@@ -120,6 +120,15 @@ internal class PlaybackSpeedAwareAudioSink(
      * True when [format] will be bitstreamed as an app-framed IEC61937 stream, which the
      * HAL cannot carry on a tunneled (HW_AV_SYNC) track.
      */
+    /**
+     * True when [format] must not be tunneled because the sink may carry it (or the DTS-HD
+     * format it turns into after the first frame) as an app-framed IEC61937 stream.
+     */
+    fun demandsNonTunneledPlayback(format: Format): Boolean {
+        if (shouldRejectDirectPlayback(format)) return false
+        return iecPassthroughSink?.mayUseIecPassthrough(format) == true
+    }
+
     fun isIecPassthroughFormat(format: Format): Boolean {
         if (shouldRejectDirectPlayback(format)) {
             android.util.Log.i("DtsHdIecSink", "isIecPassthroughFormat=false: direct playback rejected (bt=$bluetoothForcePcm session=$forcePcmForCurrentSession speed=$playbackSpeed)")

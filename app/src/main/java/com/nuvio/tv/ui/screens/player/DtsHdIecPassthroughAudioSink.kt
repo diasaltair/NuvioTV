@@ -84,6 +84,18 @@ internal class DtsHdIecPassthroughAudioSink(
     private var lastHeadMoveMs: Long = 0
     private var trackRestarts: Int = 0
 
+    /**
+     * True for any DTS track that may end up on the IEC path. Track selection sees the
+     * extractor's initial label (MKV tags DTS-HD tracks as plain `audio/vnd.dts` until the
+     * first frame is parsed), so the tunneling decision has to cover the whole family.
+     */
+    fun mayUseIecPassthrough(format: Format): Boolean {
+        val mime = format.sampleMimeType ?: return false
+        if (!mime.startsWith("audio/vnd.dts")) return false
+        if (iecFailedInProcess) return false
+        return iecProbeUsable()
+    }
+
     fun isIecPassthroughFormat(format: Format): Boolean {
         val mime = format.sampleMimeType ?: return false
         // DTS Express (LBR) has no core frame and needs a different burst; DTS core goes native.
