@@ -35,16 +35,25 @@ jobs:
           touch local.properties
           touch local.dev.properties
 
-      - name: Prepare CI signing config
+      - name: Prepare signing config
+        env:
+          KEYSTORE_BASE64: ${{ secrets.NUVIO_IEC_KEYSTORE_BASE64 }}
         run: |
-          keytool -genkeypair -v -keystore "$RUNNER_TEMP/ci-debug.jks" \
-            -storepass android -alias androiddebugkey -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            # Fixed test keystore so every build installs over the previous one.
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/ci-debug.jks"
+            ALIAS=nuvioiec; PASS=nuvioiec
+          else
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/ci-debug.jks" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+            ALIAS=androiddebugkey; PASS=android
+          fi
           {
             echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/ci-debug.jks"
-            echo "NUVIO_RELEASE_KEY_ALIAS=androiddebugkey"
-            echo "NUVIO_RELEASE_KEY_PASSWORD=android"
-            echo "NUVIO_RELEASE_STORE_PASSWORD=android"
+            echo "NUVIO_RELEASE_KEY_ALIAS=$ALIAS"
+            echo "NUVIO_RELEASE_KEY_PASSWORD=$PASS"
+            echo "NUVIO_RELEASE_STORE_PASSWORD=$PASS"
           } >> "$GITHUB_ENV"
 
       - name: Fit Gradle into the 7 GB runner
