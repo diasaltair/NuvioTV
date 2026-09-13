@@ -46,10 +46,16 @@ internal class PlaybackSpeedAwareAudioRenderer(
         if (supportsFormatDrm && (!formatHasDrm || MediaCodecUtil.getDecryptOnlyDecoderInfo() != null)) {
             audioOffloadSupport = getRendererAudioOffloadSupport(format, forcePcm)
             if (!forcePcm && playbackSpeedAwareAudioSink.supportsFormat(format)) {
+                // App-framed IEC61937 passthrough (DTS-HD) cannot be tunneled: the HAL rejects
+                // HW_AV_SYNC on that stream. Reporting no tunneling support here makes the
+                // track selector play this title non-tunneled instead of failing the sink.
+                val tunnelingSupport =
+                    if (playbackSpeedAwareAudioSink.isIecPassthroughFormat(format)) TUNNELING_NOT_SUPPORTED
+                    else TUNNELING_SUPPORTED
                 return RendererCapabilities.create(
                     C.FORMAT_HANDLED,
                     ADAPTIVE_NOT_SEAMLESS,
-                    TUNNELING_SUPPORTED,
+                    tunnelingSupport,
                     audioOffloadSupport
                 )
             }

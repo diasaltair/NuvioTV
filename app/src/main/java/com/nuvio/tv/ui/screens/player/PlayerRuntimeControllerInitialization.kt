@@ -2182,7 +2182,14 @@ private class SubtitleOffsetRenderersFactory(
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessors(arrayOf(gainAudioProcessor))
-        val baseAudioSink = builder.build()
+        // DTS-HD is framed in-app as IEC61937 (see DtsHdIecPassthroughAudioSink); every other
+        // format goes straight to DefaultAudioSink. Bluetooth/PCM policy above still wins because
+        // PlaybackSpeedAwareAudioSink rejects direct playback before this layer is consulted.
+        val baseAudioSink: AudioSink = if (bluetoothForcePcm) {
+            builder.build()
+        } else {
+            DtsHdIecPassthroughAudioSink(builder.build())
+        }
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
             sink = baseAudioSink,
             initialForcePcm = initialForcePcm,
