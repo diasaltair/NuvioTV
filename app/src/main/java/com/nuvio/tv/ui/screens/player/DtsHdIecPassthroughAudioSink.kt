@@ -319,8 +319,8 @@ internal class DtsHdIecPassthroughAudioSink(
             Log.e(TAG, "AudioTrack(IEC61937 192k 8ch) create failed", e)
             listener?.onAudioSinkError(
                 AudioSink.InitializationException(
-                    AudioTrack.ERROR, IEC_SAMPLE_RATE, AudioFormat.CHANNEL_OUT_7POINT1_SURROUND,
-                    bufferBytes, inputFormat ?: Format.Builder().build(), false, e
+                    "AudioTrack IEC61937 ${IEC_SAMPLE_RATE}Hz 8ch buffer=${bufferBytes}B init failed",
+                    AudioTrack.ERROR, inputFormat ?: Format.Builder().build(), false, e
                 )
             )
             return null
