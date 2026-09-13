@@ -22,6 +22,14 @@ jobs:
           java-version: "17"
           cache: gradle
 
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/build-cache-1
+            app/.cxx
+          key: iec-build-cache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: iec-build-cache-${{ runner.os }}-
+
       - name: Prepare local properties
         run: |
           touch local.properties
@@ -44,6 +52,11 @@ jobs:
           sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8/' gradle.properties
           echo "kotlin.daemon.jvmargs=-Xmx2g" >> gradle.properties
           echo "org.gradle.workers.max=2" >> gradle.properties
+          echo "org.gradle.caching=true" >> gradle.properties
+          # Fire TV Stick is armeabi-v7a only: skip the other three ABIs (and their NDK builds).
+          sed -i 's/include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")/include("armeabi-v7a")/' app/build.gradle.kts
+          sed -i 's/isUniversalApk = true/isUniversalApk = false/' app/build.gradle.kts
+          grep -n 'include("armeabi-v7a")' app/build.gradle.kts
           free -h; df -h /
 
       - name: Build fullDebug APK
