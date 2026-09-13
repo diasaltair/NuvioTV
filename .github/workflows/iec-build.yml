@@ -1,0 +1,52 @@
+name: IEC passthrough test build
+
+on:
+  push:
+    branches: [audio-iec-dtshd]
+  workflow_dispatch:
+
+concurrency:
+  group: iec-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Prepare local properties
+        run: |
+          touch local.properties
+          touch local.dev.properties
+
+      - name: Prepare CI signing config
+        run: |
+          keytool -genkeypair -v -keystore "$RUNNER_TEMP/ci-debug.jks" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          {
+            echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/ci-debug.jks"
+            echo "NUVIO_RELEASE_KEY_ALIAS=androiddebugkey"
+            echo "NUVIO_RELEASE_KEY_PASSWORD=android"
+            echo "NUVIO_RELEASE_STORE_PASSWORD=android"
+          } >> "$GITHUB_ENV"
+
+      - name: Build fullDebug APK
+        run: ./gradlew :app:assembleFullDebug --stacktrace --no-daemon
+
+      - name: List APKs
+        run: find app/build/outputs/apk -name '*.apk' -exec ls -la {} \;
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuvio-iec-armeabi-v7a
+          path: app/build/outputs/apk/full/debug/*armeabi-v7a*.apk
+          if-no-files-found: error
