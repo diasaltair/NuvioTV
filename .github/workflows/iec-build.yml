@@ -39,6 +39,13 @@ jobs:
             echo "NUVIO_RELEASE_STORE_PASSWORD=android"
           } >> "$GITHUB_ENV"
 
+      - name: Fit Gradle into the 7 GB runner
+        run: |
+          sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8/' gradle.properties
+          echo "kotlin.daemon.jvmargs=-Xmx2g" >> gradle.properties
+          echo "org.gradle.workers.max=2" >> gradle.properties
+          free -h; df -h /
+
       - name: Build fullDebug APK
         run: ./gradlew :app:assembleFullDebug --stacktrace --no-daemon
 
