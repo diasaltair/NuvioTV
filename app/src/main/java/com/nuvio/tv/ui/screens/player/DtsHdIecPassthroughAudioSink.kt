@@ -78,6 +78,12 @@ internal class DtsHdIecPassthroughAudioSink(
     private var lastUnderrunCount: Int = 0
     private var lastFeedMs: Long = 0
 
+    // Stall detection (same idea as media3's AudioTrackPositionTracker.isStalled): the head
+    // position stops moving while data is pending and the track is playing.
+    private var lastHeadFrames: Long = -1
+    private var lastHeadMoveMs: Long = 0
+    private var trackRestarts: Int = 0
+
     fun isIecPassthroughFormat(format: Format): Boolean {
         val mime = format.sampleMimeType ?: return false
         // DTS Express (LBR) has no core frame and needs a different burst; DTS core goes native.
@@ -260,6 +266,15 @@ internal class DtsHdIecPassthroughAudioSink(
             return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         }
 
+        if (isTrackStalled(track)) {
+            if (trackRestarts >= MAX_TRACK_RESTARTS) {
+                fallbackToWrappedSink("track stalled ${trackRestarts + 1} times")
+                return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+            }
+            restartTrack("head position frozen for ${STALL_MS} ms with data pending")
+            return false
+        }
+
         if (!drainPending(track)) {
             if (stalledWrites >= MAX_WRITE_STALLS) {
                 fallbackToWrappedSink("$stalledWrites consecutive stalled writes")
@@ -421,6 +436,38 @@ internal class DtsHdIecPassthroughAudioSink(
         }
     }
 
+    /**
+     * True when the track is playing, holds unplayed data, and its head position has not
+     * advanced for [STALL_MS]. On this HAL an underrun pauses the direct output and the
+     * track never resumes on its own once the client buffer is full.
+     */
+    private fun isTrackStalled(track: AudioTrack): Boolean {
+        if (!playing || track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+            lastHeadFrames = -1
+            return false
+        }
+        val head = rawHeadFrames(track)
+        val now = SystemClock.elapsedRealtime()
+        if (head != lastHeadFrames) {
+            lastHeadFrames = head
+            lastHeadMoveMs = now
+            return false
+        }
+        val pending = writtenFrames > head || pendingBurst != null
+        return pending && now - lastHeadMoveMs >= STALL_MS
+    }
+
+    /** Drops the current track and its buffered audio; the next buffer re-opens and re-anchors. */
+    private fun restartTrack(reason: String) {
+        trackRestarts++
+        Log.w(TAG, "restarting IEC track (#$trackRestarts): $reason")
+        listener?.onPositionDiscontinuity()
+        releaseTrack()
+        val restarts = trackRestarts
+        resetState()
+        trackRestarts = restarts
+    }
+
     private fun releaseTrack() {
         val track = audioTrack ?: return
         audioTrack = null
@@ -444,6 +491,9 @@ internal class DtsHdIecPassthroughAudioSink(
         lastTimestampPollMs = 0
         lastRawHeadPosition = 0
         headPositionWraps = 0
+        lastHeadFrames = -1
+        lastHeadMoveMs = 0
+        trackRestarts = 0
         burst.clear()
     }
 
@@ -464,6 +514,7 @@ internal class DtsHdIecPassthroughAudioSink(
         }
         stalledWrites = 0
         writtenFrames += written / (iecChannels * 2)
+        if (trackRestarts > 0 && writtenFrames > RESTART_FORGET_FRAMES) trackRestarts = 0
         checkUnderrun(track)
         lastFeedMs = SystemClock.elapsedRealtime()
         return written == before
@@ -504,10 +555,14 @@ internal class DtsHdIecPassthroughAudioSink(
             val extrapolated = timestamp.framePosition + elapsedUs * IEC_SAMPLE_RATE / C.MICROS_PER_SECOND
             return extrapolated.coerceIn(0, writtenFrames)
         }
+        return rawHeadFrames(track).coerceAtMost(writtenFrames)
+    }
+
+    private fun rawHeadFrames(track: AudioTrack): Long {
         val raw = track.playbackHeadPosition.toLong() and 0xFFFFFFFFL
         if (raw < lastRawHeadPosition) headPositionWraps++
         lastRawHeadPosition = raw
-        return ((headPositionWraps shl 32) + raw).coerceAtMost(writtenFrames)
+        return (headPositionWraps shl 32) + raw
     }
 
     // ── IEC 61937-5 framing ──
@@ -632,6 +687,12 @@ internal class DtsHdIecPassthroughAudioSink(
         private const val BUFFER_TARGET_MS = 1000L
         /** Consecutive zero-byte non-blocking writes while playing before giving up on IEC. */
         private const val MAX_WRITE_STALLS = 1000
+        /** Head position frozen this long with data pending = stalled track (media3 uses 5 s). */
+        private const val STALL_MS = 5000L
+        /** Stalls in a row (within RESTART_FORGET_FRAMES of audio) before giving up on IEC. */
+        private const val MAX_TRACK_RESTARTS = 3
+        /** After this much audio plays cleanly, earlier restarts are forgotten (30 s). */
+        private const val RESTART_FORGET_FRAMES = 30L * IEC_SAMPLE_RATE
 
         private const val TIMESTAMP_POLL_MS = 500L
 
