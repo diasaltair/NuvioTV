@@ -49,9 +49,15 @@ internal class PlaybackSpeedAwareAudioRenderer(
                 // App-framed IEC61937 passthrough (DTS-HD) cannot be tunneled: the HAL rejects
                 // HW_AV_SYNC on that stream. Reporting no tunneling support here makes the
                 // track selector play this title non-tunneled instead of failing the sink.
-                val tunnelingSupport =
-                    if (playbackSpeedAwareAudioSink.isIecPassthroughFormat(format)) TUNNELING_NOT_SUPPORTED
-                    else TUNNELING_SUPPORTED
+                val iecOwned = playbackSpeedAwareAudioSink.isIecPassthroughFormat(format)
+                val tunnelingSupport = if (iecOwned) TUNNELING_NOT_SUPPORTED else TUNNELING_SUPPORTED
+                if (format.sampleMimeType?.startsWith("audio/vnd.dts") == true) {
+                    android.util.Log.i(
+                        "DtsHdIecSink",
+                        "supportsFormat: mime=${format.sampleMimeType} sinkDirect=true iecOwned=$iecOwned " +
+                            "tunneling=${if (iecOwned) "NOT_SUPPORTED" else "SUPPORTED"}"
+                    )
+                }
                 return RendererCapabilities.create(
                     C.FORMAT_HANDLED,
                     ADAPTIVE_NOT_SEAMLESS,

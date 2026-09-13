@@ -121,8 +121,16 @@ internal class PlaybackSpeedAwareAudioSink(
      * HAL cannot carry on a tunneled (HW_AV_SYNC) track.
      */
     fun isIecPassthroughFormat(format: Format): Boolean {
-        if (shouldRejectDirectPlayback(format)) return false
-        return iecPassthroughSink?.isIecPassthroughFormat(format) == true
+        if (shouldRejectDirectPlayback(format)) {
+            android.util.Log.i("DtsHdIecSink", "isIecPassthroughFormat=false: direct playback rejected (bt=$bluetoothForcePcm session=$forcePcmForCurrentSession speed=$playbackSpeed)")
+            return false
+        }
+        val inner = iecPassthroughSink
+        if (inner == null) {
+            android.util.Log.i("DtsHdIecSink", "isIecPassthroughFormat=false: wrapped sink is not the IEC sink")
+            return false
+        }
+        return inner.isIecPassthroughFormat(format)
     }
 
     private fun shouldRejectDirectPlayback(format: Format): Boolean {

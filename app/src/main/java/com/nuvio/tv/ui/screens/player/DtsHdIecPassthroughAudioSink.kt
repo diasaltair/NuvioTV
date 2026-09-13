@@ -82,7 +82,10 @@ internal class DtsHdIecPassthroughAudioSink(
         val mime = format.sampleMimeType ?: return false
         // DTS Express (LBR) has no core frame and needs a different burst; DTS core goes native.
         if (mime != MimeTypes.AUDIO_DTS_HD) return false
-        if (iecFailedInProcess) return false
+        if (iecFailedInProcess) {
+            Log.i(TAG, "isIecPassthroughFormat=false: IEC failed earlier in this process")
+            return false
+        }
         return iecProbeUsable()
     }
 
@@ -143,6 +146,10 @@ internal class DtsHdIecPassthroughAudioSink(
             Log.i(TAG, "configure: IEC61937 DTS-HD path, mime=${inputFormat.sampleMimeType} " +
                 "sampleRate=${inputFormat.sampleRate} channels=${inputFormat.channelCount}")
             return
+        }
+        if (inputFormat.sampleMimeType == MimeTypes.AUDIO_DTS_HD) {
+            Log.i(TAG, "configure: DTS-HD handed to wrapped sink (tunnelingRequested=$tunnelingRequested " +
+                "failed=$iecFailedInProcess probe=$iecProbeResult)")
         }
         if (iecActive) {
             releaseTrack()
@@ -217,6 +224,7 @@ internal class DtsHdIecPassthroughAudioSink(
     }
 
     override fun enableTunnelingV21() {
+        Log.i(TAG, "enableTunnelingV21 (iecActive=$iecActive)")
         tunnelingRequested = true
         super.enableTunnelingV21()
     }
