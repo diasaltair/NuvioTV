@@ -122,11 +122,14 @@ internal class PlaybackSpeedAwareAudioSink(
      */
     /**
      * True when [format] must not be tunneled because the sink may carry it (or the DTS-HD
-     * format it turns into after the first frame) as an app-framed IEC61937 stream.
+     * format it turns into after the first frame) as an app-framed IEC61937 stream and this
+     * HAL refuses to clock such a stream (no IEC61937 track opens with FLAG_HW_AV_SYNC).
      */
     fun demandsNonTunneledPlayback(format: Format): Boolean {
         if (shouldRejectDirectPlayback(format)) return false
-        return iecPassthroughSink?.mayUseIecPassthrough(format) == true
+        val sink = iecPassthroughSink ?: return false
+        if (!sink.mayUseIecPassthrough(format)) return false
+        return !sink.canTunnelIecPassthrough()
     }
 
     fun isIecPassthroughFormat(format: Format): Boolean {

@@ -2,7 +2,7 @@ name: IEC passthrough test build
 
 on:
   push:
-    branches: [audio-iec-dtshd]
+    branches: [audio-iec-tunnel]
   workflow_dispatch:
 
 concurrency:

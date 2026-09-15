@@ -52,6 +52,11 @@ internal class DtsHdIecPassthroughAudioSink(
     private var inputFormat: Format? = null
     private var iecChannels: Int = 8
     private var tunnelingRequested: Boolean = false
+    /** The IEC track was opened with FLAG_HW_AV_SYNC on the tunneling session. */
+    private var iecTunnelActive: Boolean = false
+    /** Presentation time of the burst being built, for timestamped tunnel writes. */
+    private var burstPtsUs: Long = C.TIME_UNSET
+    private var lastFrameDurationUs: Long = 0
 
     private var audioTrack: AudioTrack? = null
     private var playing: Boolean = false
@@ -94,6 +99,15 @@ internal class DtsHdIecPassthroughAudioSink(
         if (!mime.startsWith("audio/vnd.dts")) return false
         if (iecFailedInProcess) return false
         return iecProbeUsable()
+    }
+
+    /**
+     * True when this HAL accepted an IEC61937 192 kHz track opened with FLAG_HW_AV_SYNC, so a
+     * DTS-HD title can stay tunneled with the IEC path as the tunnel clock source.
+     */
+    fun canTunnelIecPassthrough(): Boolean {
+        if (iecTunnelFailedInProcess) return false
+        return iecTunnelMode() != TunnelMode.NONE
     }
 
     fun isIecPassthroughFormat(format: Format): Boolean {
@@ -146,11 +160,24 @@ internal class DtsHdIecPassthroughAudioSink(
     }
 
     override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
-        // The renderer reports TUNNELING_NOT_SUPPORTED for this path, so tunneling should never
-        // be requested here. If it is, hand the format to the wrapped sink rather than open an
-        // IEC track the HAL cannot clock.
-        if (isIecPassthroughFormat(inputFormat) && !tunnelingRequested) {
-            iecChannels = if (inputFormat.channelCount in 1..2) 2 else 8
+        // Tunneling is only requested here when the tunnel probe passed (the renderer reports
+        // TUNNELING_NOT_SUPPORTED otherwise). If it is requested anyway and the HAL cannot
+        // clock an IEC track, hand the format to the wrapped sink.
+        val tunnelMode = if (tunnelingRequested) {
+            if (canTunnelIecPassthrough()) iecTunnelMode() else TunnelMode.NONE
+        } else {
+            TunnelMode.NONE
+        }
+        if (isIecPassthroughFormat(inputFormat) && (!tunnelingRequested || tunnelMode != TunnelMode.NONE)) {
+            iecTunnelActive = tunnelMode != TunnelMode.NONE
+            // A HW_AV_SYNC IEC stream on this HAL may only be stereo-shaped (4 bytes per
+            // 192 kHz frame): the burst period then follows IEC_SAMPLE_RATE and the largest
+            // frame that fits is 8 KB. Bigger frames abandon the tunnel; nothing is stripped.
+            iecChannels = when {
+                inputFormat.channelCount in 1..2 -> 2
+                tunnelMode == TunnelMode.STEREO -> 2
+                else -> 8
+            }
             if (iecActive) {
                 // Same path, new format: drop the current track so the next buffer re-opens it.
                 releaseTrack()
@@ -162,7 +189,8 @@ internal class DtsHdIecPassthroughAudioSink(
             this.inputFormat = inputFormat
             resetState()
             Log.i(TAG, "configure: IEC61937 DTS-HD path, mime=${inputFormat.sampleMimeType} " +
-                "sampleRate=${inputFormat.sampleRate} channels=${inputFormat.channelCount}")
+                "sampleRate=${inputFormat.sampleRate} channels=${inputFormat.channelCount} " +
+                "tunnel=$tunnelMode iecChannels=$iecChannels session=$audioSessionId")
             return
         }
         if (inputFormat.sampleMimeType == MimeTypes.AUDIO_DTS_HD) {
@@ -173,6 +201,7 @@ internal class DtsHdIecPassthroughAudioSink(
             releaseTrack()
             resetState()
             iecActive = false
+            iecTunnelActive = false
             this.inputFormat = null
         }
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
@@ -219,6 +248,7 @@ internal class DtsHdIecPassthroughAudioSink(
             releaseTrack()
             resetState()
             iecActive = false
+            iecTunnelActive = false
             inputFormat = null
         }
         super.reset()
@@ -228,6 +258,7 @@ internal class DtsHdIecPassthroughAudioSink(
         releaseTrack()
         resetState()
         iecActive = false
+        iecTunnelActive = false
         super.release()
     }
 
@@ -274,12 +305,14 @@ internal class DtsHdIecPassthroughAudioSink(
             return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         }
         val track = audioTrack ?: createTrack() ?: run {
+            if (iecTunnelActive) abandonTunnel("AudioTrack init failed")
             fallbackToWrappedSink("AudioTrack init failed")
             return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         }
 
         if (isTrackStalled(track)) {
             if (trackRestarts >= MAX_TRACK_RESTARTS) {
+                if (iecTunnelActive) abandonTunnel("track stalled ${trackRestarts + 1} times")
                 fallbackToWrappedSink("track stalled ${trackRestarts + 1} times")
                 return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
             }
@@ -289,6 +322,7 @@ internal class DtsHdIecPassthroughAudioSink(
 
         if (!drainPending(track)) {
             if (stalledWrites >= MAX_WRITE_STALLS) {
+                if (iecTunnelActive) abandonTunnel("$stalledWrites consecutive stalled writes")
                 fallbackToWrappedSink("$stalledWrites consecutive stalled writes")
                 return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
             }
@@ -302,11 +336,16 @@ internal class DtsHdIecPassthroughAudioSink(
 
         // One buffer normally carries one DTS frame (core + HD substream). If the extractor
         // batched several, split on the core sync word.
+        burstPtsUs = presentationTimeUs
         while (buffer.hasRemaining()) {
             val frameStart = buffer.position()
             val frameEnd = findNextCoreSync(buffer, frameStart + 4)
             val frameLen = frameEnd - frameStart
             if (!buildBurst(buffer, frameStart, frameLen)) {
+                if (iecTunnelActive && lastFrameDurationUs < 0) {
+                    // Frame larger than the tunnel-shaped burst: leave the tunnel, keep the audio.
+                    abandonTunnel("DTS-HD frame does not fit the ${iecChannels}ch IEC burst")
+                }
                 // Unparseable frame: drop it rather than feed garbage to the receiver.
                 buffer.position(frameEnd)
                 continue
@@ -324,6 +363,7 @@ internal class DtsHdIecPassthroughAudioSink(
                 buffer.position(buffer.limit())
                 return true
             }
+            burstPtsUs += lastFrameDurationUs
         }
         return true
     }
@@ -379,7 +419,8 @@ internal class DtsHdIecPassthroughAudioSink(
             lastUnderrunCount = 0
             stalledWrites = 0
             lastFeedMs = SystemClock.elapsedRealtime()
-            Log.i(TAG, "AudioTrack IEC61937 ${IEC_SAMPLE_RATE}Hz ${iecChannels}ch buffer=${bufferBytes}B")
+            Log.i(TAG, "AudioTrack IEC61937 ${IEC_SAMPLE_RATE}Hz ${iecChannels}ch buffer=${bufferBytes}B " +
+                "hwAvSync=$iecTunnelActive session=${track.audioSessionId}")
             if (playing) track.play()
             return track
         }
@@ -402,7 +443,11 @@ internal class DtsHdIecPassthroughAudioSink(
         val attributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+            .apply { if (iecTunnelActive) setFlags(AudioAttributes.FLAG_HW_AV_SYNC) }
             .build()
+        if (iecTunnelActive && audioSessionId == C.AUDIO_SESSION_ID_UNSET) {
+            Log.w(TAG, "tunneled IEC track without an audio session id: video will not lock to it")
+        }
         val track = try {
             AudioTrack.Builder()
                 .setAudioAttributes(attributes)
@@ -414,15 +459,32 @@ internal class DtsHdIecPassthroughAudioSink(
                 }
                 .build()
         } catch (e: Exception) {
-            Log.w(TAG, "AudioTrack(IEC61937, buffer=${bufferBytes}B) create failed: $e")
+            Log.w(TAG, "AudioTrack(IEC61937, buffer=${bufferBytes}B, hwAvSync=$iecTunnelActive) create failed: $e")
             return null
         }
         if (track.state != AudioTrack.STATE_INITIALIZED) {
-            Log.w(TAG, "AudioTrack(IEC61937, buffer=${bufferBytes}B) state=${track.state}")
+            Log.w(TAG, "AudioTrack(IEC61937, buffer=${bufferBytes}B, hwAvSync=$iecTunnelActive) state=${track.state}")
             track.release()
             return null
         }
         return track
+    }
+
+    /**
+     * Leaves the tunnel for the rest of the process without giving up the IEC path: the
+     * recoverable error makes the player reselect tracks, the renderer then reports
+     * TUNNELING_NOT_SUPPORTED and the title continues non-tunneled on a plain IEC track.
+     */
+    private fun abandonTunnel(reason: String) {
+        val format = inputFormat ?: Format.Builder().build()
+        Log.w(TAG, "IEC tunnel disabled for this process: $reason")
+        iecTunnelFailedInProcess = true
+        releaseTrack()
+        resetState()
+        iecActive = false
+        iecTunnelActive = false
+        inputFormat = null
+        throw AudioSink.WriteException(AudioTrack.ERROR, format, true)
     }
 
     /**
@@ -506,13 +568,21 @@ internal class DtsHdIecPassthroughAudioSink(
         lastHeadFrames = -1
         lastHeadMoveMs = 0
         trackRestarts = 0
+        burstPtsUs = C.TIME_UNSET
+        lastFrameDurationUs = 0
         burst.clear()
     }
 
     /** Writes what the track accepts; returns true when the whole [data] was consumed. */
     private fun writeBurst(track: AudioTrack, data: ByteBuffer): Boolean {
         val before = data.remaining()
-        val written = track.write(data, before, AudioTrack.WRITE_NON_BLOCKING)
+        val written = if (iecTunnelActive && burstPtsUs != C.TIME_UNSET) {
+            // HW_AV_SYNC: the framework prefixes each burst with an AV sync header carrying
+            // this timestamp; a partial write continues the same header on the next call.
+            track.write(data, before, AudioTrack.WRITE_NON_BLOCKING, burstPtsUs * 1000)
+        } else {
+            track.write(data, before, AudioTrack.WRITE_NON_BLOCKING)
+        }
         if (written < 0) {
             Log.w(TAG, "AudioTrack.write error $written")
             // Treat a write error like a stall limit: the caller falls back to the wrapped sink.
@@ -611,8 +681,10 @@ internal class DtsHdIecPassthroughAudioSink(
         }
         val pktOffset = (period * 4).toInt()
         val outBytes = DTSHD_START_CODE.size + 2 + length
+        lastFrameDurationUs = (blocks shl 5).toLong() * C.MICROS_PER_SECOND / coreSampleRate
         if (outBytes > pktOffset - BURST_HEADER_SIZE) {
             Log.w(TAG, "DTS-HD frame too large for burst: $outBytes > ${pktOffset - BURST_HEADER_SIZE}")
+            lastFrameDurationUs = -1
             return false
         }
         if (pktOffset > MAX_BURST_BYTES) return false
@@ -715,6 +787,68 @@ internal class DtsHdIecPassthroughAudioSink(
         /** null = not probed yet. Process-wide: the HAL answer does not change per player. */
         @Volatile
         private var iecProbeResult: Boolean? = null
+        /** Set once a tunneled IEC track failed at runtime; DTS-HD then plays non-tunneled. */
+        @Volatile
+        private var iecTunnelFailedInProcess: Boolean = false
+        @Volatile
+        private var iecTunnelProbeResult: TunnelMode? = null
+
+        /** Channel shape the HAL accepts for an IEC61937 192 kHz track with FLAG_HW_AV_SYNC. */
+        enum class TunnelMode { NONE, SURROUND, STEREO }
+
+        private fun probeTrack(mask: Int, hwAvSync: Boolean): Boolean {
+            val min = AudioTrack.getMinBufferSize(IEC_SAMPLE_RATE, mask, AudioFormat.ENCODING_IEC61937)
+            if (min <= 0) return false
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                        .apply { if (hwAvSync) setFlags(AudioAttributes.FLAG_HW_AV_SYNC) }
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_IEC61937)
+                        .setSampleRate(IEC_SAMPLE_RATE)
+                        .setChannelMask(mask)
+                        .build()
+                )
+                .setBufferSizeInBytes(min)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            val ok = track.state == AudioTrack.STATE_INITIALIZED
+            track.release()
+            return ok
+        }
+
+        /**
+         * One-shot check of which IEC61937 192 kHz shape, if any, this HAL opens with
+         * FLAG_HW_AV_SYNC. 7.1 first (full HBR bandwidth, what Kodi and Amlogic/Tegra HALs
+         * use), stereo second (MediaTek karat: `set(), wrong channels 0x63f, when format is
+         * AUDIO_FORMAT_IEC61937`). Runs only after the plain probe passed.
+         */
+        @Synchronized
+        private fun iecTunnelMode(): TunnelMode {
+            iecTunnelProbeResult?.let { return it }
+            if (!iecProbeUsable()) {
+                iecTunnelProbeResult = TunnelMode.NONE
+                return TunnelMode.NONE
+            }
+            val result = try {
+                when {
+                    probeTrack(AudioFormat.CHANNEL_OUT_7POINT1_SURROUND, hwAvSync = true) -> TunnelMode.SURROUND
+                    probeTrack(AudioFormat.CHANNEL_OUT_STEREO, hwAvSync = true) -> TunnelMode.STEREO
+                    else -> TunnelMode.NONE
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "IEC61937 HW_AV_SYNC probe threw: $e")
+                TunnelMode.NONE
+            }
+            Log.i(TAG, "IEC61937 ${IEC_SAMPLE_RATE}Hz HW_AV_SYNC probe: $result")
+            iecTunnelProbeResult = result
+            return result
+        }
 
         private fun channelMaskFor(channels: Int): Int =
             if (channels > 2) AudioFormat.CHANNEL_OUT_7POINT1_SURROUND else AudioFormat.CHANNEL_OUT_STEREO
