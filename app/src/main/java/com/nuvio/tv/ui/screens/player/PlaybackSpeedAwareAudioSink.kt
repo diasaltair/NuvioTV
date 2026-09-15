@@ -24,6 +24,8 @@ internal class PlaybackSpeedAwareAudioSink(
     // Set when the sink is built with forcePcm (error recovery). Don't clear on speed reset.
     private val startedWithForcedPcm: Boolean = initialForcePcm
 
+    private val iecPassthroughSink: DtsHdIecPassthroughAudioSink? = sink as? DtsHdIecPassthroughAudioSink
+
     @Volatile
     private var playbackSpeed: Float = 1f
 
@@ -112,6 +114,32 @@ internal class PlaybackSpeedAwareAudioSink(
 
     fun shouldForcePcmForFormat(format: Format): Boolean {
         return shouldRejectDirectPlayback(format)
+    }
+
+    /**
+     * True when [format] will be bitstreamed as an app-framed IEC61937 stream, which the
+     * HAL cannot carry on a tunneled (HW_AV_SYNC) track.
+     */
+    /**
+     * True when [format] must not be tunneled because the sink may carry it (or the DTS-HD
+     * format it turns into after the first frame) as an app-framed IEC61937 stream.
+     */
+    fun demandsNonTunneledPlayback(format: Format): Boolean {
+        if (shouldRejectDirectPlayback(format)) return false
+        return iecPassthroughSink?.mayUseIecPassthrough(format) == true
+    }
+
+    fun isIecPassthroughFormat(format: Format): Boolean {
+        if (shouldRejectDirectPlayback(format)) {
+            android.util.Log.i("DtsHdIecSink", "isIecPassthroughFormat=false: direct playback rejected (bt=$bluetoothForcePcm session=$forcePcmForCurrentSession speed=$playbackSpeed)")
+            return false
+        }
+        val inner = iecPassthroughSink
+        if (inner == null) {
+            android.util.Log.i("DtsHdIecSink", "isIecPassthroughFormat=false: wrapped sink is not the IEC sink")
+            return false
+        }
+        return inner.isIecPassthroughFormat(format)
     }
 
     private fun shouldRejectDirectPlayback(format: Format): Boolean {
