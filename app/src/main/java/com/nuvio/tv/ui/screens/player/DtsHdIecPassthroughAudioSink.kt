@@ -38,7 +38,9 @@ import java.nio.ByteOrder
  * (`spdif_header_dts4`, `dtshd_rate = 768000`).
  */
 internal class DtsHdIecPassthroughAudioSink(
-    sink: AudioSink
+    sink: AudioSink,
+    /** User opt-in for the 7.1 (HBR) tunneled shape; see PlayerSettings.iecTunnelSurround. */
+    private val surroundTunnelAllowed: Boolean = false
 ) : ForwardingAudioSink(sink) {
 
     private var listener: AudioSink.Listener? = null
@@ -114,7 +116,7 @@ internal class DtsHdIecPassthroughAudioSink(
      */
     fun canTunnelIecPassthrough(): Boolean {
         if (iecTunnelFailedInProcess) return false
-        return iecTunnelMode() != TunnelMode.NONE
+        return iecTunnelMode(surroundTunnelAllowed) != TunnelMode.NONE
     }
 
     /**
@@ -192,7 +194,7 @@ internal class DtsHdIecPassthroughAudioSink(
         // TUNNELING_NOT_SUPPORTED otherwise). If it is requested anyway and the HAL cannot
         // clock an IEC track, hand the format to the wrapped sink.
         val tunnelMode = if (tunnelingRequested) {
-            if (canTunnelIecPassthrough()) iecTunnelMode() else TunnelMode.NONE
+            if (canTunnelIecPassthrough()) iecTunnelMode(surroundTunnelAllowed) else TunnelMode.NONE
         } else {
             TunnelMode.NONE
         }
@@ -910,10 +912,9 @@ internal class DtsHdIecPassthroughAudioSink(
         @Volatile
         private var iecTunnelFailedInProcess: Boolean = false
         @Volatile
-        private var iecTunnelProbeResult: TunnelMode? = null
-
-        /** Channel shape the HAL accepts for an IEC61937 192 kHz track with FLAG_HW_AV_SYNC. */
-        enum class TunnelMode { NONE, SURROUND, STEREO }
+        private var iecTunnelSurroundProbe: Boolean? = null
+        @Volatile
+        private var iecTunnelStereoProbe: Boolean? = null
 
         private fun probeTrack(mask: Int, hwAvSync: Boolean): Boolean {
             val min = AudioTrack.getMinBufferSize(IEC_SAMPLE_RATE, mask, AudioFormat.ENCODING_IEC61937)
@@ -942,31 +943,38 @@ internal class DtsHdIecPassthroughAudioSink(
         }
 
         /**
-         * One-shot check of which IEC61937 192 kHz shape, if any, this HAL opens with
-         * FLAG_HW_AV_SYNC. 7.1 first (full HBR bandwidth, what Kodi and Amlogic/Tegra HALs
-         * use), stereo second (MediaTek karat: `set(), wrong channels 0x63f, when format is
-         * AUDIO_FORMAT_IEC61937`). Runs only after the plain probe passed.
+         * Which IEC61937 192 kHz shape this HAL opens with FLAG_HW_AV_SYNC. Each shape is probed
+         * once per process. The 7.1 shape (full HBR bandwidth, what Kodi and the Amlogic/Tegra
+         * HALs use) is only considered when the user allowed it: the MediaTek karat HAL logs
+         * `set(), wrong channels 0x63f, when format is AUDIO_FORMAT_IEC61937`, reopens the
+         * output as PCM and reports success, so the open probe cannot tell a real 7.1 tunnel
+         * from white noise. The stereo shape is the one that HAL asks for
+         * (`Hal|target ... channelMsk = 0x3|0x3`).
          */
         @Synchronized
-        private fun iecTunnelMode(): TunnelMode {
-            iecTunnelProbeResult?.let { return it }
-            if (!iecProbeUsable()) {
-                iecTunnelProbeResult = TunnelMode.NONE
-                return TunnelMode.NONE
-            }
-            val result = try {
-                when {
-                    probeTrack(AudioFormat.CHANNEL_OUT_7POINT1_SURROUND, hwAvSync = true) -> TunnelMode.SURROUND
-                    probeTrack(AudioFormat.CHANNEL_OUT_STEREO, hwAvSync = true) -> TunnelMode.STEREO
-                    else -> TunnelMode.NONE
+        private fun iecTunnelMode(surroundAllowed: Boolean): TunnelMode {
+            if (!iecProbeUsable()) return TunnelMode.NONE
+            fun probe(mask: Int, cached: Boolean?, store: (Boolean) -> Unit, name: String): Boolean {
+                cached?.let { return it }
+                val ok = try {
+                    probeTrack(mask, hwAvSync = true)
+                } catch (e: Exception) {
+                    Log.w(TAG, "IEC61937 HW_AV_SYNC $name probe threw: $e")
+                    false
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "IEC61937 HW_AV_SYNC probe threw: $e")
-                TunnelMode.NONE
+                Log.i(TAG, "IEC61937 ${IEC_SAMPLE_RATE}Hz HW_AV_SYNC $name probe: ${if (ok) "opens" else "refused"}")
+                store(ok)
+                return ok
             }
-            Log.i(TAG, "IEC61937 ${IEC_SAMPLE_RATE}Hz HW_AV_SYNC probe: $result")
-            iecTunnelProbeResult = result
-            return result
+            if (surroundAllowed &&
+                probe(AudioFormat.CHANNEL_OUT_7POINT1_SURROUND, iecTunnelSurroundProbe, { iecTunnelSurroundProbe = it }, "7.1")
+            ) {
+                return TunnelMode.SURROUND
+            }
+            if (probe(AudioFormat.CHANNEL_OUT_STEREO, iecTunnelStereoProbe, { iecTunnelStereoProbe = it }, "stereo")) {
+                return TunnelMode.STEREO
+            }
+            return TunnelMode.NONE
         }
 
         private fun channelMaskFor(channels: Int): Int =

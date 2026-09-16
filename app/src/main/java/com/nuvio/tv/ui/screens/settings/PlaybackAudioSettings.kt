@@ -75,6 +75,7 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetRememberAudioDelayPerDevice: (Boolean) -> Unit,
     onSetTunnelingEnabled: (Boolean) -> Unit,
     onSetForceOpticalPassthrough: (Boolean) -> Unit,
+    onSetIecTunnelSurround: (Boolean) -> Unit,
     onSetDv5ToDv81Enabled: (Boolean) -> Unit,
     onSetDv7ToDv81PreserveMappingEnabled: (Boolean) -> Unit,
     onSetStripHdr10PlusSei: (Boolean) -> Unit,
@@ -263,6 +264,20 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
                 onFocused = onItemFocused,
                 enabled = enabled && playerSettings.isTunnelingCompatible
             )
+        }
+
+        if (isExoEngine) {
+            item(key = "audio_iec_tunnel_surround") {
+                ToggleSettingsItem(
+                    icon = Icons.Default.VolumeUp,
+                    title = stringResource(R.string.audio_iec_tunnel_surround),
+                    subtitle = stringResource(R.string.audio_iec_tunnel_surround_sub),
+                    isChecked = playerSettings.iecTunnelSurround && playerSettings.effectiveTunnelingEnabled,
+                    onCheckedChange = onSetIecTunnelSurround,
+                    onFocused = onItemFocused,
+                    enabled = enabled && playerSettings.isTunnelingCompatible && playerSettings.effectiveTunnelingEnabled
+                )
+            }
         }
 
         if (isExoEngine || isMpvEngine) {
