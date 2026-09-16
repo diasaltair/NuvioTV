@@ -238,6 +238,13 @@ data class PlayerSettings(
      * silently play it as PCM noise, which no probe can see, so this stays opt-in.
      */
     val iecTunnelSurround: Boolean = false,
+    /**
+     * Allow the app-framed IEC61937 DTS-HD track to be opened with FLAG_HW_AV_SYNC at all.
+     * Off (default) keeps DTS-HD non-tunneled, the only path verified audible on every HAL
+     * seen so far: the MediaTek karat HAL accepts both IEC tunnel shapes and plays silence
+     * or noise, which no probe can see.
+     */
+    val iecTunnelEnabled: Boolean = false,
     val skipSilence: Boolean = false,
     val audioAmplificationDb: Int = 0,
     val centerMixLevelDb: Int = 0,
@@ -502,6 +509,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val tunnelingEnabledKey = booleanPreferencesKey("tunneling_enabled")
     private val forceOpticalPassthroughKey = booleanPreferencesKey("force_optical_passthrough")
     private val iecTunnelSurroundKey = booleanPreferencesKey("iec_tunnel_surround")
+    private val iecTunnelEnabledKey = booleanPreferencesKey("iec_tunnel_enabled")
     private val skipSilenceKey = booleanPreferencesKey("skip_silence")
     private val audioAmplificationDbKey = intPreferencesKey("audio_amplification_db")
     private val centerMixLevelDbKey = intPreferencesKey("center_mix_level_db")
@@ -847,6 +855,7 @@ class PlayerSettingsDataStore @Inject constructor(
                 tunnelingEnabled = prefs[tunnelingEnabledKey] ?: false,
                 forceOpticalPassthrough = prefs[forceOpticalPassthroughKey] ?: false,
                 iecTunnelSurround = prefs[iecTunnelSurroundKey] ?: false,
+                iecTunnelEnabled = prefs[iecTunnelEnabledKey] ?: false,
                 skipSilence = prefs[skipSilenceKey] ?: false,
                 audioAmplificationDb = (prefs[audioAmplificationDbKey] ?: 0).coerceIn(
                     AUDIO_AMPLIFICATION_DB_MIN,
@@ -1094,6 +1103,12 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setForceOpticalPassthrough(enabled: Boolean) {
         store().edit { prefs ->
             prefs[forceOpticalPassthroughKey] = enabled
+        }
+    }
+
+    suspend fun setIecTunnelEnabled(enabled: Boolean) {
+        store().edit { prefs ->
+            prefs[iecTunnelEnabledKey] = enabled
         }
     }
 

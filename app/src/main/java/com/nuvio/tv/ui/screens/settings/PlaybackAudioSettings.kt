@@ -76,6 +76,7 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
     onSetTunnelingEnabled: (Boolean) -> Unit,
     onSetForceOpticalPassthrough: (Boolean) -> Unit,
     onSetIecTunnelSurround: (Boolean) -> Unit,
+    onSetIecTunnelEnabled: (Boolean) -> Unit,
     onSetDv5ToDv81Enabled: (Boolean) -> Unit,
     onSetDv7ToDv81PreserveMappingEnabled: (Boolean) -> Unit,
     onSetStripHdr10PlusSei: (Boolean) -> Unit,
@@ -267,15 +268,27 @@ internal fun LazyListScope.trailerAndAudioSettingsItems(
         }
 
         if (isExoEngine) {
+            val iecTunnelOn = playerSettings.iecTunnelEnabled && playerSettings.effectiveTunnelingEnabled
+            item(key = "audio_iec_tunnel_enabled") {
+                ToggleSettingsItem(
+                    icon = Icons.Default.VolumeUp,
+                    title = stringResource(R.string.audio_iec_tunnel_enabled),
+                    subtitle = stringResource(R.string.audio_iec_tunnel_enabled_sub),
+                    isChecked = iecTunnelOn,
+                    onCheckedChange = onSetIecTunnelEnabled,
+                    onFocused = onItemFocused,
+                    enabled = enabled && playerSettings.isTunnelingCompatible && playerSettings.effectiveTunnelingEnabled
+                )
+            }
             item(key = "audio_iec_tunnel_surround") {
                 ToggleSettingsItem(
                     icon = Icons.Default.VolumeUp,
                     title = stringResource(R.string.audio_iec_tunnel_surround),
                     subtitle = stringResource(R.string.audio_iec_tunnel_surround_sub),
-                    isChecked = playerSettings.iecTunnelSurround && playerSettings.effectiveTunnelingEnabled,
+                    isChecked = playerSettings.iecTunnelSurround && iecTunnelOn,
                     onCheckedChange = onSetIecTunnelSurround,
                     onFocused = onItemFocused,
-                    enabled = enabled && playerSettings.isTunnelingCompatible && playerSettings.effectiveTunnelingEnabled
+                    enabled = enabled && playerSettings.isTunnelingCompatible && iecTunnelOn
                 )
             }
         }

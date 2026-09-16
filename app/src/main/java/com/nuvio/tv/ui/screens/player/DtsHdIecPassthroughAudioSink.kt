@@ -39,6 +39,8 @@ import java.nio.ByteOrder
  */
 internal class DtsHdIecPassthroughAudioSink(
     sink: AudioSink,
+    /** User opt-in for any tunneled IEC track; see PlayerSettings.iecTunnelEnabled. */
+    private val tunnelAllowed: Boolean = false,
     /** User opt-in for the 7.1 (HBR) tunneled shape; see PlayerSettings.iecTunnelSurround. */
     private val surroundTunnelAllowed: Boolean = false
 ) : ForwardingAudioSink(sink) {
@@ -115,6 +117,7 @@ internal class DtsHdIecPassthroughAudioSink(
      * DTS-HD title can stay tunneled with the IEC path as the tunnel clock source.
      */
     fun canTunnelIecPassthrough(): Boolean {
+        if (!tunnelAllowed) return false
         if (iecTunnelFailedInProcess) return false
         return iecTunnelMode(surroundTunnelAllowed) != TunnelMode.NONE
     }

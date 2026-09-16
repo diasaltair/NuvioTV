@@ -908,6 +908,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 forceOpticalPassthrough = isForcePassthroughActive,
                 bluetoothForcePcm = isBluetoothAudioOutput,
                 iecTunnelSurround = playerSettings.iecTunnelSurround,
+                iecTunnelEnabled = playerSettings.iecTunnelEnabled,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 initialForcePcm = hasTriedAudioPcmFallback || isBluetoothAudioOutput,
                 preferSoftwareAudioOnly = isBluetoothAudioOutput,
@@ -2124,6 +2125,7 @@ private class SubtitleOffsetRenderersFactory(
     private val forceOpticalPassthrough: Boolean,
     private val bluetoothForcePcm: Boolean = false,
     private val iecTunnelSurround: Boolean = false,
+    private val iecTunnelEnabled: Boolean = false,
     private val playbackSpeedProvider: () -> Float,
     private val initialForcePcm: Boolean = false,
     /**
@@ -2190,7 +2192,11 @@ private class SubtitleOffsetRenderersFactory(
         val baseAudioSink: AudioSink = if (bluetoothForcePcm) {
             builder.build()
         } else {
-            DtsHdIecPassthroughAudioSink(builder.build(), surroundTunnelAllowed = iecTunnelSurround)
+            DtsHdIecPassthroughAudioSink(
+                builder.build(),
+                tunnelAllowed = iecTunnelEnabled,
+                surroundTunnelAllowed = iecTunnelSurround
+            )
         }
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
             sink = baseAudioSink,
