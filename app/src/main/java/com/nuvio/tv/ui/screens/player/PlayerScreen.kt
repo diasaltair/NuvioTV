@@ -1111,6 +1111,7 @@ fun PlayerScreen(
                 uiState.activeSkipInterval
             },
             dismissed = uiState.skipIntervalDismissed,
+            targetsPostCredits = uiState.activeSkipTargetsPostCredits,
             controlsVisible = uiState.showControls,
             // Autoplay next-episode card owns focus; subtitle menu must keep D-pad focus (#2874).
             suppressFocus = uiState.postPlayMode is PostPlayMode.AutoPlay || !skipIntroCanFocus,
@@ -1144,6 +1145,7 @@ fun PlayerScreen(
             mode = uiState.postPlayMode.takeIf {
                 uiState.error == null &&
                     !postPlayRecommendationState.isVisible &&
+                    postPlayRecommendationState.recommendation == null &&
                     !shouldConfirmNextEpisodeOnEnd &&
                     !uiState.showLoadingOverlay &&
                     !uiState.showPauseOverlay &&
