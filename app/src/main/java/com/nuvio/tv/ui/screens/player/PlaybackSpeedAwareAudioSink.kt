@@ -128,8 +128,7 @@ internal class PlaybackSpeedAwareAudioSink(
     fun demandsNonTunneledPlayback(format: Format): Boolean {
         if (shouldRejectDirectPlayback(format)) return false
         val sink = iecPassthroughSink ?: return false
-        if (!sink.mayUseIecPassthrough(format)) return false
-        return !sink.canTunnelIecPassthrough()
+        return !sink.tunnelingCapability(format)
     }
 
     fun isIecPassthroughFormat(format: Format): Boolean {

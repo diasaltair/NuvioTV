@@ -89,6 +89,12 @@ internal class DtsHdIecPassthroughAudioSink(
     private var lastHeadMoveMs: Long = 0
     private var trackRestarts: Int = 0
 
+    // Wrapped-path health: a native passthrough track this HAL accepted but never plays.
+    private var wrappedWindowStartMs: Long = 0
+    private var wrappedWindowStartPosUs: Long = C.TIME_UNSET
+    private var wrappedFedBuffers: Int = 0
+    private var wrappedDeadReported: Boolean = false
+
     /**
      * True for any DTS track that may end up on the IEC path. Track selection sees the
      * extractor's initial label (MKV tags DTS-HD tracks as plain `audio/vnd.dts` until the
@@ -110,6 +116,22 @@ internal class DtsHdIecPassthroughAudioSink(
         return iecTunnelMode() != TunnelMode.NONE
     }
 
+    /**
+     * True when [format] may still be played on a tunneled track: IEC-owned formats need a
+     * HAL that clocks an IEC61937 stream; anything else needs its native tunneled rung alive.
+     */
+    fun tunnelingCapability(format: Format): Boolean {
+        if (mayUseIecPassthrough(format)) return canTunnelIecPassthrough()
+        return !PassthroughLadder.isDead(format.sampleMimeType, PassthroughLadder.Rung.NATIVE_TUNNEL)
+    }
+
+    /** Native (wrapped sink) passthrough is off the table for this encoding in this process. */
+    private fun nativeDirectDead(format: Format): Boolean {
+        val mime = format.sampleMimeType ?: return false
+        if (mime == MimeTypes.AUDIO_RAW) return false
+        return PassthroughLadder.isDead(mime, PassthroughLadder.Rung.NATIVE_DIRECT)
+    }
+
     fun isIecPassthroughFormat(format: Format): Boolean {
         val mime = format.sampleMimeType ?: return false
         // DTS Express (LBR) has no core frame and needs a different burst; DTS core goes native.
@@ -127,11 +149,16 @@ internal class DtsHdIecPassthroughAudioSink(
         if (isIecPassthroughFormat(format)) {
             return AudioSink.SINK_FORMAT_SUPPORTED_DIRECTLY
         }
+        if (nativeDirectDead(format)) {
+            Log.i(TAG, "getFormatSupport: ${format.sampleMimeType} native passthrough dead, decode instead")
+            return AudioSink.SINK_FORMAT_UNSUPPORTED
+        }
         return super.getFormatSupport(format)
     }
 
     override fun supportsFormat(format: Format): Boolean {
         if (isIecPassthroughFormat(format)) return true
+        if (nativeDirectDead(format)) return false
         return super.supportsFormat(format)
     }
 
@@ -204,15 +231,17 @@ internal class DtsHdIecPassthroughAudioSink(
             iecTunnelActive = false
             this.inputFormat = null
         }
+        this.inputFormat = inputFormat
+        resetWrappedWindow()
         super.configure(inputFormat, specifiedBufferSize, outputChannels)
     }
 
     override fun play() {
+        playing = true
         if (!iecActive) {
             super.play()
             return
         }
-        playing = true
         audioTrack?.let { track ->
             if (track.state == AudioTrack.STATE_INITIALIZED) {
                 track.play()
@@ -221,11 +250,12 @@ internal class DtsHdIecPassthroughAudioSink(
     }
 
     override fun pause() {
+        playing = false
+        resetWrappedWindow()
         if (!iecActive) {
             super.pause()
             return
         }
-        playing = false
         audioTrack?.let { track ->
             if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
                 track.pause()
@@ -234,6 +264,7 @@ internal class DtsHdIecPassthroughAudioSink(
     }
 
     override fun flush() {
+        resetWrappedWindow()
         if (!iecActive) {
             super.flush()
             return
@@ -249,8 +280,9 @@ internal class DtsHdIecPassthroughAudioSink(
             resetState()
             iecActive = false
             iecTunnelActive = false
-            inputFormat = null
         }
+        inputFormat = null
+        resetWrappedWindow()
         super.reset()
     }
 
@@ -302,7 +334,7 @@ internal class DtsHdIecPassthroughAudioSink(
 
     override fun handleBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
         if (!iecActive) {
-            return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+            return handleWrappedBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         }
         val track = audioTrack ?: createTrack() ?: run {
             if (iecTunnelActive) abandonTunnel("AudioTrack init failed")
@@ -401,6 +433,86 @@ internal class DtsHdIecPassthroughAudioSink(
         if (startMediaTimeUs == C.TIME_UNSET) return AudioSink.CURRENT_POSITION_NOT_SET
         val played = (playedFrames(track) - anchorFrames).coerceAtLeast(0)
         return startMediaTimeUs + played * C.MICROS_PER_SECOND / IEC_SAMPLE_RATE
+    }
+
+    // ── Wrapped (native passthrough) path health ──
+
+    private fun wrappedPassthroughFormat(): Format? {
+        val format = inputFormat ?: return null
+        val mime = format.sampleMimeType ?: return null
+        if (mime == MimeTypes.AUDIO_RAW) return null
+        return format
+    }
+
+    private fun resetWrappedWindow() {
+        wrappedWindowStartMs = 0
+        wrappedWindowStartPosUs = C.TIME_UNSET
+        wrappedFedBuffers = 0
+        wrappedDeadReported = false
+    }
+
+    /**
+     * Feeds the wrapped sink and watches whether what it accepts ever plays. A HAL can accept
+     * a passthrough open and then reopen the output as PCM or never start its clock; media3
+     * then loops on "Resetting stalled audio track" forever. When [WRAPPED_DEAD_MS] pass with
+     * at least [WRAPPED_MIN_FED] buffers accepted and the position advanced less than
+     * [WRAPPED_ADVANCE_OK_US], the current rung (tunneled or direct) is marked dead and a
+     * recoverable error makes the player reselect tracks on the next rung.
+     */
+    private fun handleWrappedBuffer(buffer: ByteBuffer, presentationTimeUs: Long, encodedAccessUnitCount: Int): Boolean {
+        val format = wrappedPassthroughFormat()
+        if (format != null && playing) {
+            val now = SystemClock.elapsedRealtime()
+            val pos = super.getCurrentPositionUs(false)
+            if (wrappedWindowStartMs == 0L) {
+                wrappedWindowStartMs = now
+                wrappedWindowStartPosUs = pos
+                wrappedFedBuffers = 0
+            } else if (wrappedWindowStartPosUs == AudioSink.CURRENT_POSITION_NOT_SET && pos != AudioSink.CURRENT_POSITION_NOT_SET) {
+                wrappedWindowStartPosUs = pos
+            } else if (pos != AudioSink.CURRENT_POSITION_NOT_SET &&
+                wrappedWindowStartPosUs != AudioSink.CURRENT_POSITION_NOT_SET &&
+                pos - wrappedWindowStartPosUs >= WRAPPED_ADVANCE_OK_US
+            ) {
+                wrappedWindowStartMs = now
+                wrappedWindowStartPosUs = pos
+                wrappedFedBuffers = 0
+            } else if (now - wrappedWindowStartMs >= WRAPPED_DEAD_MS && wrappedFedBuffers >= WRAPPED_MIN_FED) {
+                giveUpWrappedRung(
+                    format,
+                    "output silent: $wrappedFedBuffers buffers accepted, position moved " +
+                        "${if (pos == AudioSink.CURRENT_POSITION_NOT_SET || wrappedWindowStartPosUs == AudioSink.CURRENT_POSITION_NOT_SET) "unset" else "${(pos - wrappedWindowStartPosUs) / 1000} ms"} " +
+                        "in ${now - wrappedWindowStartMs} ms"
+                )
+            }
+        }
+        val accepted = try {
+            super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+        } catch (e: AudioSink.InitializationException) {
+            if (format == null) throw e
+            giveUpWrappedRung(format, "AudioTrack init failed: ${e.message}")
+            throw e
+        } catch (e: AudioSink.WriteException) {
+            if (format == null) throw e
+            giveUpWrappedRung(format, "AudioTrack write failed: ${e.message}")
+            throw e
+        }
+        if (accepted) wrappedFedBuffers++
+        return accepted
+    }
+
+    /** Marks the current native rung dead and raises a recoverable error so tracks are reselected. */
+    private fun giveUpWrappedRung(format: Format, reason: String) {
+        if (wrappedDeadReported) return
+        wrappedDeadReported = true
+        val rung = if (tunnelingRequested) PassthroughLadder.Rung.NATIVE_TUNNEL else PassthroughLadder.Rung.NATIVE_DIRECT
+        PassthroughLadder.markDead(format.sampleMimeType, rung, reason)
+        Log.w(TAG, "wrapped sink ${format.sampleMimeType} $rung gave up: $reason; dead=${PassthroughLadder.describe(format.sampleMimeType)}")
+        try {
+            super.flush()
+        } catch (_: Exception) {
+        }
+        throw AudioSink.WriteException(AudioTrack.ERROR, format, true)
     }
 
     // ── AudioTrack ──
@@ -504,6 +616,8 @@ internal class DtsHdIecPassthroughAudioSink(
         if (format == null) return
         try {
             super.configure(format, 0, null)
+            this.inputFormat = format
+            resetWrappedWindow()
             if (playing) super.play()
         } catch (e: AudioSink.ConfigurationException) {
             throw AudioSink.WriteException(AudioTrack.ERROR, format, true)
@@ -779,6 +893,10 @@ internal class DtsHdIecPassthroughAudioSink(
         private const val RESTART_FORGET_FRAMES = 30L * IEC_SAMPLE_RATE
 
         private const val TIMESTAMP_POLL_MS = 500L
+        /** Wrapped path: this long playing with data accepted and no position movement = dead output. */
+        private const val WRAPPED_DEAD_MS = 5000L
+        private const val WRAPPED_MIN_FED = 40
+        private const val WRAPPED_ADVANCE_OK_US = 300_000L
 
         /** Set once an IEC track failed at runtime; the wrapped sink owns DTS-HD afterwards. */
         @Volatile

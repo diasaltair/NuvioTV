@@ -52,7 +52,7 @@ internal class PlaybackSpeedAwareAudioRenderer(
                 // failing the sink.
                 val iecOwned = playbackSpeedAwareAudioSink.demandsNonTunneledPlayback(format)
                 val tunnelingSupport = if (iecOwned) TUNNELING_NOT_SUPPORTED else TUNNELING_SUPPORTED
-                if (format.sampleMimeType?.startsWith("audio/vnd.dts") == true) {
+                if (format.sampleMimeType?.let { MimeTypes.isAudio(it) && it != MimeTypes.AUDIO_RAW } == true) {
                     android.util.Log.i(
                         "DtsHdIecSink",
                         "supportsFormat: mime=${format.sampleMimeType} sinkDirect=true iecOwned=$iecOwned " +
