@@ -916,6 +916,9 @@ internal class DtsHdIecPassthroughAudioSink(
         @Volatile
         private var iecTunnelStereoProbe: Boolean? = null
 
+        /** Channel shape the HAL accepts for an IEC61937 192 kHz track with FLAG_HW_AV_SYNC. */
+        enum class TunnelMode { NONE, SURROUND, STEREO }
+
         private fun probeTrack(mask: Int, hwAvSync: Boolean): Boolean {
             val min = AudioTrack.getMinBufferSize(IEC_SAMPLE_RATE, mask, AudioFormat.ENCODING_IEC61937)
             if (min <= 0) return false
