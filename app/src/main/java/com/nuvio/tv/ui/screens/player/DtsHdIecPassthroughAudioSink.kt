@@ -102,7 +102,8 @@ internal class DtsHdIecPassthroughAudioSink(
      */
     fun mayUseIecPassthrough(format: Format): Boolean {
         val mime = format.sampleMimeType ?: return false
-        if (!mime.startsWith("audio/vnd.dts")) return false
+        // Only the core/HD pair: DTS Express (no core frame) and DTS:X Profile 2 never take this path.
+        if (mime != MimeTypes.AUDIO_DTS && mime != MimeTypes.AUDIO_DTS_HD) return false
         if (iecFailedInProcess) return false
         return iecProbeUsable()
     }

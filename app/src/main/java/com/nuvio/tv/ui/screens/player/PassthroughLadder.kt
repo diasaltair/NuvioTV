@@ -22,7 +22,7 @@ internal object PassthroughLadder {
     /** The extractor relabels DTS tracks after the first frame; treat the family as one key. */
     fun key(mime: String?): String = when {
         mime == null -> ""
-        mime.startsWith("audio/vnd.dts") -> "audio/vnd.dts"
+        mime == "audio/vnd.dts" || mime == "audio/vnd.dts.hd" -> "audio/vnd.dts"
         else -> mime
     }
 
