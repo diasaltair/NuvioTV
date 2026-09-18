@@ -39,7 +39,7 @@ object SubtitleTimingMatcher {
         val startToleranceMs: Long = 120,
         val looseToleranceMs: Long = 400,
         val bitmapToleranceMs: Long = 200,
-        val maxOffsetMs: Long = 30_000,
+        val maxOffsetMs: Long = 180_000,
         val histogramBinMs: Long = 100,
         val minComparedCues: Int = 20,
         val minBitmapComparedCues: Int = 30,
