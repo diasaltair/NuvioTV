@@ -149,6 +149,33 @@ class EmbeddedSubtitleTimingCollector(
     companion object {
         private const val TAG = "SubtitleTimingMatch"
         const val MAX_CUES_PER_TRACK = 4000
+        /** codecId used for references built from a Matroska Cues index (start times only). */
+        const val CODEC_CUES_INDEX = "mkv-cues"
+
+        /**
+         * Builds a start-only reference from externally obtained cue starts (e.g. the Matroska
+         * Cues index read over HTTP range), sorted and de-duplicated.
+         */
+        fun fromStartTimes(
+            trackNumber: Int,
+            language: String?,
+            forced: Boolean,
+            startTimesMs: List<Long>,
+            codecId: String = CODEC_CUES_INDEX
+        ): TrackTiming {
+            val starts = startTimesMs.asSequence().sorted().distinct().take(MAX_CUES_PER_TRACK).toList().toLongArray()
+            return TrackTiming(
+                trackNumber = trackNumber,
+                codecId = codecId,
+                language = language,
+                forced = forced,
+                startsMs = starts,
+                endsMs = LongArray(starts.size) { -1L },
+                observedMinMs = starts.firstOrNull() ?: 0L,
+                observedMaxMs = starts.lastOrNull() ?: 0L,
+                receivedCount = startTimesMs.size
+            )
+        }
         private const val INITIAL_CAPACITY = 256
         private const val PGS_MIN_PAYLOAD_BYTES = 64
     }

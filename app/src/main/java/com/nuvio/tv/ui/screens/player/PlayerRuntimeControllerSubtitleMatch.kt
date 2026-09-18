@@ -2,7 +2,10 @@ package com.nuvio.tv.ui.screens.player
 
 import android.util.Log
 import com.nuvio.tv.core.player.EmbeddedSubtitleTimingCollector
+import androidx.media3.common.C
 import com.nuvio.tv.domain.model.Subtitle
+import com.nuvio.tv.ui.screens.player.autosync.EmbeddedSubtitleTimelineLoader
+import com.nuvio.tv.ui.screens.player.autosync.ReferenceTrack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -118,12 +121,6 @@ internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: Stri
     }
     if (subtitleTimingMatchJob?.isActive == true) return
     val snapshot = embeddedSubtitleTimings.snapshot()
-    if (snapshot.tracks.isEmpty()) {
-        Log.i(MATCH_TAG, "skip($trigger): no embedded subtitle tracks reported yet")
-        // Let the arbiter proceed with the other method instead of waiting for a timeout.
-        if (trigger == "addon-fetch") submitTimingVerdict(null)
-        return
-    }
     if (subtitleTimingMatchGeneration >= 0) {
         val previousCues = state.subtitleTimingMatches.values.maxOfOrNull { it.referenceCueCount } ?: 0
         val currentCues = SubtitleTimingMatcher.chooseReference(snapshot, MIN_REFERENCE_CUES)?.cueCount ?: 0
@@ -144,8 +141,49 @@ internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: Stri
     }
 }
 
+/**
+ * Whole-file reference from the Matroska Cues index (shared with the fork's AutoSync loader,
+ * so the bytes are fetched once). Start times only; null when the file does not index its
+ * subtitle tracks.
+ */
+private suspend fun PlayerRuntimeController.indexedReferenceTrack(): EmbeddedSubtitleTimingCollector.TrackTiming? {
+    val timeline = try {
+        EmbeddedSubtitleTimelineLoader.load(currentStreamUrl, currentHeaders.toMap())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.i(MATCH_TAG, "cues-index load failed: ${e.message}")
+        null
+    } ?: return null
+    val track = timeline.tracks
+        .filter { it.cues.size >= MIN_REFERENCE_CUES }
+        .sortedWith(
+            compareBy<ReferenceTrack> { (it.selectionFlags and C.SELECTION_FLAG_FORCED) != 0 }
+                .thenByDescending { it.cues.size }
+        )
+        .firstOrNull() ?: return null
+    val number = track.key.substringAfterLast(':').toIntOrNull() ?: -1
+    return EmbeddedSubtitleTimingCollector.fromStartTimes(
+        trackNumber = number,
+        language = track.language,
+        forced = (track.selectionFlags and C.SELECTION_FLAG_FORCED) != 0,
+        startTimesMs = track.cues.map { it.startTimeMs }
+    )
+}
+
 private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
-    val reference = awaitReferenceTrack() ?: run {
+    // Prefer the whole-file index (instant, full coverage); fall back to what the extractor
+    // has read so far, which is exact but limited to the player's read-ahead window.
+    val extractorNow = SubtitleTimingMatcher.chooseReference(embeddedSubtitleTimings.snapshot(), MIN_REFERENCE_CUES)
+    val indexed = indexedReferenceTrack()
+    val reference = when {
+        indexed != null && (extractorNow == null || extractorNow.cueCount < indexed.cueCount) -> {
+            Log.i(MATCH_TAG, "reference from cues-index: track=${indexed.trackNumber} lang=${indexed.language} cues=${indexed.cueCount}")
+            indexed
+        }
+        extractorNow != null -> extractorNow
+        else -> awaitReferenceTrack()
+    } ?: run {
         Log.i(MATCH_TAG, "no usable embedded reference track yet (forced-only or too few cues); will retry")
         submitTimingVerdict(null)
         scheduleSubtitleTimingRescore()
