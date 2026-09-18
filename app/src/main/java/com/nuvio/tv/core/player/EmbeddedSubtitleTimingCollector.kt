@@ -66,6 +66,7 @@ class EmbeddedSubtitleTimingCollector(
             if (tracks.containsKey(trackNumber)) return
             tracks[trackNumber] = MutableTrack(trackNumber, codecId, language, forced, INITIAL_CAPACITY)
             generation++
+            android.util.Log.i(TAG, "track #$trackNumber codec=$codecId lang=$language forced=$forced")
         }
     }
 
@@ -146,6 +147,7 @@ class EmbeddedSubtitleTimingCollector(
     }
 
     companion object {
+        private const val TAG = "SubtitleTimingMatch"
         const val MAX_CUES_PER_TRACK = 4000
         private const val INITIAL_CAPACITY = 256
         private const val PGS_MIN_PAYLOAD_BYTES = 64

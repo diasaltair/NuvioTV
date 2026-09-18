@@ -28,7 +28,7 @@ import kotlin.math.abs
 private const val MATCH_TAG = "SubtitleTimingMatch"
 private const val MIN_REFERENCE_CUES = 20
 private const val REFERENCE_WAIT_POLL_MS = 2_000L
-private const val REFERENCE_WAIT_TIMEOUT_MS = 180_000L
+private const val REFERENCE_WAIT_TIMEOUT_MS = 40_000L
 private const val MAX_CANDIDATES_PER_LANGUAGE = 20
 private const val MAX_CANDIDATES_TOTAL = 24
 private const val PARALLEL_DOWNLOADS = 3
@@ -146,8 +146,9 @@ internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: Stri
 
 private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
     val reference = awaitReferenceTrack() ?: run {
-        Log.i(MATCH_TAG, "no usable embedded reference track (forced-only or too few cues)")
+        Log.i(MATCH_TAG, "no usable embedded reference track yet (forced-only or too few cues); will retry")
         submitTimingVerdict(null)
+        scheduleSubtitleTimingRescore()
         return
     }
     val targets = subtitleLanguageTargets()
@@ -231,10 +232,17 @@ private fun PlayerRuntimeController.scheduleSubtitleTimingRescore() {
 
 private suspend fun PlayerRuntimeController.awaitReferenceTrack(): EmbeddedSubtitleTimingCollector.TrackTiming? {
     val deadline = System.currentTimeMillis() + REFERENCE_WAIT_TIMEOUT_MS
+    var polls = 0
     while (true) {
         val snapshot = embeddedSubtitleTimings.snapshot()
         val reference = SubtitleTimingMatcher.chooseReference(snapshot, MIN_REFERENCE_CUES)
         if (reference != null) return reference
+        if (polls % 5 == 0) {
+            Log.i(MATCH_TAG, "waiting for reference: " + snapshot.tracks.joinToString { t ->
+                "#${t.trackNumber}(${t.codecId},${t.language ?: "?"},forced=${t.forced},cues=${t.cueCount},received=${t.receivedCount},range=${t.observedMinMs}..${t.observedMaxMs})"
+            } + " position=${currentPlaybackPositionMs() ?: -1}ms")
+        }
+        polls++
         if (snapshot.tracks.isEmpty() || System.currentTimeMillis() > deadline) return null
         delay(REFERENCE_WAIT_POLL_MS)
     }
