@@ -97,7 +97,7 @@ private fun PlayerRuntimeController.decideSubtitleSync(reason: String) {
     val switching = current == null || addonSubtitleKey(current) != addonSubtitleKey(winner.subtitle)
     if (switching) {
         if (isUserExplicitSubtitleSelection) {
-            Log.d(ARBITER_TAG, "user picked a subtitle explicitly; not switching, offset only if same")
+            Log.i(ARBITER_TAG, "user picked a subtitle explicitly; not switching, offset only if same")
             return
         }
         autoSubtitleSelected = true

@@ -32,6 +32,8 @@ private const val MAX_CANDIDATES_TOTAL = 8
 private const val PARALLEL_DOWNLOADS = 2
 private const val MIN_AUTO_OFFSET_MS = 150L
 private const val MIN_RESCORE_NEW_CUES = 40
+private const val PLACEHOLDER_MAX_CUES = 10
+private const val PLACEHOLDER_MIN_SPAN_MS = 60L * 60L * 1000L
 
 internal fun PlayerRuntimeController.resetSubtitleTimingMatchState() {
     subtitleTimingMatchJob?.cancel()
@@ -100,7 +102,7 @@ internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: Stri
     if (subtitleTimingMatchJob?.isActive == true) return
     val snapshot = embeddedSubtitleTimings.snapshot()
     if (snapshot.tracks.isEmpty()) {
-        Log.d(MATCH_TAG, "skip($trigger): no embedded subtitle tracks reported yet")
+        Log.i(MATCH_TAG, "skip($trigger): no embedded subtitle tracks reported yet")
         // Let the arbiter proceed with the other method instead of waiting for a timeout.
         if (trigger == "addon-fetch") submitTimingVerdict(null)
         return
@@ -110,7 +112,7 @@ internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: Stri
         val currentCues = SubtitleTimingMatcher.chooseReference(snapshot, MIN_REFERENCE_CUES)?.cueCount ?: 0
         if (currentCues - previousCues < MIN_RESCORE_NEW_CUES) return
     }
-    Log.d(MATCH_TAG, "start($trigger): tracks=${snapshot.tracks.size} candidates=${state.addonSubtitles.size}")
+    Log.i(MATCH_TAG, "start($trigger): tracks=${snapshot.tracks.size} candidates=${state.addonSubtitles.size}")
     subtitleTimingMatchJob = scope.launch {
         try {
             _uiState.update { it.copy(subtitleTimingMatchInProgress = true) }
@@ -127,18 +129,21 @@ internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: Stri
 
 private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
     val reference = awaitReferenceTrack() ?: run {
-        Log.d(MATCH_TAG, "no usable embedded reference track (forced-only or too few cues)")
+        Log.i(MATCH_TAG, "no usable embedded reference track (forced-only or too few cues)")
         submitTimingVerdict(null)
         return
     }
     val targets = subtitleLanguageTargets()
     val candidates = pickCandidates(_uiState.value.addonSubtitles, targets)
     if (candidates.isEmpty()) {
-        Log.d(MATCH_TAG, "no addon candidates for targets=$targets")
+        Log.i(MATCH_TAG, "no addon candidates for targets=$targets")
         submitTimingVerdict(null)
         return
     }
-    Log.d(
+    candidates.forEachIndexed { i, c ->
+        Log.i(MATCH_TAG, "candidate[$i] ${c.addonName}/${c.lang} id=${c.id} url=${c.url.take(160)}")
+    }
+    Log.i(
         MATCH_TAG,
         "reference track=${reference.trackNumber} codec=${reference.codecId} lang=${reference.language} " +
             "cues=${reference.cueCount} range=${reference.observedMinMs}..${reference.observedMaxMs}ms; " +
@@ -157,7 +162,7 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
             withContext(Dispatchers.Default) { SubtitleTimingMatcher.score(cues, reference) }
         }
         results[key] = result
-        Log.d(
+        Log.i(
             MATCH_TAG,
             "candidate ${candidate.addonName}/${candidate.lang} id=${candidate.id}: ${result.confidence} " +
                 "${result.scorePercent}% offset=${result.offsetMs}ms matched=${result.matchedCues}/${result.comparedCues} " +
@@ -208,11 +213,18 @@ private suspend fun PlayerRuntimeController.downloadAndParse(subtitle: Subtitle)
         val cues = withContext(Dispatchers.Default) {
             PlayerSubtitleCueParser.parseFromText(body, subtitle.url)
         }
-        if (cues.isEmpty()) null else cues
+        if (cues.isEmpty()) return null
+        val spanMs = cues.maxOf { it.endTimeMs } - cues.minOf { it.startTimeMs }
+        if (cues.size < PLACEHOLDER_MAX_CUES && spanMs > PLACEHOLDER_MIN_SPAN_MS) {
+            // SubMaker-style stub: 2-3 cues covering hours ("translating, please wait").
+            Log.i(MATCH_TAG, "candidate placeholder ${subtitle.addonName}/${subtitle.lang} id=${subtitle.id}: cues=${cues.size} span=${spanMs}ms text=${cues.first().text.take(80)}")
+            return null
+        }
+        cues
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        Log.d(MATCH_TAG, "candidate unavailable ${subtitle.addonName}/${subtitle.lang} id=${subtitle.id}: ${e.message}")
+        Log.i(MATCH_TAG, "candidate unavailable ${subtitle.addonName}/${subtitle.lang} id=${subtitle.id}: ${e.message}")
         null
     }
 }
