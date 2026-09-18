@@ -4,6 +4,8 @@ import android.util.Log
 import com.nuvio.tv.core.player.EmbeddedSubtitleTimingCollector
 import com.nuvio.tv.domain.model.Subtitle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
@@ -33,6 +35,7 @@ private const val PARALLEL_DOWNLOADS = 3
 private const val MIN_AUTO_OFFSET_MS = 150L
 private const val MIN_RESCORE_NEW_CUES = 20
 private const val RESCORE_INTERVAL_MS = 30_000L
+private const val EARLY_STOP_MARGIN = 0.05f
 private const val MAX_RESCORE_ATTEMPTS = 20
 /**
  * Addon entries that are machine translations produced on demand (SubMaker: "translate_<src>_to_<lang>").
@@ -164,26 +167,45 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
             "candidates=${candidates.size}"
     )
 
+    // Pipeline: PARALLEL_DOWNLOADS candidates in flight, each scored the moment its body
+    // lands; stop everything once one candidate is clearly in sync.
     val semaphore = Semaphore(PARALLEL_DOWNLOADS)
     val results = HashMap<String, SubtitleTimingMatcher.Result>()
-    for (candidate in candidates) {
-        val key = addonSubtitleKey(candidate)
-        val cues = subtitleTimingCueCache[key] ?: semaphore.withPermit { downloadAndParse(candidate) }
-        val result = if (cues == null) {
-            SubtitleTimingMatcher.unavailable(reference.trackNumber)
-        } else {
-            subtitleTimingCueCache[key] = cues
-            withContext(Dispatchers.Default) { SubtitleTimingMatcher.score(cues, reference) }
+    val early = SubtitleTimingMatcher.Options().highThreshold + EARLY_STOP_MARGIN
+    coroutineScope {
+        val channel = Channel<Pair<Subtitle, SubtitleTimingMatcher.Result>>(Channel.UNLIMITED)
+        val producers = candidates.map { candidate ->
+            launch {
+                val key = addonSubtitleKey(candidate)
+                val cues = subtitleTimingCueCache[key] ?: semaphore.withPermit { downloadAndParse(candidate) }
+                val result = if (cues == null) {
+                    SubtitleTimingMatcher.unavailable(reference.trackNumber)
+                } else {
+                    subtitleTimingCueCache[key] = cues
+                    withContext(Dispatchers.Default) { SubtitleTimingMatcher.score(cues, reference) }
+                }
+                channel.send(candidate to result)
+            }
         }
-        results[key] = result
-        Log.i(
-            MATCH_TAG,
-            "candidate ${candidate.addonName}/${candidate.lang} id=${candidate.id}: ${result.confidence} " +
-                "${result.scorePercent}% offset=${result.offsetMs}ms matched=${result.matchedCues}/${result.comparedCues} " +
-                "credits=${result.excludedCreditCues}"
-        )
-        // Publish progressively so the overlay fills in as candidates finish.
-        _uiState.update { it.copy(subtitleTimingMatches = it.subtitleTimingMatches + results) }
+        var received = 0
+        while (received < candidates.size) {
+            val (candidate, result) = channel.receive()
+            received++
+            results[addonSubtitleKey(candidate)] = result
+            Log.i(
+                MATCH_TAG,
+                "candidate ${candidate.addonName}/${candidate.lang} id=${candidate.id}: ${result.confidence} " +
+                    "${result.scorePercent}% offset=${result.offsetMs}ms matched=${result.matchedCues}/${result.comparedCues} " +
+                    "credits=${result.excludedCreditCues}"
+            )
+            // Publish progressively so the overlay fills in as candidates finish.
+            _uiState.update { it.copy(subtitleTimingMatches = it.subtitleTimingMatches + results) }
+            if (result.confidence == SubtitleTimingMatcher.Confidence.HIGH && result.score >= early) {
+                Log.i(MATCH_TAG, "early stop: ${candidate.addonName}/${candidate.lang} id=${candidate.id} at ${result.scorePercent}% (${candidates.size - received} skipped)")
+                producers.forEach { it.cancel() }
+                break
+            }
+        }
     }
     subtitleTimingMatchGeneration = embeddedSubtitleTimings.generation()
     applySubtitleTimingDecision(candidates, results, targets)
