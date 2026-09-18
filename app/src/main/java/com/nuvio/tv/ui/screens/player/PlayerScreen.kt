@@ -1606,6 +1606,8 @@ fun PlayerScreen(
             installedSubtitleAddonOrder = uiState.installedSubtitleAddonOrder,
             isLoadingAddons = uiState.isLoadingAddonSubtitles,
             subtitleTimingMatches = uiState.subtitleTimingMatches,
+            autoSyncPickKey = uiState.autoSyncPickKey,
+            autoSyncPickOffsetMs = uiState.autoSyncPickOffsetMs,
             useLibass = uiState.useLibass,
             isUsingMpv = uiState.internalPlayerEngine == InternalPlayerEngine.MVP_PLAYER,
             onInternalTrackSelected = { viewModel.onEvent(PlayerEvent.OnSelectSubtitleTrack(it)) },

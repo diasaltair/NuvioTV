@@ -3,6 +3,7 @@ package com.nuvio.tv.ui.screens.player
 import android.util.Log
 import com.nuvio.tv.core.player.EmbeddedSubtitleTimingCollector
 import com.nuvio.tv.domain.model.Subtitle
+import com.nuvio.tv.ui.screens.player.autosync.AutoSyncPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -40,7 +41,45 @@ internal fun PlayerRuntimeController.resetSubtitleTimingMatchState() {
     subtitleTimingCueCache.clear()
     subtitleTimingMatchGeneration = -1
     subtitleTimingMatchApplied = false
-    _uiState.update { it.copy(subtitleTimingMatches = emptyMap(), subtitleTimingMatchInProgress = false) }
+    subtitleSyncComparison = SubtitleSyncComparison()
+    _uiState.update {
+        it.copy(
+            subtitleTimingMatches = emptyMap(),
+            subtitleTimingMatchInProgress = false,
+            autoSyncPickKey = null,
+            autoSyncPickOffsetMs = null
+        )
+    }
+}
+
+/** Logs both methods' verdicts side by side once each has reported for this stream. */
+internal fun PlayerRuntimeController.logSubtitleSyncComparison() {
+    val c = subtitleSyncComparison
+    if (c.logged || !c.autoSyncDone || !c.timingDone) return
+    subtitleSyncComparison = c.copy(logged = true)
+    val agree = when {
+        c.autoSyncKey == null && c.timingKey == null -> "both-none"
+        c.autoSyncKey == c.timingKey -> "same-subtitle"
+        else -> "DIFFERENT"
+    }
+    val offsetDelta = if (c.autoSyncOffsetMs != null && c.timingOffsetMs != null) {
+        abs(c.autoSyncOffsetMs - c.timingOffsetMs)
+    } else {
+        null
+    }
+    Log.i(
+        MATCH_TAG,
+        "SUBTITLE_SYNC_COMPARE verdict=$agree offsetDelta=${offsetDelta ?: "n/a"}ms | " +
+            "autosync(cues-index): pick=${c.autoSyncLabel ?: "none"} offset=${c.autoSyncOffsetMs ?: "n/a"}ms " +
+            "score=${c.autoSyncScore?.let { "%.3f".format(it) } ?: "n/a"} | " +
+            "timing(extractor): pick=${c.timingLabel ?: "none"} offset=${c.timingOffsetMs ?: "n/a"}ms " +
+            "score=${c.timingScore?.let { "%.3f".format(it) } ?: "n/a"}"
+    )
+    Log.i(
+        PlayerRuntimeController.TAG,
+        "SUBTITLE_SYNC_COMPARE verdict=$agree autosync=${c.autoSyncLabel ?: "none"}@${c.autoSyncOffsetMs ?: "n/a"} " +
+            "timing=${c.timingLabel ?: "none"}@${c.timingOffsetMs ?: "n/a"}"
+    )
 }
 
 /**
@@ -175,11 +214,36 @@ private fun PlayerRuntimeController.applySubtitleTimingDecision(
     results: Map<String, SubtitleTimingMatcher.Result>,
     targets: List<String>
 ) {
+    val state = _uiState.value
+    // Record what this method would pick, regardless of whether it gets to act.
+    val wouldPick = targets.ifEmpty { candidates.map { it.lang }.distinct() }
+        .asSequence()
+        .mapNotNull { target ->
+            candidates
+                .filter { PlayerSubtitleUtils.matchesLanguageCode(it.lang, target) }
+                .mapNotNull { c -> results[addonSubtitleKey(c)]?.let { r -> c to r } }
+                .filter { (_, r) -> r.confidence == SubtitleTimingMatcher.Confidence.HIGH }
+                .maxByOrNull { (_, r) -> r.score }
+        }
+        .firstOrNull()
+    subtitleSyncComparison = subtitleSyncComparison.copy(
+        timingDone = true,
+        timingKey = wouldPick?.let { addonSubtitleKey(it.first) },
+        timingLabel = wouldPick?.let { (s, _) -> "${s.addonName}/${s.lang}#${s.id}" },
+        timingOffsetMs = wouldPick?.second?.offsetMs,
+        timingScore = wouldPick?.second?.score
+    )
+    logSubtitleSyncComparison()
+
+    if (AutoSyncPreferences.isEnabled(context) && !isUsingMpvEngine()) {
+        // The fork's AutoSync owns selection and delay; this method only scores and reports.
+        Log.d(MATCH_TAG, "AutoSync enabled; timing matcher in observe-only mode")
+        return
+    }
     if (isUserExplicitSubtitleSelection) {
         Log.d(MATCH_TAG, "user selected a subtitle explicitly; badges only")
         return
     }
-    val state = _uiState.value
     val current = state.selectedAddonSubtitle
     val currentResult = current?.let { results[addonSubtitleKey(it)] }
 

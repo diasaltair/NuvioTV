@@ -9,6 +9,7 @@ import com.nuvio.tv.ui.screens.player.autosync.AutoSyncDebugLog
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncPreferences
 import com.nuvio.tv.ui.screens.player.autosync.AutomaticSubtitleSync
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -70,6 +71,7 @@ internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
                 },
             ) ?: run {
                 Log.d(PlayerRuntimeController.TAG, "AUTO_SYNC_TV no reliable match")
+                recordAutoSyncVerdict(subtitle = null, correctionMs = null, score = null)
                 AutoSyncDebugLog.finishAndCopy(context, "no reliable match")
                 showAutoSyncToast(
                     "Auto Sync: couldn't find a reliable subtitle match",
@@ -101,6 +103,7 @@ internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
             val correctionMs = (
                 recommendation.correctionMs / SUBTITLE_DELAY_STEP_MS.toDouble()
                 ).roundToInt() * SUBTITLE_DELAY_STEP_MS
+            recordAutoSyncVerdict(recommendation.subtitle, correctionMs, recommendation.score)
 
             setSubtitleDelayMs(
                 targetMs = correctionMs.coerceIn(
@@ -138,9 +141,23 @@ internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
             throw cancel
         } catch (error: Throwable) {
             Log.w(PlayerRuntimeController.TAG, "AUTO_SYNC_TV failed", error)
+            recordAutoSyncVerdict(subtitle = null, correctionMs = null, score = null)
             AutoSyncDebugLog.error(error) { "bridge failed" }
             AutoSyncDebugLog.finishAndCopy(context, "failed")
             showAutoSyncToast("Auto Sync: failed", Toast.LENGTH_LONG)
         }
     }
+}
+
+private fun PlayerRuntimeController.recordAutoSyncVerdict(subtitle: Subtitle?, correctionMs: Int?, score: Double?) {
+    val key = subtitle?.let(::addonSubtitleKey)
+    subtitleSyncComparison = subtitleSyncComparison.copy(
+        autoSyncDone = true,
+        autoSyncKey = key,
+        autoSyncLabel = subtitle?.let { "${it.addonName}/${it.lang}#${it.id}" },
+        autoSyncOffsetMs = correctionMs,
+        autoSyncScore = score
+    )
+    _uiState.update { it.copy(autoSyncPickKey = key, autoSyncPickOffsetMs = correctionMs) }
+    logSubtitleSyncComparison()
 }

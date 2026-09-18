@@ -69,6 +69,7 @@ import com.nuvio.tv.R
 import com.nuvio.tv.data.local.SUBTITLE_LANGUAGE_FORCED
 import com.nuvio.tv.data.local.SubtitleStyleSettings
 import com.nuvio.tv.domain.model.Subtitle
+import kotlin.math.abs
 import com.nuvio.tv.ui.components.LoadingIndicator
 import com.nuvio.tv.ui.screens.detail.requestFocusAfterFrames
 
@@ -106,6 +107,8 @@ internal fun SubtitleSelectionOverlay(
     installedSubtitleAddonOrder: List<String>,
     isLoadingAddons: Boolean,
     subtitleTimingMatches: Map<String, SubtitleTimingMatcher.Result> = emptyMap(),
+    autoSyncPickKey: String? = null,
+    autoSyncPickOffsetMs: Int? = null,
     useLibass: Boolean = false,
     isUsingMpv: Boolean = false,
     onInternalTrackSelected: (Int) -> Unit,
@@ -178,6 +181,8 @@ internal fun SubtitleSelectionOverlay(
             builtInLabel = builtInLabel,
             forcedLabel = forcedLabel,
             timingMatches = subtitleTimingMatches,
+            autoSyncPickKey = autoSyncPickKey,
+            autoSyncPickOffsetMs = autoSyncPickOffsetMs,
             syncBadgeFormat = syncBadgeFormat,
             syncUnverifiedLabel = syncUnverifiedLabel,
             syncUnavailableLabel = syncUnavailableLabel
@@ -207,7 +212,10 @@ internal fun SubtitleSelectionOverlay(
         selectedOptionId,
         sessionInternalTracks,
         sessionAddonSubtitles,
-        sessionInstalledSubtitleAddonOrder
+        sessionInstalledSubtitleAddonOrder,
+        subtitleTimingMatches,
+        autoSyncPickKey,
+        autoSyncPickOffsetMs
     ) {
         buildSessionOptions(selectedLanguageKey, selectedOptionId)
     }
@@ -1894,6 +1902,8 @@ private fun buildSubtitleOptionRailItems(
     builtInLabel: String,
     forcedLabel: String,
     timingMatches: Map<String, SubtitleTimingMatcher.Result> = emptyMap(),
+    autoSyncPickKey: String? = null,
+    autoSyncPickOffsetMs: Int? = null,
     syncBadgeFormat: String = "Sync %1\$d%%",
     syncUnverifiedLabel: String = "",
     syncUnavailableLabel: String = ""
@@ -1903,7 +1913,9 @@ private fun buildSubtitleOptionRailItems(
     val addonOrderMap = installedAddonOrder.withIndex().associate { (index, name) -> name to index }
     fun toAddonItem(subtitle: Subtitle): SubtitleOptionRailItem {
         val optionId = addonSubtitleOptionId(subtitle)
-        val match = timingMatches["${subtitle.id}|${subtitle.url}"]
+        val subtitleKey = "${subtitle.id}|${subtitle.url}"
+        val match = timingMatches[subtitleKey]
+        val isAutoSyncPick = autoSyncPickKey != null && autoSyncPickKey == subtitleKey
         val syncLabel = when (match?.confidence) {
             null -> null
             SubtitleTimingMatcher.Confidence.UNAVAILABLE -> syncUnavailableLabel
@@ -1923,19 +1935,36 @@ private fun buildSubtitleOptionRailItems(
             SubtitleTimingMatcher.Confidence.UNAVAILABLE -> -2f
             else -> -1f
         }
+        val baseTitle = if (subtitle.isStreamProvided) {
+            streamProvidedSubtitleTitle(subtitle)
+        } else {
+            Subtitle.languageCodeToName(PlayerSubtitleUtils.normalizeLanguageCode(subtitle.lang))
+        }
+        // Name carries the extractor-timing score; markers tell which method chose this entry.
+        val scoreSuffix = when (match?.confidence) {
+            SubtitleTimingMatcher.Confidence.HIGH,
+            SubtitleTimingMatcher.Confidence.MEDIUM,
+            SubtitleTimingMatcher.Confidence.LOW -> " · ${match.scorePercent}%"
+            else -> ""
+        }
+        val markers = buildList {
+            if (isAutoSyncPick) {
+                add("AutoSync ✓" + (autoSyncPickOffsetMs?.takeIf { it != 0 }?.let { " %+.2fs".format(it / 1000.0) } ?: ""))
+            }
+            if (match?.confidence == SubtitleTimingMatcher.Confidence.HIGH) {
+                add("Timing ✓" + (match.offsetMs.takeIf { abs(it) >= 150 }?.let { " %+.2fs".format(it / 1000.0) } ?: ""))
+            }
+        }
+        val baseMeta = subtitle.id.takeIf { it.isNotBlank() && it != subtitle.lang && it != subtitle.url }
         return SubtitleOptionRailItem(
             syncLabel = syncLabel,
             syncTone = syncTone,
             syncScore = syncScore,
             id = optionId,
             kind = SubtitleOptionKind.ADDON,
-            title = if (subtitle.isStreamProvided) {
-                streamProvidedSubtitleTitle(subtitle)
-            } else {
-                Subtitle.languageCodeToName(PlayerSubtitleUtils.normalizeLanguageCode(subtitle.lang))
-            },
+            title = baseTitle + scoreSuffix,
             sourceLabel = if (subtitle.isStreamProvided) builtInLabel else subtitle.addonName,
-            meta = subtitle.id.takeIf { it.isNotBlank() && it != subtitle.lang && it != subtitle.url },
+            meta = (markers + listOfNotNull(baseMeta)).joinToString(" • ").ifBlank { null },
             isSelected = optionId == selectedOptionId,
             addonSubtitle = subtitle
         )

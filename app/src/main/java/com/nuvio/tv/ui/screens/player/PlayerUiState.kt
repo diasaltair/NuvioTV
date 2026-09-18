@@ -127,6 +127,9 @@ data class PlayerUiState(
     /** Timing-match verdict per addon subtitle key (see addonSubtitleKey). */
     val subtitleTimingMatches: Map<String, SubtitleTimingMatcher.Result> = emptyMap(),
     val subtitleTimingMatchInProgress: Boolean = false,
+    /** addonSubtitleKey of the subtitle the fork's AutoSync (Cues-index method) settled on. */
+    val autoSyncPickKey: String? = null,
+    val autoSyncPickOffsetMs: Int? = null,
     // Episodes/streams side panel (for series)
     val showEpisodesPanel: Boolean = false,
     val isLoadingEpisodes: Boolean = false,
@@ -264,6 +267,24 @@ data class NextEpisodeInfo(
     val hasAired: Boolean,
     val unairedMessage: String?,
     val isOtherType: Boolean = false
+)
+
+/**
+ * Side-by-side record of the two embedded-timing methods: the fork's AutoSync (Matroska Cues
+ * index over HTTP range) and the extractor-fed timing matcher. Logged once both have spoken.
+ */
+data class SubtitleSyncComparison(
+    val autoSyncDone: Boolean = false,
+    val autoSyncKey: String? = null,
+    val autoSyncLabel: String? = null,
+    val autoSyncOffsetMs: Int? = null,
+    val autoSyncScore: Double? = null,
+    val timingDone: Boolean = false,
+    val timingKey: String? = null,
+    val timingLabel: String? = null,
+    val timingOffsetMs: Long? = null,
+    val timingScore: Float? = null,
+    val logged: Boolean = false
 )
 
 data class SubtitleSyncCue(
