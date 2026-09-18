@@ -96,46 +96,23 @@ internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
                 return@launch
             }
 
-            if (!recommendation.isCurrentSubtitle) {
-                selectAddonSubtitle(recommendation.subtitle)
-            }
-
             val correctionMs = (
                 recommendation.correctionMs / SUBTITLE_DELAY_STEP_MS.toDouble()
                 ).roundToInt() * SUBTITLE_DELAY_STEP_MS
-            recordAutoSyncVerdict(recommendation.subtitle, correctionMs, recommendation.score)
-
-            setSubtitleDelayMs(
-                targetMs = correctionMs.coerceIn(
-                    SUBTITLE_DELAY_MIN_MS,
-                    SUBTITLE_DELAY_MAX_MS,
-                ),
-                showOverlay = false,
-            )
-
-            val subtitleListNumber = candidatesAtStart.indexOfFirst { subtitle ->
-                addonSubtitleKey(subtitle) == addonSubtitleKey(recommendation.subtitle)
-            }.takeIf { it >= 0 }?.plus(1)
-            val subtitleLabel = subtitleListNumber
-                ?.let { "#$it" }
-                ?: recommendation.subtitle.getDisplayLanguage()
-            val delayLabel = "%+.2fs".format(correctionMs / 1000.0)
-
-            showAutoSyncToast(
-                "Auto Sync: $subtitleLabel selected • $delayLabel",
-                Toast.LENGTH_LONG,
-            )
 
             Log.i(
                 PlayerRuntimeController.TAG,
-                "AUTO_SYNC_TV applied addon=${recommendation.subtitle.id} " +
+                "AUTO_SYNC_TV verdict addon=${recommendation.subtitle.id} " +
                     "correction=${correctionMs}ms score=${"%.4f".format(recommendation.score)} " +
                     "matches=${recommendation.matchedCues} reference=${recommendation.referenceKey}",
             )
             AutoSyncDebugLog.finishAndCopy(
                 context,
-                "applied ${correctionMs}ms to ${recommendation.subtitle.id}",
+                "verdict ${correctionMs}ms for ${recommendation.subtitle.id} (handed to arbiter)",
             )
+            // Selection and delay are applied by the arbiter once the extractor-timing
+            // matcher has also reported (or timed out); the higher-confidence verdict wins.
+            recordAutoSyncVerdict(recommendation.subtitle, correctionMs, recommendation.score)
         } catch (cancel: CancellationException) {
             AutoSyncDebugLog.finishAndCopy(context, "cancelled")
             throw cancel
@@ -153,6 +130,7 @@ private fun PlayerRuntimeController.recordAutoSyncVerdict(subtitle: Subtitle?, c
     val key = subtitle?.let(::addonSubtitleKey)
     subtitleSyncComparison = subtitleSyncComparison.copy(
         autoSyncDone = true,
+        autoSyncSubtitle = subtitle,
         autoSyncKey = key,
         autoSyncLabel = subtitle?.let { "${it.addonName}/${it.lang}#${it.id}" },
         autoSyncOffsetMs = correctionMs,
@@ -160,4 +138,5 @@ private fun PlayerRuntimeController.recordAutoSyncVerdict(subtitle: Subtitle?, c
     )
     _uiState.update { it.copy(autoSyncPickKey = key, autoSyncPickOffsetMs = correctionMs) }
     logSubtitleSyncComparison()
+    scheduleSubtitleSyncArbitration()
 }

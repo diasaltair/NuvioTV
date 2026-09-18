@@ -3,7 +3,6 @@ package com.nuvio.tv.ui.screens.player
 import android.util.Log
 import com.nuvio.tv.core.player.EmbeddedSubtitleTimingCollector
 import com.nuvio.tv.domain.model.Subtitle
-import com.nuvio.tv.ui.screens.player.autosync.AutoSyncPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -37,6 +36,8 @@ private const val MIN_RESCORE_NEW_CUES = 40
 internal fun PlayerRuntimeController.resetSubtitleTimingMatchState() {
     subtitleTimingMatchJob?.cancel()
     subtitleTimingMatchJob = null
+    subtitleSyncArbiterJob?.cancel()
+    subtitleSyncArbiterJob = null
     embeddedSubtitleTimings.reset()
     subtitleTimingCueCache.clear()
     subtitleTimingMatchGeneration = -1
@@ -92,11 +93,16 @@ internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: Stri
     if (!currentPlayerSettingsForReport.subtitleStyle.autoMatchEmbeddedTiming) return
     if (isUsingMpvEngine()) return
     val state = _uiState.value
-    if (state.addonSubtitles.isEmpty()) return
+    if (state.addonSubtitles.isEmpty()) {
+        if (trigger == "addon-fetch") submitTimingVerdict(null)
+        return
+    }
     if (subtitleTimingMatchJob?.isActive == true) return
     val snapshot = embeddedSubtitleTimings.snapshot()
     if (snapshot.tracks.isEmpty()) {
         Log.d(MATCH_TAG, "skip($trigger): no embedded subtitle tracks reported yet")
+        // Let the arbiter proceed with the other method instead of waiting for a timeout.
+        if (trigger == "addon-fetch") submitTimingVerdict(null)
         return
     }
     if (subtitleTimingMatchGeneration >= 0) {
@@ -122,12 +128,14 @@ internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: Stri
 private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
     val reference = awaitReferenceTrack() ?: run {
         Log.d(MATCH_TAG, "no usable embedded reference track (forced-only or too few cues)")
+        submitTimingVerdict(null)
         return
     }
     val targets = subtitleLanguageTargets()
     val candidates = pickCandidates(_uiState.value.addonSubtitles, targets)
     if (candidates.isEmpty()) {
         Log.d(MATCH_TAG, "no addon candidates for targets=$targets")
+        submitTimingVerdict(null)
         return
     }
     Log.d(
@@ -215,39 +223,10 @@ private fun PlayerRuntimeController.applySubtitleTimingDecision(
     targets: List<String>
 ) {
     val state = _uiState.value
-    // Record what this method would pick, regardless of whether it gets to act.
-    val wouldPick = targets.ifEmpty { candidates.map { it.lang }.distinct() }
-        .asSequence()
-        .mapNotNull { target ->
-            candidates
-                .filter { PlayerSubtitleUtils.matchesLanguageCode(it.lang, target) }
-                .mapNotNull { c -> results[addonSubtitleKey(c)]?.let { r -> c to r } }
-                .filter { (_, r) -> r.confidence == SubtitleTimingMatcher.Confidence.HIGH }
-                .maxByOrNull { (_, r) -> r.score }
-        }
-        .firstOrNull()
-    subtitleSyncComparison = subtitleSyncComparison.copy(
-        timingDone = true,
-        timingKey = wouldPick?.let { addonSubtitleKey(it.first) },
-        timingLabel = wouldPick?.let { (s, _) -> "${s.addonName}/${s.lang}#${s.id}" },
-        timingOffsetMs = wouldPick?.second?.offsetMs,
-        timingScore = wouldPick?.second?.score
-    )
-    logSubtitleSyncComparison()
-
-    if (AutoSyncPreferences.isEnabled(context) && !isUsingMpvEngine()) {
-        // The fork's AutoSync owns selection and delay; this method only scores and reports.
-        Log.d(MATCH_TAG, "AutoSync enabled; timing matcher in observe-only mode")
-        return
-    }
-    if (isUserExplicitSubtitleSelection) {
-        Log.d(MATCH_TAG, "user selected a subtitle explicitly; badges only")
-        return
-    }
     val current = state.selectedAddonSubtitle
     val currentResult = current?.let { results[addonSubtitleKey(it)] }
-
-    // Best HIGH candidate, primary language first, then by score.
+    // Best HIGH candidate, primary language first, then by score; only sidecar-attachable
+    // entries can be switched to without a media reload.
     val best = targets.ifEmpty { candidates.map { it.lang }.distinct() }
         .asSequence()
         .mapNotNull { target ->
@@ -258,29 +237,25 @@ private fun PlayerRuntimeController.applySubtitleTimingDecision(
                 .maxByOrNull { (_, r) -> r.score }
         }
         .firstOrNull()
-
-    val chosen: Pair<Subtitle, SubtitleTimingMatcher.Result>? = when {
+    val verdict: Pair<Subtitle, SubtitleTimingMatcher.Result>? = when {
         current != null && currentResult?.confidence == SubtitleTimingMatcher.Confidence.HIGH -> current to currentResult
         best != null -> best
-        // No HIGH anywhere: keep the language pick, but a consistent MEDIUM offset is still worth applying.
+        // No HIGH anywhere: a consistent MEDIUM on the current pick still carries an offset.
         current != null && currentResult?.confidence == SubtitleTimingMatcher.Confidence.MEDIUM -> current to currentResult
         else -> null
     }
-    if (chosen == null) {
-        Log.d(MATCH_TAG, "no confident candidate; keeping current selection")
-        return
-    }
-    val (subtitle, result) = chosen
-    if (current == null || addonSubtitleKey(current) != addonSubtitleKey(subtitle)) {
-        Log.d(MATCH_TAG, "switching to ${subtitle.addonName}/${subtitle.lang} id=${subtitle.id} (${result.scorePercent}%)")
-        autoSubtitleSelected = true
-        subtitleTimingMatchApplied = true
-        selectAddonSubtitle(subtitle)
-        _uiState.update { it.copy(selectedAddonSubtitle = subtitle, selectedSubtitleTrackIndex = -1) }
-    }
-    // Respect a delay the user set or restored for this video: only fill in when it is zero.
-    if (abs(result.offsetMs) >= MIN_AUTO_OFFSET_MS && _uiState.value.subtitleDelayMs == 0) {
-        Log.d(MATCH_TAG, "applying offset ${result.offsetMs}ms")
-        setSubtitleDelayMs(result.offsetMs.toInt(), showOverlay = false)
-    }
+    submitTimingVerdict(verdict)
+}
+
+internal fun PlayerRuntimeController.submitTimingVerdict(verdict: Pair<Subtitle, SubtitleTimingMatcher.Result>?) {
+    subtitleSyncComparison = subtitleSyncComparison.copy(
+        timingDone = true,
+        timingSubtitle = verdict?.first,
+        timingKey = verdict?.let { addonSubtitleKey(it.first) },
+        timingLabel = verdict?.let { (s, _) -> "${s.addonName}/${s.lang}#${s.id}" },
+        timingOffsetMs = verdict?.second?.offsetMs,
+        timingScore = verdict?.second?.score
+    )
+    logSubtitleSyncComparison()
+    scheduleSubtitleSyncArbitration()
 }

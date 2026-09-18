@@ -275,6 +275,9 @@ data class NextEpisodeInfo(
  */
 data class SubtitleSyncComparison(
     val autoSyncDone: Boolean = false,
+    val autoSyncSubtitle: com.nuvio.tv.domain.model.Subtitle? = null,
+    val timingSubtitle: com.nuvio.tv.domain.model.Subtitle? = null,
+    val decided: Boolean = false,
     val autoSyncKey: String? = null,
     val autoSyncLabel: String? = null,
     val autoSyncOffsetMs: Int? = null,
