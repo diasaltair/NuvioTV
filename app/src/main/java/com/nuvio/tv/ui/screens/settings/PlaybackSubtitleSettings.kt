@@ -79,6 +79,7 @@ internal fun LazyListScope.subtitleSettingsItems(
     onSetUseForcedSubtitles: (Boolean) -> Unit,
     onSetSubtitleShowOnlyPreferredLanguages: (Boolean) -> Unit,
     onSetSubtitleStripSdh: (Boolean) -> Unit,
+    onSetSubtitleAutoMatchEmbeddedTiming: (Boolean) -> Unit,
     onSetSubtitleOutlineEnabled: (Boolean) -> Unit,
     onSetUseLibass: (Boolean) -> Unit,
     onSetLibassRenderType: (LibassRenderType) -> Unit,
@@ -153,6 +154,18 @@ internal fun LazyListScope.subtitleSettingsItems(
             subtitle = stringResource(R.string.sub_strip_sdh_desc),
             isChecked = playerSettings.subtitleStyle.stripSdh,
             onCheckedChange = onSetSubtitleStripSdh,
+            onFocused = onItemFocused,
+            enabled = enabled
+        )
+    }
+
+    item(key = "subtitle_auto_match_embedded_timing") {
+        ToggleSettingsItem(
+            icon = Icons.Default.ClosedCaption,
+            title = stringResource(R.string.sub_auto_match_timing),
+            subtitle = stringResource(R.string.sub_auto_match_timing_desc),
+            isChecked = playerSettings.subtitleStyle.autoMatchEmbeddedTiming,
+            onCheckedChange = onSetSubtitleAutoMatchEmbeddedTiming,
             onFocused = onItemFocused,
             enabled = enabled
         )

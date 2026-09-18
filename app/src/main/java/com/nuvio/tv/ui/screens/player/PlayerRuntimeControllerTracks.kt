@@ -1422,7 +1422,7 @@ internal fun selectedAudioLanguageTarget(track: TrackInfo): String? {
     }?.code
 }
 
-private fun addonSubtitleIsForced(subtitle: Subtitle): Boolean {
+internal fun addonSubtitleIsForced(subtitle: Subtitle): Boolean {
     return listOf(subtitle.id, subtitle.url, subtitle.addonName).any {
         it.contains("forced", ignoreCase = true)
     }

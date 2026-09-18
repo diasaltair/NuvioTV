@@ -107,6 +107,7 @@ class PlayerRuntimeController(
     internal val context: Context = context.withAppLocale()
 
     companion object {
+        internal const val SUBTITLE_TIMING_CUE_CACHE_SIZE = 8
         internal const val TAG = "PlayerViewModel"
         internal const val SWITCH_TRACE_TAG = "SwitchTrace"
         internal const val SWITCH_TRACE_ENABLED = false
@@ -354,6 +355,16 @@ class PlayerRuntimeController(
     internal var hidePlayerEngineSwitchInfoJob: Job? = null
     internal var hideSubtitleDelayOverlayJob: Job? = null
     internal var subtitleAutoSyncLoadJob: Job? = null
+    /** Embedded subtitle cue timeline of the current MKV, fed by the vendored extractor. */
+    internal val embeddedSubtitleTimings = com.nuvio.tv.core.player.EmbeddedSubtitleTimingCollector()
+    internal var subtitleTimingMatchJob: Job? = null
+    /** Parsed cues of already-downloaded addon candidates, keyed by addonSubtitleKey. */
+    internal val subtitleTimingCueCache = object : LinkedHashMap<String, List<SubtitleSyncCue>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<SubtitleSyncCue>>?): Boolean =
+            size > SUBTITLE_TIMING_CUE_CACHE_SIZE
+    }
+    internal var subtitleTimingMatchGeneration: Int = -1
+    internal var subtitleTimingMatchApplied: Boolean = false
     /** ExoPlayer sidecar path: external addon cues without setMediaSource (preserves buffer). */
     internal var sidecarSubtitleJob: Job? = null
     internal var activeSidecarSubtitleKey: String? = null

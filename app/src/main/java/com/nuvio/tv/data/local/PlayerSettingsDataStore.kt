@@ -144,6 +144,8 @@ data class SubtitleStyleSettings(
     val useForcedSubtitles: Boolean = true,
     val showOnlyPreferredLanguages: Boolean = false,
     val stripSdh: Boolean = true,
+    /** Score addon subtitles against the embedded cue timeline and auto-pick the one in sync. */
+    val autoMatchEmbeddedTiming: Boolean = true,
     val size: Int = 120, // Percentage (50-200)
     val verticalOffset: Int = 5, // Percentage from bottom (-20 to 50)
     val bold: Boolean = false,
@@ -579,6 +581,7 @@ class PlayerSettingsDataStore @Inject constructor(
     private val subtitleUseForcedSubtitlesKey = booleanPreferencesKey("subtitle_use_forced_subtitles")
     private val subtitleShowOnlyPreferredLanguagesKey = booleanPreferencesKey("subtitle_show_only_preferred_languages")
     private val subtitleStripSdhKey = booleanPreferencesKey("subtitle_strip_sdh")
+    private val subtitleAutoMatchEmbeddedTimingKey = booleanPreferencesKey("subtitle_auto_match_embedded_timing")
     private val subtitleSizeKey = intPreferencesKey("subtitle_size")
     private val subtitleVerticalOffsetKey = intPreferencesKey("subtitle_vertical_offset")
     private val subtitleBoldKey = booleanPreferencesKey("subtitle_bold")
@@ -984,6 +987,7 @@ class PlayerSettingsDataStore @Inject constructor(
                             prefs[subtitleSecondaryLanguageKey]?.let(::normalizeSelectableLanguageCode) == SUBTITLE_LANGUAGE_FORCED,
                         showOnlyPreferredLanguages = prefs[subtitleShowOnlyPreferredLanguagesKey] ?: false,
                         stripSdh = prefs[subtitleStripSdhKey] ?: false,
+                        autoMatchEmbeddedTiming = prefs[subtitleAutoMatchEmbeddedTimingKey] ?: true,
                         size = prefs[subtitleSizeKey] ?: 100,
                         verticalOffset = prefs[subtitleVerticalOffsetKey] ?: 5,
                         bold = prefs[subtitleBoldKey] ?: false,
@@ -1546,6 +1550,12 @@ class PlayerSettingsDataStore @Inject constructor(
     suspend fun setSubtitleStripSdh(enabled: Boolean) {
         store().edit { prefs ->
             prefs[subtitleStripSdhKey] = enabled
+        }
+    }
+
+    suspend fun setSubtitleAutoMatchEmbeddedTiming(enabled: Boolean) {
+        store().edit { prefs ->
+            prefs[subtitleAutoMatchEmbeddedTimingKey] = enabled
         }
     }
 

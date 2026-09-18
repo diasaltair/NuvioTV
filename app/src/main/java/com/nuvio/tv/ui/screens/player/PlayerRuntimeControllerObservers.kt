@@ -158,6 +158,9 @@ internal fun PlayerRuntimeController.fetchAddonSubtitles() {
                 subtitleTracks = _uiState.value.subtitleTracks
             )
             tryAutoSelectPreferredSubtitleFromAvailableTracks()
+            // Language pick above is instant; timing verification runs behind it and may
+            // swap to a better-synced candidate or apply an offset once cues are known.
+            maybeStartSubtitleTimingMatch(trigger = "addon-fetch")
         } catch (e: Exception) {
             _uiState.update {
                 it.copy(
@@ -204,6 +207,7 @@ internal fun PlayerRuntimeController.refreshSubtitlesForCurrentEpisode() {
     resetSubtitleAutoSyncState()
     attachedAddonSubtitleKeys = emptySet()
     stopSidecarAddonSubtitle(clearView = true)
+    resetSubtitleTimingMatchState()
     _uiState.update {
         it.copy(
             addonSubtitles = emptyList(),

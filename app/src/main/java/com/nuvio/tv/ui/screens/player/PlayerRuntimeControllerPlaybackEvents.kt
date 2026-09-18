@@ -1434,6 +1434,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             }
         }
         PlayerEvent.OnShowSubtitleOverlay -> {
+            maybeStartSubtitleTimingMatch(trigger = "overlay")
             _uiState.update {
                 it.copy(
                     showSubtitleOverlay = true,

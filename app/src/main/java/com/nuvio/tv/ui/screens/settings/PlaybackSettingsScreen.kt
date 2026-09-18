@@ -338,6 +338,9 @@ fun PlaybackSettingsContent(
                 onSetSubtitleStripSdh = { enabled ->
                     coroutineScope.launch { viewModel.setSubtitleStripSdh(enabled) }
                 },
+                onSetSubtitleAutoMatchEmbeddedTiming = { enabled ->
+                    coroutineScope.launch { viewModel.setSubtitleAutoMatchEmbeddedTiming(enabled) }
+                },
                 onSetSubtitleOutlineEnabled = { enabled -> coroutineScope.launch { viewModel.setSubtitleOutlineEnabled(enabled) } },
                 onSetUseLibass = { enabled -> coroutineScope.launch { viewModel.setUseLibass(enabled) } },
                 onSetLibassRenderType = { renderType -> coroutineScope.launch { viewModel.setLibassRenderType(renderType) } },
