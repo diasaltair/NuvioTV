@@ -65,7 +65,9 @@ private fun PlayerRuntimeController.decideSubtitleSync(reason: String) {
     if (c.decided) return
     subtitleSyncComparison = c.copy(decided = true)
 
-    data class Verdict(val method: String, val subtitle: Subtitle, val offsetMs: Int, val score: Double)
+    data class Verdict(val method: String, val subtitle: Subtitle, val offsetMs: Int, val score: Double) {
+        val needsOffset: Boolean get() = abs(offsetMs) >= SubtitleTimingMatcher.NO_OFFSET_TOLERANCE_MS
+    }
 
     val auto = c.autoSyncSubtitle?.let { Verdict("autosync", it, c.autoSyncOffsetMs ?: 0, c.autoSyncScore ?: 0.0) }
     val timing = c.timingSubtitle?.let { Verdict("timing", it, (c.timingOffsetMs ?: 0L).toInt(), (c.timingScore ?: 0f).toDouble()) }
@@ -77,6 +79,9 @@ private fun PlayerRuntimeController.decideSubtitleSync(reason: String) {
         // Same subtitle: keep the extractor offset (120 ms cue tolerance) over the Cues-index one (1.8 s).
         addonSubtitleKey(auto.subtitle) == addonSubtitleKey(timing.subtitle) ->
             if (timing.score >= 0.92) timing.copy(score = maxOf(auto.score, timing.score)) else auto
+        // A subtitle that fits as-is beats one that needs shifting, unless it is clearly weaker.
+        !timing.needsOffset && auto.needsOffset && timing.score >= auto.score - 0.10 -> timing
+        !auto.needsOffset && timing.needsOffset && auto.score >= timing.score - 0.10 -> auto
         timing.score > auto.score -> timing
         else -> auto
     }

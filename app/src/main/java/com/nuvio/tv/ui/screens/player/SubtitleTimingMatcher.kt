@@ -29,7 +29,11 @@ object SubtitleTimingMatcher {
         val referenceCueCount: Int
     ) {
         val scorePercent: Int get() = (score * 100f).toInt()
+        /** True when the subtitle only lines up after shifting it by [offsetMs]. */
+        val needsOffset: Boolean get() = abs(offsetMs) >= NO_OFFSET_TOLERANCE_MS
     }
+
+    const val NO_OFFSET_TOLERANCE_MS = 150L
 
     data class Options(
         val startToleranceMs: Long = 120,
