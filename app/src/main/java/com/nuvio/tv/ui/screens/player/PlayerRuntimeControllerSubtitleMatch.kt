@@ -32,6 +32,15 @@ private const val MAX_CANDIDATES_TOTAL = 8
 private const val PARALLEL_DOWNLOADS = 2
 private const val MIN_AUTO_OFFSET_MS = 150L
 private const val MIN_RESCORE_NEW_CUES = 40
+/**
+ * Addon entries that are machine translations produced on demand (SubMaker: "translate_<src>_to_<lang>").
+ * Their first download returns a "translating…" stub, so they are never usable as sync candidates.
+ */
+private val onDemandTranslationIdPrefixes = listOf("translate_")
+
+internal fun isOnDemandTranslationSubtitle(subtitle: Subtitle): Boolean =
+    onDemandTranslationIdPrefixes.any { subtitle.id.startsWith(it, ignoreCase = true) }
+
 private const val PLACEHOLDER_MAX_CUES = 10
 private const val PLACEHOLDER_MIN_SPAN_MS = 60L * 60L * 1000L
 
@@ -197,6 +206,7 @@ private fun PlayerRuntimeController.pickCandidates(all: List<Subtitle>, targets:
             if (picked.size >= MAX_CANDIDATES_TOTAL || perLanguage >= MAX_CANDIDATES_PER_LANGUAGE) break
             if (!PlayerSubtitleUtils.matchesLanguageCode(subtitle.lang, target)) continue
             if (useForced && addonSubtitleIsForced(subtitle)) continue
+            if (isOnDemandTranslationSubtitle(subtitle)) continue
             if (!seen.add(addonSubtitleKey(subtitle))) continue
             picked.add(subtitle)
             perLanguage++

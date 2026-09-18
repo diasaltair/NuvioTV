@@ -42,8 +42,10 @@ internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
     val sourceUrlAtStart = currentStreamUrl
     val sourceHeadersAtStart = currentHeaders.toMap()
     val selectedKey = addonSubtitleKey(selectedSubtitle)
+    // On-demand translations (SubMaker "translate_…") download as stubs; keep them out of the pool.
     val candidatesAtStart = (_uiState.value.addonSubtitles + selectedSubtitle)
         .distinctBy(::addonSubtitleKey)
+        .filterNot { it != selectedSubtitle && isOnDemandTranslationSubtitle(it) }
 
     automaticSubtitleSyncJob = scope.launch {
         AutoSyncDebugLog.setEnabled(AutoSyncPreferences.isDebugLogsEnabled(context))
