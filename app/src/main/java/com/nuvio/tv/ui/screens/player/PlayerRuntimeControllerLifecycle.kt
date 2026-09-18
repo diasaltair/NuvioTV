@@ -48,6 +48,8 @@ internal fun PlayerRuntimeController.releasePlayer(flushPlaybackState: Boolean) 
     subtitleTimingMatchJob = null
     subtitleSyncArbiterJob?.cancel()
     subtitleSyncArbiterJob = null
+    subtitleTimingRescoreJob?.cancel()
+    subtitleTimingRescoreJob = null
     stopSidecarAddonSubtitle(clearView = true)
     subtitleTimingRefreshJob?.cancel()
     subtitleTimingRefreshJob = null

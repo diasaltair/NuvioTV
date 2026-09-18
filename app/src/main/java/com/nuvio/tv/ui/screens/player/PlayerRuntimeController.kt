@@ -369,6 +369,8 @@ class PlayerRuntimeController(
     /** What each sync method would pick for the current stream, for side-by-side logging. */
     internal var subtitleSyncComparison: SubtitleSyncComparison = SubtitleSyncComparison()
     internal var subtitleSyncArbiterJob: Job? = null
+    internal var subtitleTimingRescoreJob: Job? = null
+    internal var subtitleTimingRescoreAttempts: Int = 0
     /** ExoPlayer sidecar path: external addon cues without setMediaSource (preserves buffer). */
     internal var sidecarSubtitleJob: Job? = null
     internal var activeSidecarSubtitleKey: String? = null

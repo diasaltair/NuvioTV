@@ -31,7 +31,9 @@ private const val MAX_CANDIDATES_PER_LANGUAGE = 20
 private const val MAX_CANDIDATES_TOTAL = 24
 private const val PARALLEL_DOWNLOADS = 3
 private const val MIN_AUTO_OFFSET_MS = 150L
-private const val MIN_RESCORE_NEW_CUES = 40
+private const val MIN_RESCORE_NEW_CUES = 20
+private const val RESCORE_INTERVAL_MS = 30_000L
+private const val MAX_RESCORE_ATTEMPTS = 20
 /**
  * Addon entries that are machine translations produced on demand (SubMaker: "translate_<src>_to_<lang>").
  * Their first download returns a "translating…" stub, so they are never usable as sync candidates.
@@ -47,6 +49,9 @@ private const val PLACEHOLDER_MIN_SPAN_MS = 60L * 60L * 1000L
 internal fun PlayerRuntimeController.resetSubtitleTimingMatchState() {
     subtitleTimingMatchJob?.cancel()
     subtitleTimingMatchJob = null
+    subtitleTimingRescoreJob?.cancel()
+    subtitleTimingRescoreJob = null
+    subtitleTimingRescoreAttempts = 0
     subtitleSyncArbiterJob?.cancel()
     subtitleSyncArbiterJob = null
     embeddedSubtitleTimings.reset()
@@ -182,6 +187,24 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
     }
     subtitleTimingMatchGeneration = embeddedSubtitleTimings.generation()
     applySubtitleTimingDecision(candidates, results, targets)
+    // The player only reads ~1-2 min ahead; keep re-scoring the cached cues as more of the
+    // file's timeline arrives until a candidate reaches HIGH or the attempts run out.
+    val bestScore = results.values.maxOfOrNull { it.score } ?: 0f
+    if (bestScore < SubtitleTimingMatcher.Options().highThreshold) scheduleSubtitleTimingRescore()
+}
+
+private fun PlayerRuntimeController.scheduleSubtitleTimingRescore() {
+    if (subtitleTimingRescoreAttempts >= MAX_RESCORE_ATTEMPTS) return
+    if (subtitleTimingRescoreJob?.isActive == true) return
+    subtitleTimingRescoreAttempts++
+    val streamAtStart = currentStreamUrl
+    subtitleTimingRescoreJob = scope.launch {
+        delay(RESCORE_INTERVAL_MS)
+        if (currentStreamUrl != streamAtStart) return@launch
+        maybeStartSubtitleTimingMatch(trigger = "rescore#$subtitleTimingRescoreAttempts")
+        // If the guard skipped (not enough new cues yet), try again later.
+        if (subtitleTimingMatchJob?.isActive != true) scheduleSubtitleTimingRescore()
+    }
 }
 
 private suspend fun PlayerRuntimeController.awaitReferenceTrack(): EmbeddedSubtitleTimingCollector.TrackTiming? {
