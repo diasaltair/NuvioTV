@@ -105,6 +105,7 @@ internal fun SubtitleSelectionOverlay(
     subtitleDelayMs: Int,
     installedSubtitleAddonOrder: List<String>,
     isLoadingAddons: Boolean,
+    subtitleTimingMatches: Map<String, SubtitleTimingMatcher.Result> = emptyMap(),
     useLibass: Boolean = false,
     isUsingMpv: Boolean = false,
     onInternalTrackSelected: (Int) -> Unit,
@@ -127,6 +128,9 @@ internal fun SubtitleSelectionOverlay(
     val sessionAddonSubtitles = remember(visible, addonSubtitles) { addonSubtitles.map(Subtitle::copy) }
     val sessionSelectedAddonSubtitle = remember(visible) { selectedAddonSubtitle?.copy() }
     val sessionInstalledSubtitleAddonOrder = remember(visible) { installedSubtitleAddonOrder.toList() }
+    val syncBadgeFormat = stringResource(R.string.subtitle_sync_badge)
+    val syncUnverifiedLabel = stringResource(R.string.subtitle_sync_badge_unverified)
+    val syncUnavailableLabel = stringResource(R.string.subtitle_sync_badge_unavailable)
     val sessionIsLoadingAddons = isLoadingAddons
     val sessionSelectedSubtitleLanguageKey = remember(visible) {
         selectedSubtitleLanguageKey(
@@ -172,7 +176,11 @@ internal fun SubtitleSelectionOverlay(
             installedAddonOrder = sessionInstalledSubtitleAddonOrder,
             selectedOptionId = activeSelectedOptionId,
             builtInLabel = builtInLabel,
-            forcedLabel = forcedLabel
+            forcedLabel = forcedLabel,
+            timingMatches = subtitleTimingMatches,
+            syncBadgeFormat = syncBadgeFormat,
+            syncUnverifiedLabel = syncUnverifiedLabel,
+            syncUnavailableLabel = syncUnavailableLabel
         )
     }
 
@@ -1229,7 +1237,12 @@ private fun SubtitleOptionCard(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                SourceChip(label = item.sourceLabel, selected = item.isSelected)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SourceChip(label = item.sourceLabel, selected = item.isSelected)
+                    if (item.syncLabel != null) {
+                        SyncChip(label = item.syncLabel, tone = item.syncTone, selected = item.isSelected)
+                    }
+                }
                 Text(
                     text = item.title,
                     style = MaterialTheme.typography.bodyLarge,
@@ -1275,6 +1288,30 @@ private fun CountBadge(
             text = count.toString(),
             style = MaterialTheme.typography.labelSmall,
             color = if (selected) NuvioTheme.colors.OnSecondary else NuvioTheme.colors.OnSecondary
+        )
+    }
+}
+
+private enum class SyncTone { GOOD, FAIR, POOR, NEUTRAL }
+
+@Composable
+private fun SyncChip(label: String, tone: SyncTone, selected: Boolean) {
+    val accent = when (tone) {
+        SyncTone.GOOD -> Color(0xFF3DD68C)
+        SyncTone.FAIR -> Color(0xFFF5B841)
+        SyncTone.POOR -> Color(0xFFF06565)
+        SyncTone.NEUTRAL -> Color.White.copy(alpha = 0.55f)
+    }
+    Box(
+        modifier = Modifier
+            .background(accent.copy(alpha = if (selected) 0.22f else 0.14f), RoundedCornerShape(999.dp))
+            .border(NuvioTheme.spacing.hairline, accent.copy(alpha = 0.45f), RoundedCornerShape(999.dp))
+            .padding(horizontal = NuvioTheme.spacing.sm, vertical = 3.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) NuvioTheme.colors.OnSecondary.copy(alpha = 0.9f) else accent
         )
     }
 }
@@ -1763,7 +1800,10 @@ private data class SubtitleOptionRailItem(
     val meta: String?,
     val isSelected: Boolean,
     val internalTrackIndex: Int? = null,
-    val addonSubtitle: Subtitle? = null
+    val addonSubtitle: Subtitle? = null,
+    val syncLabel: String? = null,
+    val syncTone: SyncTone = SyncTone.NEUTRAL,
+    val syncScore: Float = -1f
 )
 
 private fun buildSubtitleLanguageRailItems(
@@ -1852,14 +1892,41 @@ private fun buildSubtitleOptionRailItems(
     installedAddonOrder: List<String>,
     selectedOptionId: String?,
     builtInLabel: String,
-    forcedLabel: String
+    forcedLabel: String,
+    timingMatches: Map<String, SubtitleTimingMatcher.Result> = emptyMap(),
+    syncBadgeFormat: String = "Sync %1\$d%%",
+    syncUnverifiedLabel: String = "",
+    syncUnavailableLabel: String = ""
 ): List<SubtitleOptionRailItem> {
     if (selectedLanguageKey == SubtitleOffLanguageKey) return emptyList()
 
     val addonOrderMap = installedAddonOrder.withIndex().associate { (index, name) -> name to index }
     fun toAddonItem(subtitle: Subtitle): SubtitleOptionRailItem {
         val optionId = addonSubtitleOptionId(subtitle)
+        val match = timingMatches["${subtitle.id}|${subtitle.url}"]
+        val syncLabel = when (match?.confidence) {
+            null -> null
+            SubtitleTimingMatcher.Confidence.UNAVAILABLE -> syncUnavailableLabel
+            SubtitleTimingMatcher.Confidence.INSUFFICIENT -> syncUnverifiedLabel
+            else -> String.format(syncBadgeFormat, match.scorePercent)
+        }
+        val syncTone = when (match?.confidence) {
+            SubtitleTimingMatcher.Confidence.HIGH -> SyncTone.GOOD
+            SubtitleTimingMatcher.Confidence.MEDIUM -> SyncTone.FAIR
+            SubtitleTimingMatcher.Confidence.LOW -> SyncTone.POOR
+            else -> SyncTone.NEUTRAL
+        }
+        val syncScore = when (match?.confidence) {
+            SubtitleTimingMatcher.Confidence.HIGH,
+            SubtitleTimingMatcher.Confidence.MEDIUM,
+            SubtitleTimingMatcher.Confidence.LOW -> match.score
+            SubtitleTimingMatcher.Confidence.UNAVAILABLE -> -2f
+            else -> -1f
+        }
         return SubtitleOptionRailItem(
+            syncLabel = syncLabel,
+            syncTone = syncTone,
+            syncScore = syncScore,
             id = optionId,
             kind = SubtitleOptionKind.ADDON,
             title = if (subtitle.isStreamProvided) {
@@ -1902,13 +1969,16 @@ private fun buildSubtitleOptionRailItems(
     val addonFetchedItems = matchingAddonSubtitles
         .filter { !it.isStreamProvided }
         .withIndex()
+        .map { (index, subtitle) -> index to toAddonItem(subtitle) }
+        // Verified-in-sync first, then the user's addon order, then addon result order.
         .sortedWith(
             compareBy(
-                { (_, subtitle) -> addonOrderMap[subtitle.addonName] ?: Int.MAX_VALUE },
+                { (_, item) -> -item.syncScore },
+                { (_, item) -> addonOrderMap[item.addonSubtitle?.addonName] ?: Int.MAX_VALUE },
                 { (index, _) -> index }
             )
         )
-        .map { (_, subtitle) -> toAddonItem(subtitle) }
+        .map { (_, item) -> item }
 
     return internalItems + streamProvidedItems + addonFetchedItems
 }

@@ -959,7 +959,8 @@ internal fun PlayerRuntimeController.initializePlayer(
                             manualDv81 = manualDv81Selected && !dv7Mode1Forced
                         ),
                         stripDvRpu = stripDvRpuEnabled,
-                        stripHdr10PlusSei = stripHdr10PlusSei
+                        stripHdr10PlusSei = stripHdr10PlusSei,
+                        subtitleTimingListener = embeddedSubtitleTimings
                     )
 
             setLoadingStatus(
@@ -2013,6 +2014,7 @@ internal fun PlayerRuntimeController.resetAddonSubtitleStateForNewStream() {
     effectiveSubtitleSelectionForEngineSwitch = null
     attachedAddonSubtitleKeys = emptySet()
     stopSidecarAddonSubtitle(clearView = true)
+    resetSubtitleTimingMatchState()
     _uiState.update {
         it.copy(
             addonSubtitles = emptyList(),

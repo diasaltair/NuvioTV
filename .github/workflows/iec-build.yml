@@ -2,7 +2,7 @@ name: IEC passthrough test build
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, 'feat/**']
   workflow_dispatch:
 
 concurrency:
@@ -73,6 +73,9 @@ jobs:
 
       - name: Build fullDebug APK
         run: ./gradlew :app:assembleFullDebug --stacktrace --no-daemon
+
+      - name: Unit tests (subtitle timing matcher)
+        run: ./gradlew :app:testFullDebugUnitTest --tests "*SubtitleTimingMatcherTest*" --stacktrace --no-daemon
 
       - name: List APKs
         run: find app/build/outputs/apk -name '*.apk' -exec ls -la {} \;

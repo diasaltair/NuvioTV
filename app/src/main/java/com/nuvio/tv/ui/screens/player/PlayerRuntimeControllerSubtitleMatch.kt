@@ -1,0 +1,222 @@
+package com.nuvio.tv.ui.screens.player
+
+import android.util.Log
+import com.nuvio.tv.core.player.EmbeddedSubtitleTimingCollector
+import com.nuvio.tv.domain.model.Subtitle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
+
+/**
+ * Verifies addon subtitles against the embedded subtitle timeline of the playing MKV
+ * (see [EmbeddedSubtitleTimingCollector] / [SubtitleTimingMatcher]) and, when allowed,
+ * swaps the auto-selected subtitle for the best-synced candidate and applies its offset.
+ *
+ * Runs only on the ExoPlayer engine for Matroska streams; every other case leaves the
+ * language-based auto-selection untouched. Candidate downloads are best effort: an addon
+ * that lists a subtitle it cannot serve is marked UNAVAILABLE and skipped.
+ */
+
+private const val MATCH_TAG = "SubtitleTimingMatch"
+private const val MIN_REFERENCE_CUES = 20
+private const val REFERENCE_WAIT_POLL_MS = 2_000L
+private const val REFERENCE_WAIT_TIMEOUT_MS = 180_000L
+private const val MAX_CANDIDATES_PER_LANGUAGE = 6
+private const val MAX_CANDIDATES_TOTAL = 8
+private const val PARALLEL_DOWNLOADS = 2
+private const val MIN_AUTO_OFFSET_MS = 150L
+private const val MIN_RESCORE_NEW_CUES = 40
+
+internal fun PlayerRuntimeController.resetSubtitleTimingMatchState() {
+    subtitleTimingMatchJob?.cancel()
+    subtitleTimingMatchJob = null
+    embeddedSubtitleTimings.reset()
+    subtitleTimingCueCache.clear()
+    subtitleTimingMatchGeneration = -1
+    subtitleTimingMatchApplied = false
+    _uiState.update { it.copy(subtitleTimingMatches = emptyMap(), subtitleTimingMatchInProgress = false) }
+}
+
+/**
+ * Starts (or re-runs) the timing match when it can produce something new: the setting is on,
+ * the engine is ExoPlayer, the file exposes embedded subtitle tracks and there are addon
+ * candidates. Safe to call often; a running job is kept, a finished one re-runs only when
+ * the extractor has read materially more cues since the last pass.
+ */
+internal fun PlayerRuntimeController.maybeStartSubtitleTimingMatch(trigger: String) {
+    if (!currentPlayerSettingsForReport.subtitleStyle.autoMatchEmbeddedTiming) return
+    if (isUsingMpvEngine()) return
+    val state = _uiState.value
+    if (state.addonSubtitles.isEmpty()) return
+    if (subtitleTimingMatchJob?.isActive == true) return
+    val snapshot = embeddedSubtitleTimings.snapshot()
+    if (snapshot.tracks.isEmpty()) {
+        Log.d(MATCH_TAG, "skip($trigger): no embedded subtitle tracks reported yet")
+        return
+    }
+    if (subtitleTimingMatchGeneration >= 0) {
+        val previousCues = state.subtitleTimingMatches.values.maxOfOrNull { it.referenceCueCount } ?: 0
+        val currentCues = SubtitleTimingMatcher.chooseReference(snapshot, MIN_REFERENCE_CUES)?.cueCount ?: 0
+        if (currentCues - previousCues < MIN_RESCORE_NEW_CUES) return
+    }
+    Log.d(MATCH_TAG, "start($trigger): tracks=${snapshot.tracks.size} candidates=${state.addonSubtitles.size}")
+    subtitleTimingMatchJob = scope.launch {
+        try {
+            _uiState.update { it.copy(subtitleTimingMatchInProgress = true) }
+            runSubtitleTimingMatch()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(MATCH_TAG, "match failed", e)
+        } finally {
+            _uiState.update { it.copy(subtitleTimingMatchInProgress = false) }
+        }
+    }
+}
+
+private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
+    val reference = awaitReferenceTrack() ?: run {
+        Log.d(MATCH_TAG, "no usable embedded reference track (forced-only or too few cues)")
+        return
+    }
+    val targets = subtitleLanguageTargets()
+    val candidates = pickCandidates(_uiState.value.addonSubtitles, targets)
+    if (candidates.isEmpty()) {
+        Log.d(MATCH_TAG, "no addon candidates for targets=$targets")
+        return
+    }
+    Log.d(
+        MATCH_TAG,
+        "reference track=${reference.trackNumber} codec=${reference.codecId} lang=${reference.language} " +
+            "cues=${reference.cueCount} range=${reference.observedMinMs}..${reference.observedMaxMs}ms; " +
+            "candidates=${candidates.size}"
+    )
+
+    val semaphore = Semaphore(PARALLEL_DOWNLOADS)
+    val results = HashMap<String, SubtitleTimingMatcher.Result>()
+    for (candidate in candidates) {
+        val key = addonSubtitleKey(candidate)
+        val cues = subtitleTimingCueCache[key] ?: semaphore.withPermit { downloadAndParse(candidate) }
+        val result = if (cues == null) {
+            SubtitleTimingMatcher.unavailable(reference.trackNumber)
+        } else {
+            subtitleTimingCueCache[key] = cues
+            withContext(Dispatchers.Default) { SubtitleTimingMatcher.score(cues, reference) }
+        }
+        results[key] = result
+        Log.d(
+            MATCH_TAG,
+            "candidate ${candidate.addonName}/${candidate.lang} id=${candidate.id}: ${result.confidence} " +
+                "${result.scorePercent}% offset=${result.offsetMs}ms matched=${result.matchedCues}/${result.comparedCues} " +
+                "credits=${result.excludedCreditCues}"
+        )
+        // Publish progressively so the overlay fills in as candidates finish.
+        _uiState.update { it.copy(subtitleTimingMatches = it.subtitleTimingMatches + results) }
+    }
+    subtitleTimingMatchGeneration = embeddedSubtitleTimings.generation()
+    applySubtitleTimingDecision(candidates, results, targets)
+}
+
+private suspend fun PlayerRuntimeController.awaitReferenceTrack(): EmbeddedSubtitleTimingCollector.TrackTiming? {
+    val deadline = System.currentTimeMillis() + REFERENCE_WAIT_TIMEOUT_MS
+    while (true) {
+        val snapshot = embeddedSubtitleTimings.snapshot()
+        val reference = SubtitleTimingMatcher.chooseReference(snapshot, MIN_REFERENCE_CUES)
+        if (reference != null) return reference
+        if (snapshot.tracks.isEmpty() || System.currentTimeMillis() > deadline) return null
+        delay(REFERENCE_WAIT_POLL_MS)
+    }
+}
+
+private fun PlayerRuntimeController.pickCandidates(all: List<Subtitle>, targets: List<String>): List<Subtitle> {
+    val useForced = _uiState.value.subtitleStyle.useForcedSubtitles
+    val seen = HashSet<String>()
+    val picked = ArrayList<Subtitle>()
+    val languages = if (targets.isEmpty()) all.map { it.lang }.distinct() else targets
+    for (target in languages) {
+        var perLanguage = 0
+        for (subtitle in all) {
+            if (picked.size >= MAX_CANDIDATES_TOTAL || perLanguage >= MAX_CANDIDATES_PER_LANGUAGE) break
+            if (!PlayerSubtitleUtils.matchesLanguageCode(subtitle.lang, target)) continue
+            if (useForced && addonSubtitleIsForced(subtitle)) continue
+            if (!seen.add(addonSubtitleKey(subtitle))) continue
+            picked.add(subtitle)
+            perLanguage++
+        }
+    }
+    return picked
+}
+
+/** Returns null when the addon lists a subtitle it cannot actually serve (HTTP error, empty, unparsable). */
+private suspend fun PlayerRuntimeController.downloadAndParse(subtitle: Subtitle): List<SubtitleSyncCue>? {
+    return try {
+        val body = downloadSubtitleBody(subtitle.url, subtitle.lang, subtitle.headers)
+        if (body.isBlank()) return null
+        val cues = withContext(Dispatchers.Default) {
+            PlayerSubtitleCueParser.parseFromText(body, subtitle.url)
+        }
+        if (cues.isEmpty()) null else cues
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Log.d(MATCH_TAG, "candidate unavailable ${subtitle.addonName}/${subtitle.lang} id=${subtitle.id}: ${e.message}")
+        null
+    }
+}
+
+private fun PlayerRuntimeController.applySubtitleTimingDecision(
+    candidates: List<Subtitle>,
+    results: Map<String, SubtitleTimingMatcher.Result>,
+    targets: List<String>
+) {
+    if (isUserExplicitSubtitleSelection) {
+        Log.d(MATCH_TAG, "user selected a subtitle explicitly; badges only")
+        return
+    }
+    val state = _uiState.value
+    val current = state.selectedAddonSubtitle
+    val currentResult = current?.let { results[addonSubtitleKey(it)] }
+
+    // Best HIGH candidate, primary language first, then by score.
+    val best = targets.ifEmpty { candidates.map { it.lang }.distinct() }
+        .asSequence()
+        .mapNotNull { target ->
+            candidates
+                .filter { PlayerSubtitleUtils.matchesLanguageCode(it.lang, target) }
+                .mapNotNull { c -> results[addonSubtitleKey(c)]?.let { r -> c to r } }
+                .filter { (c, r) -> r.confidence == SubtitleTimingMatcher.Confidence.HIGH && canAttachAddonSubtitleViaSidecar(c) }
+                .maxByOrNull { (_, r) -> r.score }
+        }
+        .firstOrNull()
+
+    val chosen: Pair<Subtitle, SubtitleTimingMatcher.Result>? = when {
+        current != null && currentResult?.confidence == SubtitleTimingMatcher.Confidence.HIGH -> current to currentResult
+        best != null -> best
+        // No HIGH anywhere: keep the language pick, but a consistent MEDIUM offset is still worth applying.
+        current != null && currentResult?.confidence == SubtitleTimingMatcher.Confidence.MEDIUM -> current to currentResult
+        else -> null
+    }
+    if (chosen == null) {
+        Log.d(MATCH_TAG, "no confident candidate; keeping current selection")
+        return
+    }
+    val (subtitle, result) = chosen
+    if (current == null || addonSubtitleKey(current) != addonSubtitleKey(subtitle)) {
+        Log.d(MATCH_TAG, "switching to ${subtitle.addonName}/${subtitle.lang} id=${subtitle.id} (${result.scorePercent}%)")
+        autoSubtitleSelected = true
+        subtitleTimingMatchApplied = true
+        selectAddonSubtitle(subtitle)
+        _uiState.update { it.copy(selectedAddonSubtitle = subtitle, selectedSubtitleTrackIndex = -1) }
+    }
+    // Respect a delay the user set or restored for this video: only fill in when it is zero.
+    if (abs(result.offsetMs) >= MIN_AUTO_OFFSET_MS && _uiState.value.subtitleDelayMs == 0) {
+        Log.d(MATCH_TAG, "applying offset ${result.offsetMs}ms")
+        setSubtitleDelayMs(result.offsetMs.toInt(), showOverlay = false)
+    }
+}

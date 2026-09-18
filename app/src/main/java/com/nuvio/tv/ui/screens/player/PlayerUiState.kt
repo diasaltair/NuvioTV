@@ -124,6 +124,9 @@ data class PlayerUiState(
     val selectedAddonSubtitle: Subtitle? = null,
     val addonSubtitlesError: String? = null,
     val installedSubtitleAddonOrder: List<String> = emptyList(),
+    /** Timing-match verdict per addon subtitle key (see addonSubtitleKey). */
+    val subtitleTimingMatches: Map<String, SubtitleTimingMatcher.Result> = emptyMap(),
+    val subtitleTimingMatchInProgress: Boolean = false,
     // Episodes/streams side panel (for series)
     val showEpisodesPanel: Boolean = false,
     val isLoadingEpisodes: Boolean = false,

@@ -555,6 +555,18 @@ public class MatroskaExtractor implements Extractor {
     return dolbyVisionSampleTransformer;
   }
 
+  @Nullable private volatile SubtitleTimingListener subtitleTimingListener;
+
+  /** Installs a listener that observes embedded subtitle sample timings for every text track. */
+  public void setSubtitleTimingListener(@Nullable SubtitleTimingListener listener) {
+    subtitleTimingListener = listener;
+  }
+
+  @Nullable
+  public SubtitleTimingListener getSubtitleTimingListener() {
+    return subtitleTimingListener;
+  }
+
   // Temporary arrays.
   private final ParsableByteArray nalStartCode;
   private final ParsableByteArray nalLength;
@@ -1258,6 +1270,14 @@ public class MatroskaExtractor implements Extractor {
             // deadlocking startup: no endTracks -> no preparation -> no loading.
             currentTrack.output.format(checkNotNull(currentTrack.format));
             tracks.put(currentTrack.number, currentTrack);
+            SubtitleTimingListener timingListener = subtitleTimingListener;
+            if (timingListener != null && currentTrack.type == C.TRACK_TYPE_TEXT) {
+              timingListener.onSubtitleTrack(
+                  currentTrack.number,
+                  currentTrack.codecId,
+                  currentTrack.language,
+                  currentTrack.flagForced);
+            }
           }
         }
         this.currentTrack = null;
@@ -1998,6 +2018,13 @@ public class MatroskaExtractor implements Extractor {
       track.trueHdSampleRechunker.sampleMetadata(
           track.output, timeUs, flags, size, offset, track.cryptoData);
     } else {
+      SubtitleTimingListener timingListener = subtitleTimingListener;
+      if (timingListener != null
+          && track.type == C.TRACK_TYPE_TEXT
+          && blockSampleCount <= 1
+          && timeUs != C.TIME_UNSET) {
+        timingListener.onSubtitleSample(track.number, timeUs, blockDurationUs, size);
+      }
       if (CODEC_ID_SUBRIP.equals(track.codecId)
           || CODEC_ID_ASS.equals(track.codecId)
           || CODEC_ID_SSA.equals(track.codecId)

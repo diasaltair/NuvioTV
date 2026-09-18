@@ -872,6 +872,11 @@
     <string name="sub_show_only_preferred_languages_desc">Hide all other subtitles languages from selection list</string>
     <string name="sub_strip_sdh">Strip SDH subtitles</string>
     <string name="sub_strip_sdh_desc">Hide sound descriptions and speaker labels from text subtitles</string>
+    <string name="sub_auto_match_timing">Auto-match subtitles by timing</string>
+    <string name="sub_auto_match_timing_desc">Compare addon subtitles with the file\'s embedded subtitle timing and auto-select the one in sync (MKV, ExoPlayer)</string>
+    <string name="subtitle_sync_badge">Sync %1$d%%</string>
+    <string name="subtitle_sync_badge_unverified">Sync ?</string>
+    <string name="subtitle_sync_badge_unavailable">Unavailable</string>
     <string name="sub_organization">Subtitle Organization</string>
     <string name="sub_size">Size</string>
     <string name="sub_vertical_offset">Vertical Offset</string>

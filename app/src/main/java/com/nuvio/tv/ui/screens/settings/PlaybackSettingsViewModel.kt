@@ -246,6 +246,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setSubtitleStripSdh(enabled)
     }
 
+    suspend fun setSubtitleAutoMatchEmbeddedTiming(enabled: Boolean) {
+        playerSettingsDataStore.setSubtitleAutoMatchEmbeddedTiming(enabled)
+    }
+
     suspend fun setSubtitleSize(size: Int) {
         playerSettingsDataStore.setSubtitleSize(size)
     }
