@@ -1302,6 +1302,9 @@ private fun CountBadge(
 
 private enum class SyncTone { GOOD, FAIR, POOR, NEUTRAL }
 
+private fun formatOffsetSeconds(offsetMs: Long): String =
+    if (offsetMs == 0L) "0s" else "%+.1fs".format(offsetMs / 1000.0)
+
 @Composable
 private fun SyncChip(label: String, tone: SyncTone, selected: Boolean) {
     val accent = when (tone) {
@@ -1941,11 +1944,14 @@ private fun buildSubtitleOptionRailItems(
             Subtitle.languageCodeToName(PlayerSubtitleUtils.normalizeLanguageCode(subtitle.lang))
         }
         // Name carries the extractor-timing score; markers tell which method chose this entry.
+        // Every scored entry shows "· NN% · +1.2s" in its name; unscored ones show why.
         val scoreSuffix = when (match?.confidence) {
             SubtitleTimingMatcher.Confidence.HIGH,
             SubtitleTimingMatcher.Confidence.MEDIUM,
-            SubtitleTimingMatcher.Confidence.LOW -> " · ${match.scorePercent}%"
-            else -> ""
+            SubtitleTimingMatcher.Confidence.LOW -> " · ${match.scorePercent}% · " + formatOffsetSeconds(match.offsetMs)
+            SubtitleTimingMatcher.Confidence.INSUFFICIENT -> " · ?"
+            SubtitleTimingMatcher.Confidence.UNAVAILABLE -> " · ✕"
+            null -> ""
         }
         val markers = buildList {
             if (isAutoSyncPick) {

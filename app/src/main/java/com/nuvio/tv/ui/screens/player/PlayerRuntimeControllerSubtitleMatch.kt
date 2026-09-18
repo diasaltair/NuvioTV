@@ -227,6 +227,7 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
             }
         }
         var received = 0
+        var earlyApplied = false
         while (received < candidates.size) {
             val (candidate, result) = channel.receive()
             received++
@@ -239,10 +240,12 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
             )
             // Publish progressively so the overlay fills in as candidates finish.
             _uiState.update { it.copy(subtitleTimingMatches = it.subtitleTimingMatches + results) }
-            if (result.confidence == SubtitleTimingMatcher.Confidence.HIGH && result.score >= early) {
-                Log.i(MATCH_TAG, "early stop: ${candidate.addonName}/${candidate.lang} id=${candidate.id} at ${result.scorePercent}% (${candidates.size - received} skipped)")
-                producers.forEach { it.cancel() }
-                break
+            // A clear match is handed to the arbiter right away; scoring continues in the
+            // background so every entry in the list gets its score and offset.
+            if (!earlyApplied && result.confidence == SubtitleTimingMatcher.Confidence.HIGH && result.score >= early) {
+                Log.i(MATCH_TAG, "early verdict: ${candidate.addonName}/${candidate.lang} id=${candidate.id} at ${result.scorePercent}% offset=${result.offsetMs}ms (${candidates.size - received} still scoring)")
+                earlyApplied = true
+                applySubtitleTimingDecision(candidates, HashMap(results), targets)
             }
         }
     }
