@@ -27,9 +27,9 @@ private const val MATCH_TAG = "SubtitleTimingMatch"
 private const val MIN_REFERENCE_CUES = 20
 private const val REFERENCE_WAIT_POLL_MS = 2_000L
 private const val REFERENCE_WAIT_TIMEOUT_MS = 180_000L
-private const val MAX_CANDIDATES_PER_LANGUAGE = 6
-private const val MAX_CANDIDATES_TOTAL = 8
-private const val PARALLEL_DOWNLOADS = 2
+private const val MAX_CANDIDATES_PER_LANGUAGE = 20
+private const val MAX_CANDIDATES_TOTAL = 24
+private const val PARALLEL_DOWNLOADS = 3
 private const val MIN_AUTO_OFFSET_MS = 150L
 private const val MIN_RESCORE_NEW_CUES = 40
 /**

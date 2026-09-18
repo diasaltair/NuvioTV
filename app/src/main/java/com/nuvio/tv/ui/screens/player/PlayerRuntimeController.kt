@@ -107,7 +107,7 @@ class PlayerRuntimeController(
     internal val context: Context = context.withAppLocale()
 
     companion object {
-        internal const val SUBTITLE_TIMING_CUE_CACHE_SIZE = 8
+        internal const val SUBTITLE_TIMING_CUE_CACHE_SIZE = 24
         internal const val TAG = "PlayerViewModel"
         internal const val SWITCH_TRACE_TAG = "SwitchTrace"
         internal const val SWITCH_TRACE_ENABLED = false
