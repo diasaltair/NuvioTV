@@ -1597,7 +1597,11 @@ internal fun PlayerRuntimeController.tryAutoSelectPreferredSubtitleFromAvailable
         Log.d(PlayerRuntimeController.TAG, "AUTO_SUB stop: user explicitly selected current subtitle")
         return
     }
-    val state = _uiState.value
+    // Language-only picks below take the first addon entry; keep on-demand translations
+    // (SubMaker "translate_…", stubs until translated) behind real subtitle files.
+    val state = _uiState.value.let { s ->
+        s.copy(addonSubtitles = s.addonSubtitles.sortedBy { isOnDemandTranslationSubtitle(it) })
+    }
     val preferredTargets = subtitleLanguageTargets()
     val primaryTarget = preferredTargets.firstOrNull()
 

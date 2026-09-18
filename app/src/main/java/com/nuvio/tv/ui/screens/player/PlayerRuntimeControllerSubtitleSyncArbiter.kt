@@ -36,7 +36,12 @@ private fun PlayerRuntimeController.autoSyncExpected(): Boolean =
 private fun PlayerRuntimeController.timingExpected(): Boolean =
     currentPlayerSettingsForReport.subtitleStyle.autoMatchEmbeddedTiming && !isUsingMpvEngine()
 
-/** Called after either method records its verdict. Decides now if possible, else waits. */
+/**
+ * Called after either method records its verdict. The first positive verdict is applied at
+ * once (the user should not wait on the slower method); a later verdict goes through
+ * [reviseSubtitleSyncDecision]. When neither is positive yet, wait for the other method or
+ * time out.
+ */
 internal fun PlayerRuntimeController.scheduleSubtitleSyncArbitration() {
     val c = subtitleSyncComparison
     if (c.decided) {
@@ -45,10 +50,11 @@ internal fun PlayerRuntimeController.scheduleSubtitleSyncArbitration() {
     }
     val autoDone = c.autoSyncDone || !autoSyncExpected()
     val timingDone = c.timingDone || !timingExpected()
-    if (autoDone && timingDone) {
+    val anyPositive = c.autoSyncSubtitle != null || c.timingSubtitle != null
+    if ((autoDone && timingDone) || anyPositive) {
         subtitleSyncArbiterJob?.cancel()
         subtitleSyncArbiterJob = null
-        decideSubtitleSync(reason = "both-reported")
+        decideSubtitleSync(reason = if (autoDone && timingDone) "both-reported" else "first-positive")
         return
     }
     if (subtitleSyncArbiterJob?.isActive == true) return
@@ -139,38 +145,52 @@ private fun PlayerRuntimeController.showArbiterToast(message: String, duration: 
 }
 
 /**
- * A later, stronger timing verdict (the extractor sees more of the file as playback goes on)
- * may refine the offset of the chosen subtitle or, when clearly better, replace it.
+ * A verdict arriving after the decision may refine the offset of the chosen subtitle (same
+ * subtitle, materially different offset, at least as confident) or replace it when clearly
+ * better. Works for either method; the extractor offset wins ties on the same subtitle.
  */
 private fun PlayerRuntimeController.reviseSubtitleSyncDecision() {
     val c = subtitleSyncComparison
-    val subtitle = c.timingSubtitle ?: return
-    val score = (c.timingScore ?: 0f).toDouble()
-    val offset = (c.timingOffsetMs ?: 0L).toInt().coerceIn(SUBTITLE_DELAY_MIN_MS, SUBTITLE_DELAY_MAX_MS)
-    if (score < 0.92) return
-    val key = addonSubtitleKey(subtitle)
+    data class Late(val method: String, val subtitle: Subtitle, val offsetMs: Int, val score: Double)
+    val candidates = listOfNotNull(
+        c.timingSubtitle?.let { Late("timing", it, (c.timingOffsetMs ?: 0L).toInt(), (c.timingScore ?: 0f).toDouble()) },
+        c.autoSyncSubtitle?.let { Late("autosync", it, c.autoSyncOffsetMs ?: 0, c.autoSyncScore ?: 0.0) }
+    ).filter { it.method != c.winnerMethod || addonSubtitleKey(it.subtitle) != c.winnerKey || it.offsetMs != (_uiState.value.subtitleDelayMs) }
+    val late = candidates.maxByOrNull { it.score } ?: return
+    val minScore = if (late.method == "timing") 0.92 else 0.75
+    if (late.score < minScore) {
+        Log.i(ARBITER_TAG, "REVISION ignored: ${late.method} %.3f below threshold".format(late.score))
+        return
+    }
+    val key = addonSubtitleKey(late.subtitle)
+    val offset = late.offsetMs.coerceIn(SUBTITLE_DELAY_MIN_MS, SUBTITLE_DELAY_MAX_MS)
     val current = _uiState.value.selectedAddonSubtitle
     val currentKey = current?.let(::addonSubtitleKey)
     val currentDelay = _uiState.value.subtitleDelayMs
     when {
         key == currentKey -> {
+            // Same subtitle: only the extractor's finer offset, or a first offset, is worth applying.
             if (abs(offset - currentDelay) < MIN_APPLY_OFFSET_MS) return
-            Log.i(ARBITER_TAG, "REVISION same-subtitle offset ${currentDelay}ms -> ${offset}ms (timing score %.3f)".format(score))
-            subtitleSyncComparison = c.copy(winnerKey = key, winnerScore = score, winnerMethod = "timing")
+            if (late.method != "timing" && c.winnerMethod == "timing") {
+                Log.i(ARBITER_TAG, "REVISION ignored: autosync offset ${offset}ms vs timing ${currentDelay}ms on same subtitle")
+                return
+            }
+            Log.i(ARBITER_TAG, "REVISION same-subtitle offset ${currentDelay}ms -> ${offset}ms (${late.method} %.3f)".format(late.score))
+            subtitleSyncComparison = c.copy(winnerKey = key, winnerScore = maxOf(c.winnerScore, late.score), winnerMethod = late.method)
             setSubtitleDelayMs(offset, showOverlay = false)
-            showArbiterToast("Sync (timing): offset refined • %+.2fs".format(offset / 1000.0), Toast.LENGTH_SHORT)
+            showArbiterToast("Sync (${late.method}): offset refined • %+.2fs".format(offset / 1000.0), Toast.LENGTH_SHORT)
         }
-        !isUserExplicitSubtitleSelection && score > c.winnerScore + 0.05 -> {
-            Log.i(ARBITER_TAG, "REVISION switch ${c.winnerMethod}:${c.winnerKey} (%.3f) -> timing:$key (%.3f) offset=${offset}ms".format(c.winnerScore, score))
-            subtitleSyncComparison = c.copy(winnerKey = key, winnerScore = score, winnerMethod = "timing")
+        !isUserExplicitSubtitleSelection && late.score > c.winnerScore + 0.05 -> {
+            Log.i(ARBITER_TAG, "REVISION switch ${c.winnerMethod}:${c.winnerKey} (%.3f) -> ${late.method}:$key (%.3f) offset=${offset}ms".format(c.winnerScore, late.score))
+            subtitleSyncComparison = c.copy(winnerKey = key, winnerScore = late.score, winnerMethod = late.method)
             autoSubtitleSelected = true
             subtitleTimingMatchApplied = true
-            selectAddonSubtitle(subtitle)
-            _uiState.update { it.copy(selectedAddonSubtitle = subtitle, selectedSubtitleTrackIndex = -1) }
+            selectAddonSubtitle(late.subtitle)
+            _uiState.update { it.copy(selectedAddonSubtitle = late.subtitle, selectedSubtitleTrackIndex = -1) }
             if (abs(offset) >= MIN_APPLY_OFFSET_MS || currentDelay != 0) setSubtitleDelayMs(offset, showOverlay = false)
             val n = _uiState.value.addonSubtitles.indexOfFirst { addonSubtitleKey(it) == key }.takeIf { it >= 0 }?.plus(1)
-            showArbiterToast("Sync (timing): #${n ?: "?"} selected • %+.2fs".format(offset / 1000.0), Toast.LENGTH_LONG)
+            showArbiterToast("Sync (${late.method}): #${n ?: "?"} selected • %+.2fs".format(offset / 1000.0), Toast.LENGTH_LONG)
         }
-        else -> Log.i(ARBITER_TAG, "REVISION ignored: timing %.3f vs winner ${c.winnerMethod} %.3f".format(score, c.winnerScore))
+        else -> Log.i(ARBITER_TAG, "REVISION ignored: ${late.method} %.3f vs winner ${c.winnerMethod} %.3f".format(late.score, c.winnerScore))
     }
 }
