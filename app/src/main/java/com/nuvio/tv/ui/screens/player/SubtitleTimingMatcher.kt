@@ -12,7 +12,7 @@ import kotlin.math.abs
  * cues whose start (and end, when known) lands on an embedded cue within tolerance. Credit cues
  * ("subs by …") near the edges with no embedded counterpart are excluded from the denominator.
  */
-internal object SubtitleTimingMatcher {
+object SubtitleTimingMatcher {
 
     enum class Confidence { HIGH, MEDIUM, LOW, INSUFFICIENT, UNAVAILABLE }
 
