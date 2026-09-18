@@ -200,11 +200,7 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
             )
             // Publish progressively so the overlay fills in as candidates finish.
             _uiState.update { it.copy(subtitleTimingMatches = it.subtitleTimingMatches + results) }
-            // Only a candidate that needs no offset ends the search early; an offset match is
-            // kept as fallback while the rest are checked for one that fits as-is.
-            if (result.confidence == SubtitleTimingMatcher.Confidence.HIGH && result.score >= early &&
-                abs(result.offsetMs) < MIN_AUTO_OFFSET_MS
-            ) {
+            if (result.confidence == SubtitleTimingMatcher.Confidence.HIGH && result.score >= early) {
                 Log.i(MATCH_TAG, "early stop: ${candidate.addonName}/${candidate.lang} id=${candidate.id} at ${result.scorePercent}% (${candidates.size - received} skipped)")
                 producers.forEach { it.cancel() }
                 break
@@ -305,14 +301,14 @@ private fun PlayerRuntimeController.applySubtitleTimingDecision(
                 .filter { PlayerSubtitleUtils.matchesLanguageCode(it.lang, target) }
                 .mapNotNull { c -> results[addonSubtitleKey(c)]?.let { r -> c to r } }
                 .filter { (c, r) -> r.confidence == SubtitleTimingMatcher.Confidence.HIGH && canAttachAddonSubtitleViaSidecar(c) }
-                // Prefer a subtitle that fits the file as-is; fall back to one that needs an offset.
-                .sortedWith(compareBy<Pair<Subtitle, SubtitleTimingMatcher.Result>> { (_, r) -> r.needsOffset }.thenByDescending { (_, r) -> r.score })
+                // Score first; a no-offset match only breaks ties (the delay is saved per video,
+                // so a subtitle that fits as-is leaves nothing behind if the user switches later).
+                .sortedWith(compareByDescending<Pair<Subtitle, SubtitleTimingMatcher.Result>> { (_, r) -> r.score }.thenBy { (_, r) -> r.needsOffset })
                 .firstOrNull()
         }
         .firstOrNull()
     val verdict: Pair<Subtitle, SubtitleTimingMatcher.Result>? = when {
-        current != null && currentResult?.confidence == SubtitleTimingMatcher.Confidence.HIGH &&
-            (!currentResult.needsOffset || best == null || best.second.needsOffset) -> current to currentResult
+        current != null && currentResult?.confidence == SubtitleTimingMatcher.Confidence.HIGH -> current to currentResult
         best != null -> best
         // No HIGH anywhere: a consistent MEDIUM on the current pick still carries an offset.
         current != null && currentResult?.confidence == SubtitleTimingMatcher.Confidence.MEDIUM -> current to currentResult

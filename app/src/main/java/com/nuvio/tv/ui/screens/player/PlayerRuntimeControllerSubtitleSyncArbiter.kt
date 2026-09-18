@@ -79,10 +79,10 @@ private fun PlayerRuntimeController.decideSubtitleSync(reason: String) {
         // Same subtitle: keep the extractor offset (120 ms cue tolerance) over the Cues-index one (1.8 s).
         addonSubtitleKey(auto.subtitle) == addonSubtitleKey(timing.subtitle) ->
             if (timing.score >= 0.92) timing.copy(score = maxOf(auto.score, timing.score)) else auto
-        // A subtitle that fits as-is beats one that needs shifting, unless it is clearly weaker.
-        !timing.needsOffset && auto.needsOffset && timing.score >= auto.score - 0.10 -> timing
-        !auto.needsOffset && timing.needsOffset && auto.score >= timing.score - 0.10 -> auto
         timing.score > auto.score -> timing
+        auto.score > timing.score -> auto
+        // Tie: the one that fits as-is leaves no per-video delay behind.
+        !timing.needsOffset && auto.needsOffset -> timing
         else -> auto
     }
 
