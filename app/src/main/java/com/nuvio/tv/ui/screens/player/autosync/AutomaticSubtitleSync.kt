@@ -1859,6 +1859,7 @@ internal data class ReferenceTrack(
     val label: String? = null,
     val selectionFlags: Int = 0,
     val roleFlags: Int = 0,
+    val codecId: String = "",
 )
 
 internal data class IndexedEmbeddedTimeline(

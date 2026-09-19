@@ -315,6 +315,7 @@ internal object EmbeddedSubtitleTimelineLoader {
                     ?: track.codecId.takeIf { it.isNotBlank() },
                 selectionFlags = selectionFlags,
                 roleFlags = roleFlags,
+                codecId = track.codecId,
             )
         }
 

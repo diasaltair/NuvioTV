@@ -159,6 +159,8 @@ private suspend fun PlayerRuntimeController.indexedReferenceTrack(): EmbeddedSub
         .filter { it.cues.size >= MIN_REFERENCE_CUES }
         .sortedWith(
             compareBy<ReferenceTrack> { (it.selectionFlags and C.SELECTION_FLAG_FORCED) != 0 }
+                // Text tracks first: PGS indexes carry "clear" points too and are coarser.
+                .thenBy { !it.codecId.startsWith("S_TEXT") }
                 .thenByDescending { it.cues.size }
         )
         .firstOrNull() ?: return null
@@ -167,7 +169,8 @@ private suspend fun PlayerRuntimeController.indexedReferenceTrack(): EmbeddedSub
         trackNumber = number,
         language = track.language,
         forced = (track.selectionFlags and C.SELECTION_FLAG_FORCED) != 0,
-        startTimesMs = track.cues.map { it.startTimeMs }
+        startTimesMs = track.cues.map { it.startTimeMs },
+        codecId = EmbeddedSubtitleTimingCollector.CODEC_CUES_INDEX + ":" + track.codecId
     )
 }
 

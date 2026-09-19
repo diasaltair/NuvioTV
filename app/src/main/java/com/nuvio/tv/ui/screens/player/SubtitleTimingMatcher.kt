@@ -36,9 +36,11 @@ object SubtitleTimingMatcher {
     const val NO_OFFSET_TOLERANCE_MS = 150L
 
     data class Options(
-        val startToleranceMs: Long = 120,
-        val looseToleranceMs: Long = 400,
-        val bitmapToleranceMs: Long = 200,
+        // Subtitles from different authors (BD PGS vs fansub SRT) disagree by a few hundred ms
+        // per cue even when both are in sync with the picture, so tolerances are generous.
+        val startToleranceMs: Long = 500,
+        val looseToleranceMs: Long = 1_200,
+        val bitmapToleranceMs: Long = 600,
         val maxOffsetMs: Long = 180_000,
         val histogramBinMs: Long = 100,
         val minComparedCues: Int = 20,
