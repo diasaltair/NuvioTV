@@ -290,6 +290,7 @@ data class SubtitleSyncComparison(
     val timingLabel: String? = null,
     val timingOffsetMs: Long? = null,
     val timingScore: Float? = null,
+    val timingScale: Double = 1.0,
     val logged: Boolean = false
 )
 

@@ -304,6 +304,16 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
         }
     }
 
+    /** Multiplies subtitle timestamps (mpv `sub-speed`), used for frame-rate drift correction. */
+    fun setSubtitleTimeScale(scale: Double) {
+        if (!initialized) return
+        runCatching {
+            mpv.setPropertyDouble("sub-speed", scale)
+        }.onFailure {
+            Log.w(TAG, "Failed to set subtitle time scale on mpv: ${it.message}")
+        }
+    }
+
     fun setAudioDelayMs(delayMs: Int) {
         if (!initialized) return
         runCatching {

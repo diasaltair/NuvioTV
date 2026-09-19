@@ -26,14 +26,28 @@ object SubtitleTimingMatcher {
         val comparedCues: Int,
         val excludedCreditCues: Int,
         val referenceTrackNumber: Int,
-        val referenceCueCount: Int
+        val referenceCueCount: Int,
+        /** Multiply external cue times by this before adding [offsetMs] (1.0 = no drift). */
+        val scale: Double = 1.0
     ) {
+        val hasDrift: Boolean get() = abs(scale - 1.0) > DRIFT_EPSILON
         val scorePercent: Int get() = (score * 100f).toInt()
         /** True when the subtitle only lines up after shifting it by [offsetMs]. */
         val needsOffset: Boolean get() = abs(offsetMs) >= NO_OFFSET_TOLERANCE_MS
     }
 
     const val NO_OFFSET_TOLERANCE_MS = 150L
+    const val DRIFT_EPSILON = 0.0005
+
+    /** Frame-rate conversions seen in the wild; the matcher tries each when the plain fit is weak. */
+    private val DRIFT_SCALES = doubleArrayOf(
+        25.0 / 23.976, 23.976 / 25.0,
+        24.0 / 25.0, 25.0 / 24.0,
+        24.0 / 23.976, 23.976 / 24.0,
+        30.0 / 29.97, 29.97 / 30.0
+    )
+    private const val DRIFT_MIN_IMPROVEMENT = 0.05f
+    private const val DRIFT_MIN_SPAN_MS = 20L * 60L * 1000L
 
     data class Options(
         // Subtitles from different authors (BD PGS vs fansub SRT) disagree by a few hundred ms
@@ -90,11 +104,35 @@ object SubtitleTimingMatcher {
         ).first()
     }
 
+    /**
+     * Scores at scale 1.0 and, when that fit is not HIGH and the file is long enough for
+     * drift to show, retries with common frame-rate conversion factors; keeps the best.
+     */
     fun score(
         external: List<SubtitleSyncCue>,
         reference: EmbeddedSubtitleTimingCollector.TrackTiming,
         options: Options = Options()
     ): Result {
+        val plain = scoreAtScale(external, reference, options, 1.0)
+        if (plain.confidence == Confidence.HIGH || plain.confidence == Confidence.INSUFFICIENT) return plain
+        if (reference.observedMaxMs - reference.observedMinMs < DRIFT_MIN_SPAN_MS) return plain
+        var best = plain
+        for (scale in DRIFT_SCALES) {
+            val r = scoreAtScale(external, reference, options, scale)
+            if (r.score > best.score + (if (best === plain) DRIFT_MIN_IMPROVEMENT else 0f)) best = r
+        }
+        return best
+    }
+
+    private fun scoreAtScale(
+        externalRaw: List<SubtitleSyncCue>,
+        reference: EmbeddedSubtitleTimingCollector.TrackTiming,
+        options: Options,
+        scale: Double
+    ): Result {
+        val external = if (scale == 1.0) externalRaw else externalRaw.map {
+            it.copy(startTimeMs = (it.startTimeMs * scale).toLong(), endTimeMs = (it.endTimeMs * scale).toLong())
+        }
         if (external.isEmpty() || reference.cueCount == 0) return insufficient
         val embStarts = reference.startsMs
         val embEnds = reference.endsMs
@@ -175,7 +213,8 @@ object SubtitleTimingMatcher {
             comparedCues = compared,
             excludedCreditCues = credits,
             referenceTrackNumber = reference.trackNumber,
-            referenceCueCount = reference.cueCount
+            referenceCueCount = reference.cueCount,
+            scale = scale
         )
     }
 

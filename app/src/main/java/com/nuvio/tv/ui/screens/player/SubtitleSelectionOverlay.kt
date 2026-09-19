@@ -1948,7 +1948,8 @@ private fun buildSubtitleOptionRailItems(
         val scoreSuffix = when (match?.confidence) {
             SubtitleTimingMatcher.Confidence.HIGH,
             SubtitleTimingMatcher.Confidence.MEDIUM,
-            SubtitleTimingMatcher.Confidence.LOW -> " · ${match.scorePercent}% · " + formatOffsetSeconds(match.offsetMs)
+            SubtitleTimingMatcher.Confidence.LOW -> " · ${match.scorePercent}% · " + formatOffsetSeconds(match.offsetMs) +
+                (if (match.hasDrift) " ×%.4f".format(match.scale) else "")
             SubtitleTimingMatcher.Confidence.INSUFFICIENT -> " · ?"
             SubtitleTimingMatcher.Confidence.UNAVAILABLE -> " · ✕"
             null -> ""

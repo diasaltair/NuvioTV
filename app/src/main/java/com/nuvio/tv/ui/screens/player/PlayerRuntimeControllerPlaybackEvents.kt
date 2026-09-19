@@ -1314,6 +1314,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             }
         }
         is PlayerEvent.OnSelectSubtitleTrack -> {
+            applySubtitleTimeScale(1.0)
             logSwitchTrace(
                 stage = "event-select-subtitle-internal",
                 message = "index=${event.index}"
@@ -1365,6 +1366,9 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
                 stage = "event-select-subtitle-addon",
                 message = "addonId=${event.subtitle.id} addonLang=${event.subtitle.lang} addonName=${event.subtitle.addonName}"
             )
+            // A manual pick gets the drift factor the matcher measured for it, or none.
+            val picked = _uiState.value.subtitleTimingMatches[addonSubtitleKey(event.subtitle)]
+            applySubtitleTimeScale(picked?.takeIf { it.confidence != SubtitleTimingMatcher.Confidence.UNAVAILABLE }?.scale ?: 1.0)
             autoSubtitleSelected = true
             rememberAddonSubtitleSelection(event.subtitle)
             selectAddonSubtitle(event.subtitle)

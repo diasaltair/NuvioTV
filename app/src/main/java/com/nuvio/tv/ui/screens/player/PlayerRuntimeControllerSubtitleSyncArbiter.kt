@@ -71,12 +71,12 @@ private fun PlayerRuntimeController.decideSubtitleSync(reason: String) {
     if (c.decided) return
     subtitleSyncComparison = c.copy(decided = true)
 
-    data class Verdict(val method: String, val subtitle: Subtitle, val offsetMs: Int, val score: Double) {
+    data class Verdict(val method: String, val subtitle: Subtitle, val offsetMs: Int, val score: Double, val scale: Double = 1.0) {
         val needsOffset: Boolean get() = abs(offsetMs) >= SubtitleTimingMatcher.NO_OFFSET_TOLERANCE_MS
     }
 
     val auto = c.autoSyncSubtitle?.let { Verdict("autosync", it, c.autoSyncOffsetMs ?: 0, c.autoSyncScore ?: 0.0) }
-    val timing = c.timingSubtitle?.let { Verdict("timing", it, (c.timingOffsetMs ?: 0L).toInt(), (c.timingScore ?: 0f).toDouble()) }
+    val timing = c.timingSubtitle?.let { Verdict("timing", it, (c.timingOffsetMs ?: 0L).toInt(), (c.timingScore ?: 0f).toDouble(), c.timingScale) }
 
     val winner: Verdict? = when {
         auto == null && timing == null -> null
@@ -125,6 +125,7 @@ private fun PlayerRuntimeController.decideSubtitleSync(reason: String) {
         _uiState.update { it.copy(selectedAddonSubtitle = winner.subtitle, selectedSubtitleTrackIndex = -1) }
     }
     val offset = winner.offsetMs.coerceIn(SUBTITLE_DELAY_MIN_MS, SUBTITLE_DELAY_MAX_MS)
+    applySubtitleTimeScale(winner.scale)
     if (abs(offset) >= MIN_APPLY_OFFSET_MS || _uiState.value.subtitleDelayMs != 0) {
         setSubtitleDelayMs(offset, showOverlay = false)
     }
@@ -157,6 +158,19 @@ private fun PlayerRuntimeController.reviseSubtitleSyncDecision() {
         c.autoSyncSubtitle?.let { Late("autosync", it, c.autoSyncOffsetMs ?: 0, c.autoSyncScore ?: 0.0) }
     ).filter { it.method != c.winnerMethod || addonSubtitleKey(it.subtitle) != c.winnerKey || it.offsetMs != (_uiState.value.subtitleDelayMs) }
     val late = candidates.maxByOrNull { it.score } ?: return
+    // Drift fix: the timing matcher found the chosen subtitle only lines up with a rate change.
+    if (late.method == "timing" && abs(c.timingScale - 1.0) > SubtitleTimingMatcher.DRIFT_EPSILON &&
+        addonSubtitleKey(late.subtitle) == _uiState.value.selectedAddonSubtitle?.let(::addonSubtitleKey) &&
+        late.score >= 0.80 && abs(subtitleTimeScale - c.timingScale) > SubtitleTimingMatcher.DRIFT_EPSILON
+    ) {
+        val offset = late.offsetMs.coerceIn(SUBTITLE_DELAY_MIN_MS, SUBTITLE_DELAY_MAX_MS)
+        Log.i(ARBITER_TAG, "REVISION drift: scale ${"%.5f".format(c.timingScale)} offset=${offset}ms (timing %.3f)".format(late.score))
+        subtitleSyncComparison = c.copy(winnerKey = addonSubtitleKey(late.subtitle), winnerScore = maxOf(c.winnerScore, late.score), winnerMethod = "timing")
+        applySubtitleTimeScale(c.timingScale)
+        setSubtitleDelayMs(offset, showOverlay = false)
+        showArbiterToast("Sync (timing): drift fixed ×%.4f • %+.2fs".format(c.timingScale, offset / 1000.0), Toast.LENGTH_LONG)
+        return
+    }
     val minScore = if (late.method == "timing") 0.92 else 0.75
     if (late.score < minScore) {
         Log.i(ARBITER_TAG, "REVISION ignored: ${late.method} %.3f below threshold".format(late.score))
@@ -185,6 +199,7 @@ private fun PlayerRuntimeController.reviseSubtitleSyncDecision() {
             subtitleSyncComparison = c.copy(winnerKey = key, winnerScore = late.score, winnerMethod = late.method)
             autoSubtitleSelected = true
             subtitleTimingMatchApplied = true
+            applySubtitleTimeScale(if (late.method == "timing") c.timingScale else 1.0)
             selectAddonSubtitle(late.subtitle)
             _uiState.update { it.copy(selectedAddonSubtitle = late.subtitle, selectedSubtitleTrackIndex = -1) }
             if (abs(offset) >= MIN_APPLY_OFFSET_MS || currentDelay != 0) setSubtitleDelayMs(offset, showOverlay = false)
@@ -193,4 +208,15 @@ private fun PlayerRuntimeController.reviseSubtitleSyncDecision() {
         }
         else -> Log.i(ARBITER_TAG, "REVISION ignored: ${late.method} %.3f vs winner ${c.winnerMethod} %.3f".format(late.score, c.winnerScore))
     }
+}
+
+/** Applies a subtitle time-scale to whichever engine renders addon cues; 1.0 clears it. */
+internal fun PlayerRuntimeController.applySubtitleTimeScale(scale: Double) {
+    val clean = if (abs(scale - 1.0) > SubtitleTimingMatcher.DRIFT_EPSILON) scale else 1.0
+    if (subtitleTimeScale == clean) return
+    subtitleTimeScale = clean
+    Log.i(ARBITER_TAG, "subtitle time scale = ${"%.5f".format(clean)}")
+    if (isUsingMpvEngine()) mpvView?.setSubtitleTimeScale(clean)
+    lastSidecarCueSignature = null
+    refreshActiveSubtitleTrackAfterTimingChange()
 }

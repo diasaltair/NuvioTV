@@ -179,11 +179,13 @@ internal fun PlayerRuntimeController.renderSidecarCuesAtCurrentPosition() {
     val cues = sidecarTimedCues
     if (cues.isEmpty() || activeSidecarSubtitleKey == null) return
     val player = _exoPlayer ?: return
+    // Cue time t shows at video time t * scale + delay, so map video time back to cue time.
+    val scale = subtitleTimeScale
     val positionUs = (
-        player.currentPosition.coerceAtLeast(0L) * 1_000L +
+        (player.currentPosition.coerceAtLeast(0L) * 1_000L +
             audioDelayUs.get() -
-            subtitleDelayUs.get()
-        ).coerceAtLeast(0L)
+            subtitleDelayUs.get()) / scale
+        ).toLong().coerceAtLeast(0L)
     val active = collectActiveSidecarCues(cues, positionUs)
     val stripSdh = currentPlayerSettingsForReport.subtitleStyle.stripSdh
     // Sign before sanitising, filtering and merging to skip that work while cues are

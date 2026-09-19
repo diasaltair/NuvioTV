@@ -370,6 +370,8 @@ class PlayerRuntimeController(
     internal var subtitleSyncComparison: SubtitleSyncComparison = SubtitleSyncComparison()
     internal var subtitleSyncArbiterJob: Job? = null
     internal var subtitleTimingRescoreJob: Job? = null
+    /** Time-scale applied to addon subtitle cues (frame-rate drift correction); 1.0 = none. */
+    @Volatile internal var subtitleTimeScale: Double = 1.0
     internal var subtitleTimingRescoreAttempts: Int = 0
     /** ExoPlayer sidecar path: external addon cues without setMediaSource (preserves buffer). */
     internal var sidecarSubtitleJob: Job? = null

@@ -65,6 +65,7 @@ internal fun PlayerRuntimeController.resetSubtitleTimingMatchState() {
     subtitleTimingMatchGeneration = -1
     subtitleTimingMatchApplied = false
     subtitleSyncComparison = SubtitleSyncComparison()
+    applySubtitleTimeScale(1.0)
     _uiState.update {
         it.copy(
             subtitleTimingMatches = emptyMap(),
@@ -239,7 +240,7 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
                 MATCH_TAG,
                 "candidate ${candidate.addonName}/${candidate.lang} id=${candidate.id}: ${result.confidence} " +
                     "${result.scorePercent}% offset=${result.offsetMs}ms matched=${result.matchedCues}/${result.comparedCues} " +
-                    "credits=${result.excludedCreditCues}"
+                    "credits=${result.excludedCreditCues}" + (if (result.hasDrift) " scale=${"%.5f".format(result.scale)}" else "")
             )
             // Publish progressively so the overlay fills in as candidates finish.
             _uiState.update { it.copy(subtitleTimingMatches = it.subtitleTimingMatches + results) }
@@ -376,7 +377,8 @@ internal fun PlayerRuntimeController.submitTimingVerdict(verdict: Pair<Subtitle,
         timingKey = verdict?.let { addonSubtitleKey(it.first) },
         timingLabel = verdict?.let { (s, _) -> "${s.addonName}/${s.lang}#${s.id}" },
         timingOffsetMs = verdict?.second?.offsetMs,
-        timingScore = verdict?.second?.score
+        timingScore = verdict?.second?.score,
+        timingScale = verdict?.second?.scale ?: 1.0
     )
     logSubtitleSyncComparison()
     scheduleSubtitleSyncArbitration()
