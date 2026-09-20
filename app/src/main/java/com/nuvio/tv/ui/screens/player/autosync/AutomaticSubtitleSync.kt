@@ -9,6 +9,7 @@ import com.nuvio.tv.ui.screens.player.SUBTITLE_DELAY_MAX_MS
 import com.nuvio.tv.ui.screens.player.SUBTITLE_DELAY_MIN_MS
 import com.nuvio.tv.ui.screens.player.SubtitleSyncCue
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -194,11 +195,15 @@ internal object AutomaticSubtitleSync {
                 )
             }
             val downloadSemaphore = Semaphore(MAX_PARALLEL_SUBTITLE_DOWNLOADS)
+            // Only the selected subtitle downloads up front. The rest stay lazy: they are
+            // started only when the selected one does not fit the reference, so a subtitle
+            // that is already in sync costs one addon request instead of one per candidate.
             val pendingLoads = knownCandidates
                 .mapIndexed { index, candidate ->
+                    val isSelected = candidate.url == selectedSubtitle.url
                     PendingCandidateLoad(
                         index = index,
-                        deferred = async {
+                        deferred = async(start = if (isSelected) CoroutineStart.DEFAULT else CoroutineStart.LAZY) {
                             loadSubtitleCandidate(
                                 candidate = candidate,
                                 downloadSemaphore = downloadSemaphore,
@@ -420,6 +425,40 @@ internal object AutomaticSubtitleSync {
                         },
                     )
                 }
+            }
+
+            // Selected subtitle first, alone: accepted against any reference means it is
+            // usable as-is or with an offset, and the other candidates are never fetched.
+            val selectedLoad = pendingLoads.firstOrNull { load ->
+                knownCandidates[load.index].url == selectedSubtitle.url
+            }
+            if (selectedLoad != null) {
+                pendingLoads.remove(selectedLoad)
+                val parsed = selectedLoad.deferred.await()
+                registerParsedCandidate(selectedLoad.index, parsed)
+                val state = queuedMatchStates.singleOrNull()
+                if (state != null) {
+                    queuedMatchStates.clear()
+                    val summary = withContext(Dispatchers.Default) {
+                        matchCandidateAgainstReferences(state.group.members.first(), state.rankedReferences)
+                    }
+                    state.summary = summary
+                    groupResults += CandidateTimingGroupResult(state.group, summary)
+                    state.group.members.forEachIndexed { memberIndex, member ->
+                        addMemberResult(member, summary, reusedTiming = memberIndex > 0)
+                    }
+                    if (summary.bestAccepted != null) {
+                        earlyStopped = true
+                        AutoSyncDebugLog.info {
+                            "EARLY STOP selected subtitle accepted; skipped downloads=${pendingLoads.size}"
+                        }
+                        pendingLoads.forEach { it.deferred.cancel() }
+                        pendingLoads.clear()
+                    }
+                }
+            }
+            if (!earlyStopped) {
+                pendingLoads.forEach { it.deferred.start() }
             }
 
             pendingLoads

@@ -210,14 +210,45 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
             "candidates=${candidates.size}"
     )
 
+    val results = HashMap<String, SubtitleTimingMatcher.Result>()
+
+    // The subtitle already on screen is scored alone first. When it fits the reference
+    // (HIGH or MEDIUM, offset or not) the other candidates are never downloaded: each
+    // download is one addon request, and OpenSubtitles rate-limits a burst of 20+.
+    val selected = _uiState.value.selectedAddonSubtitle
+        ?.takeIf { s -> candidates.any { addonSubtitleKey(it) == addonSubtitleKey(s) } }
+    if (selected != null) {
+        val key = addonSubtitleKey(selected)
+        val cues = subtitleTimingCueCache[key] ?: downloadAndParse(selected)?.also { subtitleTimingCueCache[key] = it }
+        val result = if (cues == null) {
+            SubtitleTimingMatcher.unavailable(reference.trackNumber)
+        } else {
+            withContext(Dispatchers.Default) { SubtitleTimingMatcher.score(cues, reference) }
+        }
+        results[key] = result
+        Log.i(
+            MATCH_TAG,
+            "selected ${selected.addonName}/${selected.lang} id=${selected.id}: ${result.confidence} " +
+                "${result.scorePercent}% offset=${result.offsetMs}ms matched=${result.matchedCues}/${result.comparedCues}"
+        )
+        _uiState.update { it.copy(subtitleTimingMatches = it.subtitleTimingMatches + results) }
+        if (result.confidence == SubtitleTimingMatcher.Confidence.HIGH ||
+            result.confidence == SubtitleTimingMatcher.Confidence.MEDIUM
+        ) {
+            Log.i(MATCH_TAG, "selected subtitle fits; skipping ${candidates.size - 1} other candidates")
+            subtitleTimingMatchGeneration = embeddedSubtitleTimings.generation()
+            applySubtitleTimingDecision(candidates, results, targets)
+            return
+        }
+    }
+
     // Pipeline: PARALLEL_DOWNLOADS candidates in flight, each scored the moment its body
     // lands; stop everything once one candidate is clearly in sync.
     val semaphore = Semaphore(PARALLEL_DOWNLOADS)
-    val results = HashMap<String, SubtitleTimingMatcher.Result>()
     val early = SubtitleTimingMatcher.Options().highThreshold + EARLY_STOP_MARGIN
     coroutineScope {
         val channel = Channel<Pair<Subtitle, SubtitleTimingMatcher.Result>>(Channel.UNLIMITED)
-        val producers = candidates.map { candidate ->
+        val producers = candidates.filter { addonSubtitleKey(it) !in results }.map { candidate ->
             launch {
                 val key = addonSubtitleKey(candidate)
                 val cues = subtitleTimingCueCache[key] ?: semaphore.withPermit { downloadAndParse(candidate) }
@@ -232,7 +263,7 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
         }
         var received = 0
         var earlyApplied = false
-        while (received < candidates.size) {
+        while (received < producers.size) {
             val (candidate, result) = channel.receive()
             received++
             results[addonSubtitleKey(candidate)] = result
@@ -247,7 +278,7 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
             // A clear match is handed to the arbiter right away; scoring continues in the
             // background so every entry in the list gets its score and offset.
             if (!earlyApplied && result.confidence == SubtitleTimingMatcher.Confidence.HIGH && result.score >= early) {
-                Log.i(MATCH_TAG, "early verdict: ${candidate.addonName}/${candidate.lang} id=${candidate.id} at ${result.scorePercent}% offset=${result.offsetMs}ms (${candidates.size - received} still scoring)")
+                Log.i(MATCH_TAG, "early verdict: ${candidate.addonName}/${candidate.lang} id=${candidate.id} at ${result.scorePercent}% offset=${result.offsetMs}ms (${producers.size - received} still scoring)")
                 earlyApplied = true
                 applySubtitleTimingDecision(candidates, HashMap(results), targets)
             }
