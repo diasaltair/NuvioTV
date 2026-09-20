@@ -233,7 +233,7 @@ private suspend fun PlayerRuntimeController.runSubtitleTimingMatch() {
         return
     }
 
-    var best = selected
+    var best: Subtitle = selected
     var bestResult = selectedResult
     if (bestResult.score >= ACCEPT_SCORE) {
         applySubtitleSyncPick(best, bestResult, switching = false)
