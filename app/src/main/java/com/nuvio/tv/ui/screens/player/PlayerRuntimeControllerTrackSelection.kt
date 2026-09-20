@@ -222,6 +222,7 @@ internal fun PlayerRuntimeController.selectSubtitleTrack(trackIndex: Int) {
 
 internal fun PlayerRuntimeController.rememberInternalSubtitleSelection(trackIndex: Int) {
     val selectedTrack = _uiState.value.subtitleTracks.getOrNull(trackIndex) ?: return
+    clearSyncAppliedSubtitleDelay(reason = "user selected built-in track")
     logSwitchTrace(
         stage = "user-remember-subtitle-internal",
         message = "trackIndex=$trackIndex lang=${selectedTrack.language} name=${selectedTrack.name} " +
@@ -359,6 +360,7 @@ internal fun PlayerRuntimeController.refreshActiveSubtitleTrackAfterTimingChange
 }
 
 internal fun PlayerRuntimeController.rememberSubtitleDisabled() {
+    clearSyncAppliedSubtitleDelay(reason = "user disabled subtitles")
     logSwitchTrace(
         stage = "user-remember-subtitle-disabled",
         message = "selectedSubtitleIndex=${_uiState.value.selectedSubtitleTrackIndex} addonSelected=${_uiState.value.selectedAddonSubtitle != null}"

@@ -42,10 +42,9 @@ internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
     val sourceUrlAtStart = currentStreamUrl
     val sourceHeadersAtStart = currentHeaders.toMap()
     val selectedKey = addonSubtitleKey(selectedSubtitle)
-    // On-demand translations (SubMaker "translate_…") download as stubs; keep them out of the pool.
-    val candidatesAtStart = (_uiState.value.addonSubtitles + selectedSubtitle)
-        .distinctBy(::addonSubtitleKey)
-        .filterNot { it != selectedSubtitle && isOnDemandTranslationSubtitle(it) }
+    // AutoSync only aligns the selected subtitle (one addon request). Looking at other
+    // entries is the timing matcher's job, one at a time, after this offset is known.
+    val candidatesAtStart = listOf(selectedSubtitle)
 
     automaticSubtitleSyncJob = scope.launch {
         AutoSyncDebugLog.setEnabled(AutoSyncPreferences.isDebugLogsEnabled(context))
@@ -140,5 +139,7 @@ private fun PlayerRuntimeController.recordAutoSyncVerdict(subtitle: Subtitle?, c
     )
     _uiState.update { it.copy(autoSyncPickKey = key, autoSyncPickOffsetMs = correctionMs) }
     logSubtitleSyncComparison()
-    scheduleSubtitleSyncArbitration()
+    // On ExoPlayer the timing matcher consumes this offset and applies the decision itself;
+    // only when it cannot run (MPV) does the arbiter apply the AutoSync verdict alone.
+    if (!timingExpected()) scheduleSubtitleSyncArbitration()
 }

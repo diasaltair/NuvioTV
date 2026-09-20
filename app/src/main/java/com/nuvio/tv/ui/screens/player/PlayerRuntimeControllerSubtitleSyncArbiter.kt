@@ -33,7 +33,7 @@ private fun PlayerRuntimeController.autoSyncExpected(): Boolean =
     AutoSyncPreferences.isEnabled(context) &&
         (currentStreamUrl.startsWith("http://", true) || currentStreamUrl.startsWith("https://", true))
 
-private fun PlayerRuntimeController.timingExpected(): Boolean =
+internal fun PlayerRuntimeController.timingExpected(): Boolean =
     currentPlayerSettingsForReport.subtitleStyle.autoMatchEmbeddedTiming && !isUsingMpvEngine()
 
 /**

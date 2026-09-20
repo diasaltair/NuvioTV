@@ -1709,6 +1709,7 @@ internal fun PlayerRuntimeController.tryAutoSelectPreferredSubtitleFromAvailable
             Log.d(PlayerRuntimeController.TAG, "AUTO_SUB pick internal index=$internalIndex lang=${state.subtitleTracks[internalIndex].language}")
             selectSubtitleTrack(internalIndex)
             _uiState.update { it.copy(selectedSubtitleTrackIndex = internalIndex, selectedAddonSubtitle = null) }
+            clearSyncAppliedSubtitleDelay(reason = "auto-selected built-in track")
         } else {
             Log.d(PlayerRuntimeController.TAG, "AUTO_SUB stop: preferred internal already selected")
         }

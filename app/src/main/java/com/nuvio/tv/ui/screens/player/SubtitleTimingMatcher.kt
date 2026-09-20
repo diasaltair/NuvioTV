@@ -111,9 +111,12 @@ object SubtitleTimingMatcher {
     fun score(
         external: List<SubtitleSyncCue>,
         reference: EmbeddedSubtitleTimingCollector.TrackTiming,
-        options: Options = Options()
+        options: Options = Options(),
+        /** Score at this offset instead of estimating one (no drift retry either). */
+        fixedOffsetMs: Long? = null
     ): Result {
-        val plain = scoreAtScale(external, reference, options, 1.0)
+        val plain = scoreAtScale(external, reference, options, 1.0, fixedOffsetMs)
+        if (fixedOffsetMs != null) return plain
         if (plain.confidence == Confidence.HIGH || plain.confidence == Confidence.INSUFFICIENT) return plain
         if (reference.observedMaxMs - reference.observedMinMs < DRIFT_MIN_SPAN_MS) return plain
         var best = plain
@@ -128,7 +131,8 @@ object SubtitleTimingMatcher {
         externalRaw: List<SubtitleSyncCue>,
         reference: EmbeddedSubtitleTimingCollector.TrackTiming,
         options: Options,
-        scale: Double
+        scale: Double,
+        fixedOffsetMs: Long? = null
     ): Result {
         val external = if (scale == 1.0) externalRaw else externalRaw.map {
             it.copy(startTimeMs = (it.startTimeMs * scale).toLong(), endTimeMs = (it.endTimeMs * scale).toLong())
@@ -150,7 +154,7 @@ object SubtitleTimingMatcher {
             .toList()
         if (ext.size < minCompared) return insufficient.copy(referenceTrackNumber = reference.trackNumber, referenceCueCount = reference.cueCount)
 
-        val offsetMs = estimateOffset(ext, embStarts, options) ?: 0L
+        val offsetMs = fixedOffsetMs ?: (estimateOffset(ext, embStarts, options) ?: 0L)
 
         // With the offset known, only cues that land inside the observed embedded range can be
         // judged; the rest of the file has simply not been read yet.
