@@ -807,6 +807,10 @@
     <string name="audio_enable_downmix_subtitle">Uses the FFmpeg downmix path. Requires Prefer app decoders (FFmpeg). When disabled, audio follows the previous Android/device path.</string>
     <string name="audio_tunneled">Tunneled Playback</string>
     <string name="audio_tunneled_sub">Hardware-level audio/video sync. May improve playback on some Android TV devices</string>
+    <string name="audio_iec_tunnel_enabled">Tunneled DTS-HD passthrough (experimental)</string>
+    <string name="audio_iec_tunnel_enabled_sub">Keep DTS-HD / DTS:X tunneled on an app-framed IEC61937 track. Off: DTS-HD plays non-tunneled (verified audible). Some devices accept the tunneled track and play silence or noise; turn on only if it sounds right.</string>
+    <string name="audio_iec_tunnel_surround">Tunneled DTS-HD: 7.1 HBR track</string>
+    <string name="audio_iec_tunnel_surround_sub">Send tunneled DTS-HD on a 7.1 IEC61937 track (full DTS-HD MA bandwidth). Off: stereo-shaped track, and streams that do not fit continue non-tunneled. Some devices accept the 7.1 tunnel and play white noise; turn on only if it sounds right.</string>
     <string name="audio_force_optical_passthrough">Force AC-3 Transcoding (Optical/SPDIF)</string>
     <string name="audio_force_optical_passthrough_sub">Transcodes multichannel formats (TrueHD, DTS, AAC, etc.) to Dolby Digital 5.1 in real-time for Optical/SPDIF connections.</string>
     <!-- DV7 Handling Mode -->

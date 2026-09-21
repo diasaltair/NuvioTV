@@ -2,7 +2,7 @@ name: IEC passthrough test build
 
 on:
   push:
-    branches: [dev, 'feat/**']
+    branches: [dev, 'feat/**', audio-iec-tunnel]
   workflow_dispatch:
 
 concurrency:

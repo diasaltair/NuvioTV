@@ -300,6 +300,8 @@ fun PlaybackSettingsContent(
                 },
                 onSetTunnelingEnabled = { enabled -> coroutineScope.launch { viewModel.setTunnelingEnabled(enabled) } },
                 onSetForceOpticalPassthrough = { enabled -> coroutineScope.launch { viewModel.setForceOpticalPassthrough(enabled) } },
+                onSetIecTunnelSurround = { enabled -> coroutineScope.launch { viewModel.setIecTunnelSurround(enabled) } },
+                onSetIecTunnelEnabled = { enabled -> coroutineScope.launch { viewModel.setIecTunnelEnabled(enabled) } },
                 onShowDv7HandlingModeDialog = { openDialog { showDv7HandlingModeDialog = true } },
                 onSetDv5ToDv81Enabled = { enabled ->
                     coroutineScope.launch { viewModel.setDv5ToDv81Enabled(enabled) }

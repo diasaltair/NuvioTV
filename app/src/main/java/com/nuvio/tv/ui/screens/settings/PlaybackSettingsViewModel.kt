@@ -122,6 +122,14 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setTunnelingEnabled(enabled)
     }
 
+    suspend fun setIecTunnelEnabled(enabled: Boolean) {
+        playerSettingsDataStore.setIecTunnelEnabled(enabled)
+    }
+
+    suspend fun setIecTunnelSurround(enabled: Boolean) {
+        playerSettingsDataStore.setIecTunnelSurround(enabled)
+    }
+
     suspend fun setForceOpticalPassthrough(enabled: Boolean) {
         playerSettingsDataStore.setForceOpticalPassthrough(enabled)
     }
