@@ -4,16 +4,22 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import androidx.media3.common.C
 import com.nuvio.tv.domain.model.Subtitle
+import com.nuvio.tv.ui.screens.player.autosync.AutoSyncCandidateScope
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncDebugLog
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncPreferences
+import com.nuvio.tv.ui.screens.player.autosync.AutoSyncSubtitleCandidate
 import com.nuvio.tv.ui.screens.player.autosync.AutomaticSubtitleSync
+import com.nuvio.tv.ui.screens.player.autosync.applyAutoSyncSidecarTimeline
+import com.nuvio.tv.ui.screens.player.autosync.replaceAutoSyncSidecarSubtitle
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** Thin bridge between the isolated AutoSync feature and NuvioTV's existing subtitle/player APIs. */
+/** Thin TV adapter around the feature-owned Mobile AutoSync V2 pipeline. */
 private val autoSyncToastHandler = Handler(Looper.getMainLooper())
 
 private fun PlayerRuntimeController.showAutoSyncToast(
@@ -24,9 +30,9 @@ private fun PlayerRuntimeController.showAutoSyncToast(
         Toast.makeText(context, message, duration).show()
     }
 }
-
 internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
     selectedSubtitle: Subtitle,
+    candidateScope: AutoSyncCandidateScope = AutoSyncCandidateScope.STARTUP_SEARCH,
 ) {
     AutoSyncPreferences.ensureLoaded(context)
     if (!AutoSyncPreferences.isEnabled(context)) return
@@ -36,110 +42,232 @@ internal fun PlayerRuntimeController.maybeRunAutomaticSubtitleSync(
     ) {
         return
     }
+    if (
+        candidateScope == AutoSyncCandidateScope.STARTUP_SEARCH &&
+        !AutoSyncPreferences.claimStartupRun(hashCode(), currentStreamUrl)
+    ) {
+        return
+    }
+
+    val player = _exoPlayer ?: return
+    val useLibass = requestedUseLibassByUser || activePlayerUsesLibass
+    if (!canAttachAddonSubtitleViaSidecar(selectedSubtitle)) return
 
     automaticSubtitleSyncJob?.cancel()
 
     val sourceUrlAtStart = currentStreamUrl
     val sourceHeadersAtStart = currentHeaders.toMap()
-    val selectedKey = addonSubtitleKey(selectedSubtitle)
-    // AutoSync only aligns the selected subtitle (one addon request). Looking at other
-    // entries is the timing matcher's job, one at a time, after this offset is known.
-    val candidatesAtStart = listOf(selectedSubtitle)
+    val selectedUrl = selectedSubtitle.url
+    val candidatesAtStart = (_uiState.value.addonSubtitles + selectedSubtitle)
+        .distinctBy { it.url }
+    val candidateByUrl = candidatesAtStart.associateBy { it.url }
+
+    val started = startSidecarAddonSubtitle(
+        subtitle = selectedSubtitle,
+        rawBodyLoader = {
+            AutomaticSubtitleSync.downloadSubtitleBody(
+                url = selectedUrl,
+                headers = selectedSubtitle.headers.orEmpty(),
+            )
+        },
+    )
+    if (!started) return
+
+    val selectedBodyDeferred = sidecarRawBodyDeferredFor(selectedUrl)
+    player.trackSelectionParameters = player.trackSelectionParameters
+        .buildUpon()
+        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        .build()
 
     automaticSubtitleSyncJob = scope.launch {
-        AutoSyncDebugLog.setEnabled(AutoSyncPreferences.isDebugLogsEnabled(context))
         try {
             Log.d(
                 PlayerRuntimeController.TAG,
-                "AUTO_SYNC_TV start lang=${selectedSubtitle.lang} candidates=${candidatesAtStart.size}",
+                "AUTO_SYNC_V2 start scope=${candidateScope.name} " +
+                    "lang=${selectedSubtitle.lang} candidates=${candidatesAtStart.size}",
             )
-            showAutoSyncToast("Auto Sync: checking embedded subtitles…")
+            showAutoSyncToast("Auto Sync V2: checking embedded subtitles…")
 
-            val recommendation = AutomaticSubtitleSync.findBestSubtitleRecommendation(
-                sourceUrl = sourceUrlAtStart,
+            var noSubtitleTracks = false
+            val resolved = AutomaticSubtitleSync.findTimelineRetime(
+                sourceKey = sourceUrlAtStart,
                 sourceHeaders = sourceHeadersAtStart,
-                selectedSubtitle = selectedSubtitle,
-                candidates = candidatesAtStart,
-                subtitleBodyLoader = { subtitle ->
-                    downloadSubtitleBody(
-                        subtitle.url,
-                        subtitle.lang,
-                        subtitle.headers,
-                    )
+                selectedSubtitleUrl = selectedUrl,
+                selectedSubtitleHeaders = selectedSubtitle.headers.orEmpty(),
+                selectedSubtitleBodyDeferred = selectedBodyDeferred,
+                preferredLanguage = selectedSubtitle.lang,
+                alternativeSubtitles = if (candidateScope == AutoSyncCandidateScope.STARTUP_SEARCH) {
+                    candidatesAtStart.map { subtitle ->
+                        AutoSyncSubtitleCandidate(
+                            url = subtitle.url,
+                            language = subtitle.lang,
+                            name = subtitle.addonName.ifBlank { subtitle.id },
+                        )
+                    }
+                } else {
+                    emptyList()
+                },
+                alternativeSubtitlesProvider = if (
+                    candidateScope == AutoSyncCandidateScope.STARTUP_SEARCH
+                ) {
+                    {
+                        _uiState.value.addonSubtitles.map { subtitle ->
+                            AutoSyncSubtitleCandidate(
+                                url = subtitle.url,
+                                language = subtitle.lang,
+                                name = subtitle.addonName.ifBlank { subtitle.id },
+                            )
+                        }
+                    }
+                } else {
+                    null
                 },
                 onReferenceReady = {
-                    showAutoSyncToast("Auto Sync: comparing same-language subtitles…")
+                    showAutoSyncToast("Auto Sync V2: comparing subtitles…")
                 },
-            ) ?: run {
-                Log.d(PlayerRuntimeController.TAG, "AUTO_SYNC_TV no reliable match")
-                recordAutoSyncVerdict(subtitle = null, correctionMs = null, score = null)
-                AutoSyncDebugLog.finishAndCopy(context, "no reliable match")
+                onNoSubtitleTracks = { noSubtitleTracks = true },
+            )
+
+            if (resolved == null) {
+                if (activeSidecarSubtitleKey == null) {
+                    startSidecarAddonSubtitle(selectedSubtitle)
+                }
+                AutoSyncDebugLog.finishAndCopy(
+                    context,
+                    "REJECT V2 - original subtitle timing kept",
+                )
                 showAutoSyncToast(
-                    "Auto Sync: couldn't find a reliable subtitle match",
+                    if (noSubtitleTracks) "No subtitles in tracks"
+                    else "Auto Sync V2: no reliable match",
                     Toast.LENGTH_LONG,
                 )
                 return@launch
             }
 
-            if (currentStreamUrl != sourceUrlAtStart) {
-                AutoSyncDebugLog.finishAndCopy(context, "discarded: source changed")
+            if (currentStreamUrl != sourceUrlAtStart) return@launch
+            val activeSubtitleUrl = _uiState.value.selectedAddonSubtitle?.url
+            if (activeSubtitleUrl != selectedUrl && activeSubtitleUrl != resolved.subtitleUrl) {
                 return@launch
             }
 
-            val activeAddon = _uiState.value.selectedAddonSubtitle
-            if (
-                activeAddon != null &&
-                addonSubtitleKey(activeAddon) != selectedKey &&
-                addonSubtitleKey(activeAddon) != addonSubtitleKey(recommendation.subtitle)
-            ) {
-                Log.d(PlayerRuntimeController.TAG, "AUTO_SYNC_TV discarded: subtitle changed")
-                AutoSyncDebugLog.finishAndCopy(context, "discarded: subtitle changed")
+            val chosenSubtitle = candidateByUrl[resolved.subtitleUrl]
+                ?: _uiState.value.addonSubtitles.firstOrNull { it.url == resolved.subtitleUrl }
+                ?: selectedSubtitle.takeIf { it.url == resolved.subtitleUrl }
+                ?: return@launch
+
+            val applied = when {
+                resolved.subtitleUrl == selectedUrl -> {
+                    applyAutoSyncSidecarTimeline(
+                        sidecar = this@maybeRunAutomaticSubtitleSync,
+                        url = selectedUrl,
+                        timeline = resolved.timeline,
+                    )
+                }
+                activeSidecarSubtitleKey == null &&
+                    startSidecarAddonSubtitle(
+                        subtitle = chosenSubtitle,
+                        rawBodyLoader = resolved.subtitleBody?.let { body ->
+                            suspend { body }
+                        },
+                    ) -> {
+                    applyAutoSyncSidecarTimeline(
+                        sidecar = this@maybeRunAutomaticSubtitleSync,
+                        url = resolved.subtitleUrl,
+                        timeline = resolved.timeline,
+                    )
+                }
+                else -> {
+                    replaceAutoSyncSidecarSubtitle(
+                        sidecar = this@maybeRunAutomaticSubtitleSync,
+                        expectedCurrentUrl = selectedUrl,
+                        url = resolved.subtitleUrl,
+                        headers = resolved.subtitleHeaders,
+                        rawBody = resolved.subtitleBody,
+                        useLibass = useLibass,
+                        timeline = resolved.timeline,
+                    )
+                }
+            }
+
+            if (!applied) {
+                if (activeSidecarSubtitleKey == null) {
+                    startSidecarAddonSubtitle(selectedSubtitle)
+                }
+                AutoSyncDebugLog.finishAndCopy(
+                    context,
+                    "REJECT V2 - sidecar changed or apply failed",
+                )
+                showAutoSyncToast("Auto Sync V2: could not apply sync", Toast.LENGTH_LONG)
                 return@launch
             }
 
-            val correctionMs = (
-                recommendation.correctionMs / SUBTITLE_DELAY_STEP_MS.toDouble()
-                ).roundToInt() * SUBTITLE_DELAY_STEP_MS
+            if (chosenSubtitle.url != selectedUrl) {
+                _uiState.update {
+                    it.copy(
+                        selectedAddonSubtitle = chosenSubtitle,
+                        selectedSubtitleTrackIndex = -1,
+                    )
+                }
+                rememberAddonSubtitleSelection(chosenSubtitle)
+            }
+            setSubtitleDelayMs(targetMs = 0, showOverlay = false)
 
-            Log.i(
-                PlayerRuntimeController.TAG,
-                "AUTO_SYNC_TV verdict addon=${recommendation.subtitle.id} " +
-                    "correction=${correctionMs}ms score=${"%.4f".format(recommendation.score)} " +
-                    "matches=${recommendation.matchedCues} reference=${recommendation.referenceKey}",
-            )
+            val timeline = resolved.timeline
+            AutoSyncDebugLog.info {
+                "AUTO APPLY V2 sidecar=true bufferPreserved=true " +
+                    "externalChanged=${chosenSubtitle.url != selectedUrl} " +
+                    "groups=${timeline.groups.size} alignment=${timeline.alignmentSource} " +
+                    "targetCoverage=${"%.4f".format(timeline.targetCoverage)} " +
+                    "referenceCoverage=${"%.4f".format(timeline.referenceCoverage)}"
+            }
             AutoSyncDebugLog.finishAndCopy(
                 context,
-                "verdict ${correctionMs}ms for ${recommendation.subtitle.id} (handed to arbiter)",
+                "APPLIED V2 sidecar timeline url=${chosenSubtitle.url}",
             )
-            // Selection and delay are applied by the arbiter once the extractor-timing
-            // matcher has also reported (or timed out); the higher-confidence verdict wins.
-            recordAutoSyncVerdict(recommendation.subtitle, correctionMs, recommendation.score)
+            showAutoSyncToast(
+                buildAutoSyncSuccessToast(
+                    replacedSubtitle = chosenSubtitle.url != selectedUrl,
+                    scale = timeline.alignmentScale,
+                    interceptMs = timeline.alignmentInterceptMs,
+                ),
+                Toast.LENGTH_LONG,
+            )
         } catch (cancel: CancellationException) {
-            AutoSyncDebugLog.finishAndCopy(context, "cancelled")
             throw cancel
         } catch (error: Throwable) {
-            Log.w(PlayerRuntimeController.TAG, "AUTO_SYNC_TV failed", error)
-            recordAutoSyncVerdict(subtitle = null, correctionMs = null, score = null)
-            AutoSyncDebugLog.error(error) { "bridge failed" }
+            Log.w(PlayerRuntimeController.TAG, "AUTO_SYNC_V2 failed", error)
+            AutoSyncDebugLog.error(error) { "TV bridge failed" }
             AutoSyncDebugLog.finishAndCopy(context, "failed")
-            showAutoSyncToast("Auto Sync: failed", Toast.LENGTH_LONG)
+            if (activeSidecarSubtitleKey == null) {
+                startSidecarAddonSubtitle(selectedSubtitle)
+            }
+            showAutoSyncToast("Auto Sync V2: failed", Toast.LENGTH_LONG)
         }
     }
 }
 
-private fun PlayerRuntimeController.recordAutoSyncVerdict(subtitle: Subtitle?, correctionMs: Int?, score: Double?) {
-    val key = subtitle?.let(::addonSubtitleKey)
-    subtitleSyncComparison = subtitleSyncComparison.copy(
-        autoSyncDone = true,
-        autoSyncSubtitle = subtitle,
-        autoSyncKey = key,
-        autoSyncLabel = subtitle?.let { "${it.addonName}/${it.lang}#${it.id}" },
-        autoSyncOffsetMs = correctionMs,
-        autoSyncScore = score
-    )
-    _uiState.update { it.copy(autoSyncPickKey = key, autoSyncPickOffsetMs = correctionMs) }
-    logSubtitleSyncComparison()
-    // On ExoPlayer the timing matcher consumes this offset and applies the decision itself;
-    // only when it cannot run (MPV) does the arbiter apply the AutoSync verdict alone.
-    if (!timingExpected()) scheduleSubtitleSyncArbitration()
+private fun buildAutoSyncSuccessToast(
+    replacedSubtitle: Boolean,
+    scale: Double,
+    interceptMs: Double,
+): String {
+    val prefix = if (replacedSubtitle) {
+        "Auto Sync V2: subtitle replaced"
+    } else {
+        "Auto Sync V2 succeeded"
+    }
+    return when {
+        abs(scale - 1.0) >= 0.0005 -> "$prefix • drift corrected"
+        abs(interceptMs) >= 50.0 -> "$prefix • ${formatAutoSyncOffset(interceptMs)}"
+        else -> "$prefix • already in sync"
+    }
+}
+
+private fun formatAutoSyncOffset(offsetMs: Double): String {
+    val roundedMs = offsetMs.roundToInt()
+    if (abs(roundedMs) < 1_000) {
+        return "${if (roundedMs > 0) "+" else ""}$roundedMs ms"
+    }
+    val tenths = (roundedMs / 100.0).roundToInt()
+    return "${if (tenths > 0) "+" else ""}${tenths / 10}.${abs(tenths % 10)} s"
 }
