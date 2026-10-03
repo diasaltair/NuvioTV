@@ -1,9 +1,11 @@
 package com.nuvio.tv.ui.screens.player
 
+import com.nuvio.tv.ui.reshaped.livetv.keepPlayerForLiveTvZap // Nuvio RS hook
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.media3.common.util.UnstableApi
+import com.nuvio.tv.core.connection.StreamConnectionFit
 import com.nuvio.tv.core.debrid.DirectDebridPlayableResult
 import com.nuvio.tv.core.network.NetworkResult
 import com.nuvio.tv.core.player.StreamAutoPlaySelector
@@ -220,6 +222,10 @@ internal fun PlayerRuntimeController.loadSourceStreams(forceRefresh: Boolean) {
             updateSourceChipsForFetchStart(type, vid, installedAddons)
         }
 
+        // Nuvio RS: one connection snapshot per load, taken once the duration is known.
+        var connectionFit: StreamConnectionFit? = null
+        var connectionFitCaptured = false
+
         streamRepository.getStreamsFromAllAddons(
             type = type,
             videoId = vid,
@@ -229,7 +235,14 @@ internal fun PlayerRuntimeController.loadSourceStreams(forceRefresh: Boolean) {
         ).collect { result ->
             when (result) {
                 is NetworkResult.Success -> {
-                    val addonStreams = StreamAutoPlaySelector.orderAddonStreams(result.data, installedAddonOrder)
+                    if (!connectionFitCaptured) {
+                        currentPlaybackDurationMs().takeIf { it > 0L }?.let { durationMs ->
+                            connectionFit = StreamConnectionFit.captureByDuration(context, durationMs)
+                            connectionFitCaptured = true
+                        }
+                    }
+                    val addonOrderedStreams = StreamAutoPlaySelector.orderAddonStreams(result.data, installedAddonOrder)
+                    val addonStreams = connectionFit?.applyToGroups(addonOrderedStreams) ?: addonOrderedStreams
                     val allStreams = addonStreams.flatMap { it.streams }
                     val availableAddons = addonStreams.map { it.addonName }
                     _uiState.update {
@@ -618,6 +631,12 @@ private fun PlayerRuntimeController.applySelectedStreamState(
         filename = currentFilename,
         responseHeaders = currentStreamResponseHeaders
     )
+    // A source switch mints a new debrid link for the same file, and without a file index a
+    // multi-file torrent could hand one file's bytes to another, so that case keys on the url.
+    val fileIdx = stream.getEffectiveFileIdx()
+    currentStreamCacheKey = stream.getEffectiveInfoHash()?.lowercase()?.takeIf { fileIdx != null }?.let { hash ->
+        "$hash:$fileIdx"
+    }
     parsingErrorProbeAttempted = false
     applyStreamMetadata(stream)
 }
@@ -771,6 +790,26 @@ internal fun PlayerRuntimeController.switchToSourceStream(
         return
     }
 
+    if (stream.youTubeIdToResolve() != null) {
+        debridResolveJob?.cancel()
+        _uiState.update { it.copy(isLoadingSourceStreams = true, sourceStreamsError = null) }
+        debridResolveJob = scope.launch {
+            val resolved = resolveYouTubeStream(stream)
+            debridResolveJob = null
+            if (resolved != null) {
+                switchToSourceStream(resolved)
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isLoadingSourceStreams = false,
+                        sourceStreamsError = context.getString(com.nuvio.tv.R.string.youtube_resolution_failed)
+                    )
+                }
+            }
+        }
+        return
+    }
+
     if (stream.isTorrent()) {
         debridResolveJob?.cancel()
         _uiState.update { it.copy(isLoadingSourceStreams = true, sourceStreamsError = null) }
@@ -832,7 +871,7 @@ internal fun PlayerRuntimeController.switchToSourceStream(
     )
 
     resetLoadingOverlayForNewStream()
-    releasePlayer(flushPlaybackState = false)
+    if (!keepPlayerForLiveTvZap(url)) releasePlayer(flushPlaybackState = false) // Nuvio RS hook: Live TV zaps keep the player
 
     applySelectedStreamState(
         stream = stream,
@@ -896,7 +935,8 @@ internal fun PlayerRuntimeController.switchToSourceStream(
                         filename = currentFilename,
                         responseHeaders = currentStreamResponseHeaders,
                         mimeTypeOverride = currentStreamMimeType,
-                        audioDelayUsProvider = audioDelayUs::get
+                        audioDelayUsProvider = audioDelayUs::get,
+                        cacheKey = currentStreamCacheKey
                     )
                 )
                 player.playWhenReady = true
@@ -1299,6 +1339,26 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
         return
     }
 
+    if (stream.youTubeIdToResolve() != null) {
+        debridResolveJob?.cancel()
+        _uiState.update { it.copy(isLoadingEpisodeStreams = true, episodeStreamsError = null) }
+        debridResolveJob = scope.launch {
+            val resolved = resolveYouTubeStream(stream)
+            debridResolveJob = null
+            if (resolved != null) {
+                switchToEpisodeStream(resolved, forcedTargetVideo, isAutoPlay)
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isLoadingEpisodeStreams = false,
+                        episodeStreamsError = context.getString(com.nuvio.tv.R.string.youtube_resolution_failed)
+                    )
+                }
+            }
+        }
+        return
+    }
+
     if (stream.isTorrent()) {
         val resolveSeason = forcedTargetVideo?.season ?: _uiState.value.episodeStreamsSeason ?: currentSeason
         val resolveEpisode = forcedTargetVideo?.episode ?: _uiState.value.episodeStreamsEpisode ?: currentEpisode
@@ -1598,6 +1658,21 @@ internal fun PlayerRuntimeController.showEpisodeStreamPicker(video: Video, force
     }
     loadEpisodesIfNeeded()
     loadStreamsForEpisode(video = video, forceRefresh = forceRefresh)
+}
+
+internal suspend fun PlayerRuntimeController.resolveYouTubeStream(stream: Stream): Stream? {
+    recordLoadingDiagnosticEvent(
+        phase = "resolving_youtube",
+        message = context.getString(com.nuvio.tv.R.string.youtube_resolving_stream),
+        detail = stream.addonName
+    )
+    val resolved = youTubeStreamResolver.resolve(stream)
+    recordLoadingDiagnosticEvent(
+        phase = if (resolved != null) "resolving_youtube_done" else "resolving_youtube_failed",
+        message = context.getString(com.nuvio.tv.R.string.youtube_resolving_stream),
+        detail = stream.addonName
+    )
+    return resolved
 }
 
 internal suspend fun PlayerRuntimeController.resolveDirectDebridStreamIfNeeded(

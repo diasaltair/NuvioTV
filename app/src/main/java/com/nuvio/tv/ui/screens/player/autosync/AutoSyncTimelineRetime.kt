@@ -17,7 +17,9 @@ import kotlin.time.TimeSource
  * near an embedded subtitle timeline. This aligner then walks both ordered cue sequences and
  * resolves local 1:1 / 1:2 / 2:1 / 1:3 / 3:1 / 2:2 groupings plus skips. Matched add-on groups
  * are locally anchored to embedded starts while preserving the add-on cue durations; unmatched
- * add-on cues retain the coarse affine timing.
+ * add-on cues retain the coarse affine timing. For validated delay-only matches, this DP remains
+ * the structural safety gate while final playback keeps the external timeline intact and applies
+ * only the single validated offset.
  *
  * This file is deliberately commonMain and player-independent so the algorithm can be unit-tested
  * without Android, Media3, networking, or playback state.
@@ -40,12 +42,33 @@ internal object AutoSyncTimelineRetimer {
     private const val MAX_AVERAGE_GROUP_COST = 2.35
     private const val MAX_LONGEST_TARGET_SKIP_RUN = 12
 
+    // A target spanning well under the reference (e.g. a CD2 subtitle) can sit anywhere inside
+    // it, so its offset search covers the whole reference instead of only ACTIVITY_MAX_OFFSET_MS.
+    private const val PARTIAL_TARGET_SPAN_RATIO = 0.75
+
+    // Each matched group is anchored to its reference start unless its shift differs from the
+    // median of its neighbours by more than LOCAL_SHIFT_MAX_DEVIATION_MS. Genuine per-line
+    // corrections survive; a mis-paired group takes the local median instead of snapping a line
+    // up to a full match tolerance away.
+    private const val LOCAL_SHIFT_RADIUS_GROUPS = 3
+    private const val LOCAL_SHIFT_MAX_DEVIATION_MS = 250L
+
     // Whole-timeline subtitle activity correlation. This is deliberately global:
     // mid-film cuts/splits are rejected rather than growing another piecewise synchronization layer.
     private const val ACTIVITY_COARSE_BIN_MS = 500L
     private const val ACTIVITY_FINE_BIN_MS = 100L
     private const val ACTIVITY_MAX_OFFSET_MS = 180_000L
     private const val ACTIVITY_FINE_RADIUS_MS = 750L
+    // Dense dialogue saturates 500 ms coarse bins, so neighbouring offsets can score within a
+    // hair of each other and the coarse argmax lands on a plateau edge. Fine refinement then
+    // spans the whole contiguous plateau (capped) instead of only the argmax's own radius.
+    private const val ACTIVITY_COARSE_PLATEAU_SCORE_EPSILON = 0.01
+    private const val ACTIVITY_COARSE_PLATEAU_MAX_EXTENT_MS = 3_000L
+    // Coverage scoring stays flat across such a plateau even at 100 ms bins. Fine offsets within
+    // this score of the fine best are separated by how closely target cue starts land on
+    // reference cue starts, which is sharp to a single bin.
+    private const val ACTIVITY_FINE_TIE_SCORE_EPSILON = 0.005
+    private const val ACTIVITY_ONSET_MATCH_TOLERANCE_MS = 250L
     private const val ACTIVITY_MAX_CUE_DURATION_MS = 20_000L
     private const val ACTIVITY_MAX_TIMELINE_MS = 8L * 60L * 60L * 1_000L
     private const val ACTIVITY_MIN_SCORE = 0.55
@@ -84,6 +107,17 @@ internal object AutoSyncTimelineRetimer {
     private const val COVERAGE_SEGMENT_MAX_AVERAGE_COST = 1.35
     private const val COVERAGE_SEGMENT_MIN_GROUPS = 4
 
+    // Conservative post-confidence repair for a supported 2:2 reply boundary. These checks are
+    // intentionally output-only: they never feed back into DP scoring, confidence, or selection.
+    private const val GROUPED_REPLY_MIN_REFERENCE_GAP_MS = 500L
+    private const val GROUPED_REPLY_MIN_EARLY_START_MS = 250L
+    private const val GROUPED_REPLY_MAX_START_ADJUSTMENT_MS = 1_250L
+    private const val GROUPED_REPLY_ENDPOINT_TOLERANCE_MS = 200L
+    private const val GROUPED_REPLY_CONTEXT_SHIFT_TOLERANCE_MS = 500L
+    private const val GROUPED_REPLY_MIN_RESULT_DURATION_MS = 800L
+    private const val GROUPED_REPLY_CONTEXT_GROUP_RADIUS = 2
+    private const val GROUPED_REPLY_REFERENCE_NEIGHBOR_RADIUS = 2
+
     private val groupShapes = arrayOf(
         GroupShape(referenceCount = 1, targetCount = 1),
         GroupShape(referenceCount = 1, targetCount = 2),
@@ -112,13 +146,25 @@ internal object AutoSyncTimelineRetimer {
         return normalized
     }
 
+    /**
+     * SDH and over-segmented references (1.5x the target's cues or more) legitimately produce
+     * ambiguous delay-only margins, so the margin gate is relaxed for them.
+     */
+    internal fun shouldRelaxDelayOnlyMargin(
+        sdhReference: Boolean,
+        referenceSize: Int,
+        targetSize: Int,
+    ): Boolean = sdhReference || referenceSize.toLong() * 2L >= targetSize.toLong() * 3L
+
     internal fun prepareUnitActivity(
         cues: List<SubtitleSyncCue>,
     ): PreparedActivity? {
         if (cues.size < MIN_CUES) return null
         val coarse = buildActivityTimeline(cues, 1.0, ACTIVITY_COARSE_BIN_MS) ?: return null
         val fine = buildActivityTimeline(cues, 1.0, ACTIVITY_FINE_BIN_MS) ?: return null
-        return PreparedActivity(coarse = coarse, fine = fine)
+        val starts = LongArray(cues.size) { index -> cues[index].startTimeMs.coerceAtLeast(0L) }
+        starts.sort()
+        return PreparedActivity(coarse = coarse, fine = fine, starts = starts)
     }
 
     fun retime(
@@ -175,7 +221,7 @@ internal object AutoSyncTimelineRetimer {
             dpMs += elapsedMs(dpMark)
 
             val validationMark = if (timingEnabled) TimeSource.Monotonic.markNow() else null
-            val finalized = result.copy(
+            var finalized = result.copy(
                 alignmentSource = "provided",
                 alignmentScale = coarseScale,
                 alignmentInterceptMs = coarseInterceptMs,
@@ -186,6 +232,15 @@ internal object AutoSyncTimelineRetimer {
                     targetSize = target.size,
                 ),
             )
+            if (finalized.confident) {
+                finalized = refineGroupedReplyTiming(
+                    reference = reference,
+                    target = target,
+                    result = finalized,
+                    referenceEstimatedEndStartsMs = referenceEstimatedEndStartsMs,
+                    cancellationCheck = cancellationCheck,
+                )
+            }
             validationMs += elapsedMs(validationMark)
             reportTimings("provided")
             return finalized
@@ -237,7 +292,10 @@ internal object AutoSyncTimelineRetimer {
                 validationMs += elapsedMs(fastValidationMark)
                 if (validatedFast.confident) {
                     reportTimings("fast-delay")
-                    return validatedFast
+                    return validatedFast.withValidatedDelayOnlyCues(
+                        target = target,
+                        alignment = fastDelayOnly,
+                    )
                 }
             }
         }
@@ -288,7 +346,7 @@ internal object AutoSyncTimelineRetimer {
         dpMs += elapsedMs(dpMark)
 
         val validationMark = if (timingEnabled) TimeSource.Monotonic.markNow() else null
-        val finalized = finalizeDiscoveredResult(
+        var finalized = finalizeDiscoveredResult(
             result = result,
             referenceSize = reference.size,
             targetSize = target.size,
@@ -301,9 +359,25 @@ internal object AutoSyncTimelineRetimer {
                 allowAmbiguousDelayOnlyMargin ||
                     (delayOnly?.stableSegmentMarginOverride == true),
         )
+        if (finalized.confident && delayOnly == null) {
+            finalized = refineGroupedReplyTiming(
+                reference = reference,
+                target = target,
+                result = finalized,
+                referenceEstimatedEndStartsMs = referenceEstimatedEndStartsMs,
+                cancellationCheck = cancellationCheck,
+            )
+        }
         validationMs += elapsedMs(validationMark)
         reportTimings(if (delayOnly != null) "delay-only" else "activity")
-        return finalized
+        return if (finalized.confident && delayOnly != null) {
+            finalized.withValidatedDelayOnlyCues(
+                target = target,
+                alignment = delayOnly,
+            )
+        } else {
+            finalized
+        }
     }
 
     private fun finalizeDiscoveredResult(
@@ -334,18 +408,49 @@ internal object AutoSyncTimelineRetimer {
             candidateActivityMargin >= requiredActivityMargin ||
                 (delayOnly && allowAmbiguousDelayOnlyMargin)
 
-        val confirmed =
-            result.confident &&
-                candidateActivityScore >= requiredActivityScore &&
-                activityMarginAccepted &&
-                coverageSegments >= requiredCoverageSegments &&
-                result.targetCoverage >= DISCOVERED_MIN_TARGET_COVERAGE &&
-                result.averageGroupCost <= DISCOVERED_MAX_AVERAGE_GROUP_COST &&
-                result.longestTargetSkipRun <= MAX_LONGEST_TARGET_SKIP_RUN &&
-                simpleRatio >= DISCOVERED_MIN_SIMPLE_GROUP_RATIO
+        // A long unmatched target run alone is tolerated when every other gate passes: it is
+        // typically localized content the reference lacks (lyrics, credits, sign translations).
+        val matchedTargetCount = targetSize - result.skippedTargetCues
+        val skipRunOnlyFailure =
+            !result.confident &&
+                result.longestTargetSkipRun > MAX_LONGEST_TARGET_SKIP_RUN &&
+                matchedTargetCount >= min(MIN_MATCHED_TARGET_CUES, targetSize) &&
+                result.targetCoverage >= MIN_TARGET_COVERAGE &&
+                result.averageGroupCost <= MAX_AVERAGE_GROUP_COST
+
+        val rejectReasons = buildList {
+            if (!skipRunOnlyFailure) result.rejectReason?.let(::add)
+            if (candidateActivityScore < requiredActivityScore) {
+                add("activityScore=${round3(candidateActivityScore)}<$requiredActivityScore")
+            }
+            if (!activityMarginAccepted) {
+                add("activityMargin=${round3(candidateActivityMargin)}<$requiredActivityMargin")
+            }
+            if (coverageSegments < requiredCoverageSegments) {
+                add("coverageSegments=$coverageSegments<$requiredCoverageSegments")
+            }
+            if (result.targetCoverage < DISCOVERED_MIN_TARGET_COVERAGE) {
+                add(
+                    "targetCoverage=${round3(result.targetCoverage)}" +
+                        "<$DISCOVERED_MIN_TARGET_COVERAGE",
+                )
+            }
+            if (result.averageGroupCost > DISCOVERED_MAX_AVERAGE_GROUP_COST) {
+                add(
+                    "avgGroupCost=${round3(result.averageGroupCost)}" +
+                        ">$DISCOVERED_MAX_AVERAGE_GROUP_COST",
+                )
+            }
+            if (simpleRatio < DISCOVERED_MIN_SIMPLE_GROUP_RATIO) {
+                add("simpleRatio=${round3(simpleRatio)}<$DISCOVERED_MIN_SIMPLE_GROUP_RATIO")
+            }
+        }.distinct()
+        val confirmed = rejectReasons.isEmpty()
 
         return result.copy(
             confident = confirmed,
+            localizedMismatchIgnored = confirmed && skipRunOnlyFailure,
+            rejectReason = rejectReasons.joinToString(",").ifEmpty { null },
             alignmentSource = if (delayOnly) "delay-only-validated" else "activity-correlation",
             alignmentScale = candidateScale,
             alignmentInterceptMs = candidateInterceptMs,
@@ -551,14 +656,22 @@ internal object AutoSyncTimelineRetimer {
             )
         }.toMutableList()
 
-        groups.forEach { group ->
+        // Target ranges of groups are disjoint, so every shift can be read before any is applied.
+        val groupShifts = rejectLocalShiftOutliers(
+            LongArray(groups.size) { groupIndex ->
+                val group = groups[groupIndex]
+                reference[group.referenceStartIndex].startTimeMs -
+                    retimed[group.targetStartIndex].startTimeMs
+            },
+        )
+        groups.forEachIndexed { groupIndex, group ->
             for (index in group.targetStartIndex until group.targetStartIndex + group.targetCount) {
                 matchedTarget[index] = true
             }
             for (index in group.referenceStartIndex until group.referenceStartIndex + group.referenceCount) {
                 matchedReference[index] = true
             }
-            transplantGroupTiming(reference, target, group, retimed)
+            transplantGroupTiming(group, retimed, groupShifts[groupIndex])
         }
 
         // Keep the output monotonic even when malformed source cues overlap backwards.
@@ -596,11 +709,32 @@ internal object AutoSyncTimelineRetimer {
         val longestTargetSkipRun = longestFalseRun(matchedTarget)
         val averageGroupCost = groups.map { it.cost }.average()
 
-        val confident =
-            matchedTargetCount >= min(MIN_MATCHED_TARGET_CUES, target.size) &&
-                targetCoverage >= MIN_TARGET_COVERAGE &&
-                averageGroupCost <= MAX_AVERAGE_GROUP_COST &&
-                longestTargetSkipRun <= MAX_LONGEST_TARGET_SKIP_RUN
+        // Offset each matched group still needs after the seed transform.
+        val groupResiduals = DoubleArray(groups.size) { groupIndex ->
+            val group = groups[groupIndex]
+            abs(
+                referenceStarts[group.referenceStartIndex] -
+                    transformedTargetStarts[group.targetStartIndex],
+            )
+        }
+        groupResiduals.sort()
+
+        val minMatchedTarget = min(MIN_MATCHED_TARGET_CUES, target.size)
+        val rejectReasons = buildList {
+            if (matchedTargetCount < minMatchedTarget) {
+                add("matchedTarget=$matchedTargetCount<$minMatchedTarget")
+            }
+            if (targetCoverage < MIN_TARGET_COVERAGE) {
+                add("targetCoverage=${round3(targetCoverage)}<$MIN_TARGET_COVERAGE")
+            }
+            if (averageGroupCost > MAX_AVERAGE_GROUP_COST) {
+                add("avgGroupCost=${round3(averageGroupCost)}>$MAX_AVERAGE_GROUP_COST")
+            }
+            if (longestTargetSkipRun > MAX_LONGEST_TARGET_SKIP_RUN) {
+                add("targetSkipRun=$longestTargetSkipRun>$MAX_LONGEST_TARGET_SKIP_RUN")
+            }
+        }
+        val confident = rejectReasons.isEmpty()
 
         val shapeCounts = groups.groupingBy { "${it.referenceCount}:${it.targetCount}" }.eachCount()
 
@@ -620,6 +754,8 @@ internal object AutoSyncTimelineRetimer {
             threeToOneGroups = shapeCounts["3:1"] ?: 0,
             twoToTwoGroups = shapeCounts["2:2"] ?: 0,
             confident = confident,
+            medianGroupResidualMs = groupResiduals[groupResiduals.size / 2],
+            rejectReason = rejectReasons.joinToString(",").ifEmpty { null },
         )
     }
 
@@ -645,18 +781,18 @@ internal object AutoSyncTimelineRetimer {
         targetActivity: PreparedActivity,
         cancellationCheck: (() -> Unit)? = null,
     ): DelayOnlySearchEvidence? {
-        val maxOffsetBins = (ACTIVITY_MAX_OFFSET_MS / ACTIVITY_COARSE_BIN_MS).toInt()
-        val scores = DoubleArray(maxOffsetBins * 2 + 1) { Double.NaN }
+        val offsetRange = coarseOffsetRange(referenceActivity.coarse, targetActivity.coarse)
+        val scores = DoubleArray(offsetRange.last - offsetRange.first + 1) { Double.NaN }
         val candidates = ArrayList<ActivityCandidate>(scores.size)
 
-        for (offsetBins in -maxOffsetBins..maxOffsetBins) {
-            if ((offsetBins + maxOffsetBins) % 64 == 0) cancellationCheck?.invoke()
+        for (offsetBins in offsetRange) {
+            if ((offsetBins - offsetRange.first) % 64 == 0) cancellationCheck?.invoke()
             val score = scoreActivityOffset(
                 referenceActivity.coarse,
                 targetActivity.coarse,
                 offsetBins,
             ) ?: continue
-            scores[offsetBins + maxOffsetBins] = score
+            scores[offsetBins - offsetRange.first] = score
             candidates += ActivityCandidate(
                 scale = 1.0,
                 interceptMs = offsetBins * ACTIVITY_COARSE_BIN_MS,
@@ -666,47 +802,37 @@ internal object AutoSyncTimelineRetimer {
 
         val seed = buildDelayOnlySearchSeed(candidates) ?: return null
         val refined = refineDelayOnlySearchSeed(
-            referenceFine = referenceActivity.fine,
-            targetFine = targetActivity.fine,
+            referenceActivity = referenceActivity,
+            targetActivity = targetActivity,
             seed = seed,
             cancellationCheck = cancellationCheck,
         )
         return DelayOnlySearchEvidence(
             coarseScores = scores,
-            maxOffsetBins = maxOffsetBins,
+            firstOffsetBins = offsetRange.first,
             seed = refined,
         )
     }
 
     private fun refineDelayOnlySearchSeed(
-        referenceFine: ActivityTimeline,
-        targetFine: ActivityTimeline,
+        referenceActivity: PreparedActivity,
+        targetActivity: PreparedActivity,
         seed: DelayOnlySearchSeed,
         cancellationCheck: (() -> Unit)? = null,
     ): DelayOnlySearchSeed {
         if (seed.fine != null) return seed
-
-        var fineBest: ActivityCandidate? = null
-        var offsetMs = seed.coarse.interceptMs - ACTIVITY_FINE_RADIUS_MS
-        while (offsetMs <= seed.coarse.interceptMs + ACTIVITY_FINE_RADIUS_MS) {
-            cancellationCheck?.invoke()
-            val offsetBins =
-                (offsetMs.toDouble() / ACTIVITY_FINE_BIN_MS.toDouble()).roundToInt()
-            val score = scoreActivityOffset(referenceFine, targetFine, offsetBins)
-            if (score != null) {
-                val candidate = ActivityCandidate(
-                    scale = 1.0,
-                    interceptMs = offsetBins * ACTIVITY_FINE_BIN_MS,
-                    score = score,
-                )
-                val current = fineBest
-                if (current == null || candidate.score > current.score) {
-                    fineBest = candidate
-                }
-            }
-            offsetMs += ACTIVITY_FINE_BIN_MS
-        }
-        return seed.copy(fine = fineBest)
+        return seed.copy(
+            fine = fineActivityBest(
+                referenceFine = referenceActivity.fine,
+                targetFine = targetActivity.fine,
+                referenceStarts = referenceActivity.starts,
+                targetStarts = targetActivity.starts,
+                scale = 1.0,
+                plateauStartMs = seed.plateauStartMs,
+                plateauEndMs = seed.plateauEndMs,
+                cancellationCheck = cancellationCheck,
+            ),
+        )
     }
 
     internal fun findDelayOnlyAlignmentPrepared(
@@ -754,27 +880,18 @@ internal object AutoSyncTimelineRetimer {
 
         val referenceFine = referenceActivity.fine
         val targetFine = targetActivity.fine
-        val best = coarseSeed.fine ?: run {
-            var fineBest: ActivityCandidate? = null
-            var offsetMs = coarse.interceptMs - ACTIVITY_FINE_RADIUS_MS
-            while (offsetMs <= coarse.interceptMs + ACTIVITY_FINE_RADIUS_MS) {
-                cancellationCheck?.invoke()
-                val offsetBins =
-                    (offsetMs.toDouble() / ACTIVITY_FINE_BIN_MS.toDouble()).roundToInt()
-                val score = scoreActivityOffset(referenceFine, targetFine, offsetBins)
-                if (score != null) {
-                    val candidate = ActivityCandidate(
-                        scale = 1.0,
-                        interceptMs = offsetBins * ACTIVITY_FINE_BIN_MS,
-                        score = score,
-                    )
-                    val current = fineBest
-                    if (current == null || candidate.score > current.score) fineBest = candidate
-                }
-                offsetMs += ACTIVITY_FINE_BIN_MS
-            }
-            fineBest ?: coarse
-        }
+        val best = coarseSeed.fine
+            ?: fineActivityBest(
+                referenceFine = referenceFine,
+                targetFine = targetFine,
+                referenceStarts = referenceActivity.starts,
+                targetStarts = targetActivity.starts,
+                scale = 1.0,
+                plateauStartMs = coarseSeed.plateauStartMs,
+                plateauEndMs = coarseSeed.plateauEndMs,
+                cancellationCheck = cancellationCheck,
+            )
+            ?: coarse
 
         if (best.score < DELAY_ONLY_MIN_SCORE) return null
 
@@ -801,8 +918,11 @@ internal object AutoSyncTimelineRetimer {
                 continue
             }
 
+            // The segment agrees when an offset within maxDelta of the global one scores as
+            // well as the segment's best, up to the coverage tie epsilon: on a flat coverage
+            // plateau the segment argmax is an arbitrary edge, not evidence of drift.
             var segmentBestScore = Double.NEGATIVE_INFINITY
-            var segmentBestOffsetBins = globalOffsetBins
+            var segmentNearScore = Double.NEGATIVE_INFINITY
             var hasScore = false
             for (delta in -localRadiusBins..localRadiusBins) {
                 val candidateOffsetBins = globalOffsetBins + delta
@@ -813,17 +933,15 @@ internal object AutoSyncTimelineRetimer {
                     segment = segment,
                 ) ?: continue
                 hasScore = true
-                if (score > segmentBestScore) {
-                    segmentBestScore = score
-                    segmentBestOffsetBins = candidateOffsetBins
-                }
+                segmentBestScore = max(segmentBestScore, score)
+                if (abs(delta) <= maxDeltaBins) segmentNearScore = max(segmentNearScore, score)
             }
 
             if (!hasScore) continue
             availableSegments++
             if (
                 segmentBestScore >= DELAY_ONLY_MIN_SEGMENT_SCORE &&
-                abs(segmentBestOffsetBins - globalOffsetBins) <= maxDeltaBins
+                segmentNearScore >= segmentBestScore - ACTIVITY_FINE_TIE_SCORE_EPSILON
             ) {
                 passedSegments++
             }
@@ -844,21 +962,39 @@ internal object AutoSyncTimelineRetimer {
         )
     }
 
+    private fun buildUniformDelayCues(
+        target: List<SubtitleSyncCue>,
+        offsetMs: Long,
+    ): List<AutoSyncRetimedCue> = target.map { cue ->
+        val start = (cue.startTimeMs + offsetMs).coerceAtLeast(0L)
+        val end = (cue.endTimeMs + offsetMs).coerceAtLeast(start + 1L)
+        AutoSyncRetimedCue(
+            originalStartTimeMs = cue.startTimeMs,
+            originalEndTimeMs = cue.endTimeMs,
+            startTimeMs = start,
+            endTimeMs = end,
+        )
+    }
+
+    private fun AutoSyncTimelineRetimeResult.withValidatedDelayOnlyCues(
+        target: List<SubtitleSyncCue>,
+        alignment: AutoSyncDelayOnlyAlignment,
+    ): AutoSyncTimelineRetimeResult =
+        copy(
+            cues = buildUniformDelayCues(
+                target = target,
+                offsetMs = alignment.offsetMs.roundToLong(),
+            ),
+        )
+
     internal fun buildDelayOnlyTimeline(
         target: List<SubtitleSyncCue>,
         alignment: AutoSyncDelayOnlyAlignment,
     ): AutoSyncTimelineRetimeResult {
-        val offsetMs = alignment.offsetMs.roundToLong()
-        val retimed = target.map { cue ->
-            val start = (cue.startTimeMs + offsetMs).coerceAtLeast(0L)
-            val end = (cue.endTimeMs + offsetMs).coerceAtLeast(start + 1L)
-            AutoSyncRetimedCue(
-                originalStartTimeMs = cue.startTimeMs,
-                originalEndTimeMs = cue.endTimeMs,
-                startTimeMs = start,
-                endTimeMs = end,
-            )
-        }
+        val retimed = buildUniformDelayCues(
+            target = target,
+            offsetMs = alignment.offsetMs.roundToLong(),
+        )
 
         return AutoSyncTimelineRetimeResult(
             cues = retimed,
@@ -971,21 +1107,17 @@ internal object AutoSyncTimelineRetimer {
         val referenceCoarse = referenceActivity.coarse
         val coarseCandidates = mutableListOf<ActivityCandidate>()
         val unitScaleCandidates = mutableListOf<ActivityCandidate>()
-        val maxOffsetBins = (ACTIVITY_MAX_OFFSET_MS / ACTIVITY_COARSE_BIN_MS).toInt()
 
         for (scale in activityScaleCandidates(reference, target)) {
             cancellationCheck?.invoke()
 
             if (scale == 1.0 && precomputedUnitEvidence != null) {
                 val evidence = precomputedUnitEvidence
-                for (offsetBins in -maxOffsetBins..maxOffsetBins) {
-                    if ((offsetBins + maxOffsetBins) % 64 == 0) {
-                        cancellationCheck?.invoke()
-                    }
-                    val evidenceIndex = offsetBins + evidence.maxOffsetBins
-                    if (evidenceIndex !in evidence.coarseScores.indices) continue
+                for (evidenceIndex in evidence.coarseScores.indices) {
+                    if (evidenceIndex % 64 == 0) cancellationCheck?.invoke()
                     val score = evidence.coarseScores[evidenceIndex]
                     if (score.isNaN()) continue
+                    val offsetBins = evidence.firstOffsetBins + evidenceIndex
                     val candidate = ActivityCandidate(
                         scale = 1.0,
                         interceptMs = offsetBins * ACTIVITY_COARSE_BIN_MS,
@@ -1002,8 +1134,9 @@ internal object AutoSyncTimelineRetimer {
             } else {
                 buildActivityTimeline(target, scale, ACTIVITY_COARSE_BIN_MS) ?: continue
             }
-            for (offsetBins in -maxOffsetBins..maxOffsetBins) {
-                if ((offsetBins + maxOffsetBins) % 64 == 0) cancellationCheck?.invoke()
+            val offsetRange = coarseOffsetRange(referenceCoarse, targetCoarse)
+            for (offsetBins in offsetRange) {
+                if ((offsetBins - offsetRange.first) % 64 == 0) cancellationCheck?.invoke()
                 val score = scoreActivityOffset(referenceCoarse, targetCoarse, offsetBins)
                     ?: continue
                 val candidate = ActivityCandidate(
@@ -1034,23 +1167,17 @@ internal object AutoSyncTimelineRetimer {
                 ?: return null
         }
 
-        var fineBest: ActivityCandidate? = null
-        var offsetMs = coarseBest.interceptMs - ACTIVITY_FINE_RADIUS_MS
-        while (offsetMs <= coarseBest.interceptMs + ACTIVITY_FINE_RADIUS_MS) {
-            cancellationCheck?.invoke()
-            val offsetBins = (offsetMs.toDouble() / ACTIVITY_FINE_BIN_MS.toDouble()).roundToInt()
-            val score = scoreActivityOffset(referenceFine, targetFine, offsetBins)
-            if (score != null) {
-                val candidate = ActivityCandidate(
-                    scale = coarseBest.scale,
-                    interceptMs = offsetBins * ACTIVITY_FINE_BIN_MS,
-                    score = score,
-                )
-                val current = fineBest
-                if (current == null || candidate.score > current.score) fineBest = candidate
-            }
-            offsetMs += ACTIVITY_FINE_BIN_MS
-        }
+        val plateau = coarsePlateauMs(coarseCandidates, coarseBest)
+        val fineBest = fineActivityBest(
+            referenceFine = referenceFine,
+            targetFine = targetFine,
+            referenceStarts = referenceActivity.starts,
+            targetStarts = targetActivity.starts,
+            scale = coarseBest.scale,
+            plateauStartMs = plateau.first,
+            plateauEndMs = plateau.last,
+            cancellationCheck = cancellationCheck,
+        )
 
         val best = fineBest ?: coarseBest
         val unitSeed = precomputedUnitEvidence?.seed?.let { seed ->
@@ -1070,6 +1197,135 @@ internal object AutoSyncTimelineRetimer {
         )
     }
 
+    /**
+     * Contiguous coarse offsets around [best] (same scale) scoring within
+     * [ACTIVITY_COARSE_PLATEAU_SCORE_EPSILON] of it, capped at
+     * [ACTIVITY_COARSE_PLATEAU_MAX_EXTENT_MS] on each side. [candidates] of one scale are in
+     * ascending offset order, as every coarse sweep produces them.
+     */
+    private fun coarsePlateauMs(
+        candidates: List<ActivityCandidate>,
+        best: ActivityCandidate,
+    ): LongRange {
+        val bestIndex = candidates.indexOfFirst { it === best }
+        if (bestIndex < 0) return best.interceptMs..best.interceptMs
+        val floor = best.score - ACTIVITY_COARSE_PLATEAU_SCORE_EPSILON
+
+        fun extent(step: Int): Long {
+            var edge = best.interceptMs
+            var index = bestIndex + step
+            while (index in candidates.indices) {
+                val candidate = candidates[index]
+                if (
+                    candidate.scale != best.scale ||
+                    candidate.interceptMs != edge + step * ACTIVITY_COARSE_BIN_MS ||
+                    candidate.score < floor ||
+                    abs(candidate.interceptMs - best.interceptMs) >
+                    ACTIVITY_COARSE_PLATEAU_MAX_EXTENT_MS
+                ) {
+                    break
+                }
+                edge = candidate.interceptMs
+                index += step
+            }
+            return edge
+        }
+
+        return extent(-1)..extent(1)
+    }
+
+    /**
+     * Best fine-bin offset from the plateau start minus the fine radius to its end plus it.
+     * Offsets whose coverage score ties the best within [ACTIVITY_FINE_TIE_SCORE_EPSILON] are
+     * ranked by cue-start agreement, then by score.
+     */
+    private fun fineActivityBest(
+        referenceFine: ActivityTimeline,
+        targetFine: ActivityTimeline,
+        referenceStarts: LongArray,
+        targetStarts: LongArray,
+        scale: Double,
+        plateauStartMs: Long,
+        plateauEndMs: Long,
+        cancellationCheck: (() -> Unit)?,
+    ): ActivityCandidate? {
+        val candidates = ArrayList<ActivityCandidate>()
+        var fineBest: ActivityCandidate? = null
+        var offsetMs = plateauStartMs - ACTIVITY_FINE_RADIUS_MS
+        while (offsetMs <= plateauEndMs + ACTIVITY_FINE_RADIUS_MS) {
+            cancellationCheck?.invoke()
+            val offsetBins = (offsetMs.toDouble() / ACTIVITY_FINE_BIN_MS.toDouble()).roundToInt()
+            val score = scoreActivityOffset(referenceFine, targetFine, offsetBins)
+            if (score != null) {
+                val candidate = ActivityCandidate(
+                    scale = scale,
+                    interceptMs = offsetBins * ACTIVITY_FINE_BIN_MS,
+                    score = score,
+                )
+                candidates += candidate
+                val current = fineBest
+                if (current == null || candidate.score > current.score) fineBest = candidate
+            }
+            offsetMs += ACTIVITY_FINE_BIN_MS
+        }
+        val best = fineBest ?: return null
+
+        var chosen = best
+        var chosenOnsets = -1.0
+        for (candidate in candidates) {
+            if (candidate.score < best.score - ACTIVITY_FINE_TIE_SCORE_EPSILON) continue
+            cancellationCheck?.invoke()
+            val onsets = onsetAgreement(
+                referenceStarts = referenceStarts,
+                targetStarts = targetStarts,
+                scale = scale,
+                interceptMs = candidate.interceptMs,
+            )
+            if (
+                onsets > chosenOnsets ||
+                (onsets == chosenOnsets && candidate.score > chosen.score)
+            ) {
+                chosen = candidate
+                chosenOnsets = onsets
+            }
+        }
+        return chosen
+    }
+
+    /**
+     * How well target cue starts, mapped by [scale] and [interceptMs], land on reference starts:
+     * each contributes 1 at an exact hit, falling linearly to 0 at
+     * [ACTIVITY_ONSET_MATCH_TOLERANCE_MS] from the nearest reference start.
+     */
+    private fun onsetAgreement(
+        referenceStarts: LongArray,
+        targetStarts: LongArray,
+        scale: Double,
+        interceptMs: Long,
+    ): Double {
+        if (referenceStarts.isEmpty()) return 0.0
+        val tolerance = ACTIVITY_ONSET_MATCH_TOLERANCE_MS
+        var agreement = 0.0
+        var cursor = 0
+        for (start in targetStarts) {
+            val mapped = (start * scale).roundToLong() + interceptMs
+            while (cursor < referenceStarts.size && referenceStarts[cursor] < mapped - tolerance) {
+                cursor++
+            }
+            if (cursor == referenceStarts.size) break
+            var nearest = Long.MAX_VALUE
+            var index = cursor
+            while (index < referenceStarts.size && referenceStarts[index] <= mapped + tolerance) {
+                nearest = min(nearest, abs(referenceStarts[index] - mapped))
+                index++
+            }
+            if (nearest <= tolerance) {
+                agreement += (tolerance - nearest).toDouble() / tolerance.toDouble()
+            }
+        }
+        return agreement
+    }
+
     private fun buildDelayOnlySearchSeed(
         candidates: List<ActivityCandidate>,
     ): DelayOnlySearchSeed? {
@@ -1080,10 +1336,13 @@ internal object AutoSyncTimelineRetimer {
                     DELAY_ONLY_DISTINCT_OFFSET_MS
             }
             .maxByOrNull { it.score }
+        val plateau = coarsePlateauMs(candidates, coarse)
         return DelayOnlySearchSeed(
             coarse = coarse,
             margin = coarse.score - (secondDistinct?.score ?: 0.0),
             fine = null,
+            plateauStartMs = plateau.first,
+            plateauEndMs = plateau.last,
         )
     }
 
@@ -1261,6 +1520,23 @@ internal object AutoSyncTimelineRetimer {
         return unique
     }
 
+    /**
+     * Coarse offsets searched for one pair: ±[ACTIVITY_MAX_OFFSET_MS] normally, widened to every
+     * placement inside the reference when the target covers only part of it (CD1/CD2 subtitles).
+     */
+    private fun coarseOffsetRange(
+        reference: ActivityTimeline,
+        target: ActivityTimeline,
+    ): IntRange {
+        val baseBins = (ACTIVITY_MAX_OFFSET_MS / ACTIVITY_COARSE_BIN_MS).toInt()
+        val referenceSpan = reference.lastActive - reference.firstActive
+        val targetSpan = target.lastActive - target.firstActive
+        if (targetSpan >= referenceSpan * PARTIAL_TARGET_SPAN_RATIO) return -baseBins..baseBins
+
+        return min(-baseBins, reference.firstActive - target.firstActive - baseBins)..
+            max(baseBins, reference.lastActive - target.lastActive + baseBins)
+    }
+
     private fun isDistinctActivityTransform(
         first: ActivityCandidate,
         second: ActivityCandidate,
@@ -1362,9 +1638,11 @@ internal object AutoSyncTimelineRetimer {
         val lastActive: Int,
     )
 
-    internal data class PreparedActivity(
+    internal class PreparedActivity(
         val coarse: ActivityTimeline,
         val fine: ActivityTimeline,
+        /** Sorted cue start times, for onset tie-breaks between equally covering offsets. */
+        val starts: LongArray,
     )
 
     internal data class ActivityCandidate(
@@ -1377,11 +1655,15 @@ internal object AutoSyncTimelineRetimer {
         val coarse: ActivityCandidate,
         val margin: Double,
         val fine: ActivityCandidate?,
+        /** Coarse score plateau around [coarse]; fine refinement covers all of it. */
+        val plateauStartMs: Long = coarse.interceptMs,
+        val plateauEndMs: Long = coarse.interceptMs,
     )
 
     internal data class DelayOnlySearchEvidence(
+        /** Coarse score per offset, where index 0 is [firstOffsetBins]; NaN when unscorable. */
         val coarseScores: DoubleArray,
-        val maxOffsetBins: Int,
+        val firstOffsetBins: Int,
         val seed: DelayOnlySearchSeed,
     )
 
@@ -1393,21 +1675,269 @@ internal object AutoSyncTimelineRetimer {
         val delayOnlySeed: DelayOnlySearchSeed?,
     )
 
-    private fun transplantGroupTiming(
+    private fun refineGroupedReplyTiming(
         reference: List<SubtitleSyncCue>,
         target: List<SubtitleSyncCue>,
+        result: AutoSyncTimelineRetimeResult,
+        referenceEstimatedEndStartsMs: Set<Long>,
+        cancellationCheck: (() -> Unit)?,
+    ): AutoSyncTimelineRetimeResult {
+        if (!result.confident || result.twoToTwoGroups == 0 || result.cues.size != target.size) {
+            return result
+        }
+
+        var refinedCues: MutableList<AutoSyncRetimedCue>? = null
+
+        for (groupIndex in result.groups.indices) {
+            if ((groupIndex and 0xFF) == 0) cancellationCheck?.invoke()
+
+            val group = result.groups[groupIndex]
+            if (group.referenceCount != 2 || group.targetCount != 2) continue
+
+            val firstReferenceIndex = group.referenceStartIndex
+            val secondReferenceIndex = firstReferenceIndex + 1
+            val firstTargetIndex = group.targetStartIndex
+            val secondTargetIndex = firstTargetIndex + 1
+            if (secondReferenceIndex !in reference.indices || secondTargetIndex !in target.indices) {
+                continue
+            }
+
+            val firstReference = reference[firstReferenceIndex]
+            val secondReference = reference[secondReferenceIndex]
+            val firstTarget = target[firstTargetIndex]
+            val secondTarget = target[secondTargetIndex]
+
+            if (
+                !isValidCueInterval(firstReference) ||
+                !isValidCueInterval(secondReference) ||
+                !isValidCueInterval(firstTarget) ||
+                !isValidCueInterval(secondTarget)
+            ) {
+                continue
+            }
+            if (
+                firstReference.startTimeMs in referenceEstimatedEndStartsMs ||
+                secondReference.startTimeMs in referenceEstimatedEndStartsMs
+            ) {
+                continue
+            }
+
+            val referenceGapMs = secondReference.startTimeMs - firstReference.endTimeMs
+            if (
+                firstReference.startTimeMs >= secondReference.startTimeMs ||
+                referenceGapMs < GROUPED_REPLY_MIN_REFERENCE_GAP_MS ||
+                hasAmbiguousReferenceGap(
+                    reference = reference,
+                    firstReferenceIndex = firstReferenceIndex,
+                    secondReferenceIndex = secondReferenceIndex,
+                )
+            ) {
+                continue
+            }
+
+            if (
+                firstTarget.startTimeMs >= secondTarget.startTimeMs ||
+                firstTarget.endTimeMs > secondTarget.startTimeMs ||
+                (firstTargetIndex > 0 &&
+                    target[firstTargetIndex - 1].endTimeMs > firstTarget.startTimeMs) ||
+                (secondTargetIndex < target.lastIndex &&
+                    secondTarget.endTimeMs > target[secondTargetIndex + 1].startTimeMs)
+            ) {
+                continue
+            }
+
+            val currentCues = refinedCues ?: result.cues
+            val firstOutput = currentCues[firstTargetIndex]
+            val secondOutput = currentCues[secondTargetIndex]
+            if (
+                !isValidRetimedCue(firstOutput) ||
+                !isValidRetimedCue(secondOutput) ||
+                firstOutput.originalStartTimeMs != firstTarget.startTimeMs ||
+                firstOutput.originalEndTimeMs != firstTarget.endTimeMs ||
+                secondOutput.originalStartTimeMs != secondTarget.startTimeMs ||
+                secondOutput.originalEndTimeMs != secondTarget.endTimeMs ||
+                firstOutput.endTimeMs > secondOutput.startTimeMs
+            ) {
+                continue
+            }
+
+            if (
+                abs(firstOutput.startTimeMs - firstReference.startTimeMs) >
+                    GROUPED_REPLY_ENDPOINT_TOLERANCE_MS ||
+                abs(secondOutput.endTimeMs - secondReference.endTimeMs) >
+                    GROUPED_REPLY_ENDPOINT_TOLERANCE_MS
+            ) {
+                continue
+            }
+
+            val startAdjustmentMs = secondReference.startTimeMs - secondOutput.startTimeMs
+            if (
+                startAdjustmentMs < GROUPED_REPLY_MIN_EARLY_START_MS ||
+                startAdjustmentMs > GROUPED_REPLY_MAX_START_ADJUSTMENT_MS
+            ) {
+                continue
+            }
+
+            val localGroupShiftMs =
+                firstReference.startTimeMs -
+                    transformTime(
+                        firstTarget.startTimeMs,
+                        result.alignmentScale,
+                        result.alignmentInterceptMs,
+                    )
+            if (
+                !hasSupportingSimpleGroup(
+                    reference = reference,
+                    target = target,
+                    groups = result.groups,
+                    groupIndex = groupIndex,
+                    direction = -1,
+                    expectedShiftMs = localGroupShiftMs,
+                    scale = result.alignmentScale,
+                    interceptMs = result.alignmentInterceptMs,
+                ) ||
+                !hasSupportingSimpleGroup(
+                    reference = reference,
+                    target = target,
+                    groups = result.groups,
+                    groupIndex = groupIndex,
+                    direction = 1,
+                    expectedShiftMs = localGroupShiftMs,
+                    scale = result.alignmentScale,
+                    interceptMs = result.alignmentInterceptMs,
+                )
+            ) {
+                continue
+            }
+
+            val proposedStartMs = secondReference.startTimeMs
+            if (
+                proposedStartMs < firstOutput.endTimeMs ||
+                proposedStartMs >= secondOutput.endTimeMs ||
+                (secondTargetIndex < currentCues.lastIndex &&
+                    proposedStartMs >= currentCues[secondTargetIndex + 1].startTimeMs)
+            ) {
+                continue
+            }
+
+            val currentDurationMs = secondOutput.endTimeMs - secondOutput.startTimeMs
+            val proposedDurationMs = secondOutput.endTimeMs - proposedStartMs
+            if (
+                proposedDurationMs < GROUPED_REPLY_MIN_RESULT_DURATION_MS ||
+                proposedDurationMs * 2L < currentDurationMs
+            ) {
+                continue
+            }
+
+            val output = refinedCues ?: result.cues.toMutableList().also { refinedCues = it }
+            output[secondTargetIndex] = secondOutput.copy(startTimeMs = proposedStartMs)
+        }
+
+        val output = refinedCues ?: return result
+        return result.copy(cues = output)
+    }
+
+    private fun hasSupportingSimpleGroup(
+        reference: List<SubtitleSyncCue>,
+        target: List<SubtitleSyncCue>,
+        groups: List<AutoSyncCueGroup>,
+        groupIndex: Int,
+        direction: Int,
+        expectedShiftMs: Long,
+        scale: Double,
+        interceptMs: Double,
+    ): Boolean {
+        for (distance in 1..GROUPED_REPLY_CONTEXT_GROUP_RADIUS) {
+            val neighborIndex = groupIndex + direction * distance
+            if (neighborIndex !in groups.indices) break
+
+            val neighbor = groups[neighborIndex]
+            if (neighbor.referenceCount != 1 || neighbor.targetCount != 1) continue
+            val referenceIndex = neighbor.referenceStartIndex
+            val targetIndex = neighbor.targetStartIndex
+            if (referenceIndex !in reference.indices || targetIndex !in target.indices) continue
+
+            val referenceCue = reference[referenceIndex]
+            val targetCue = target[targetIndex]
+            if (!isValidCueInterval(referenceCue) || !isValidCueInterval(targetCue)) continue
+
+            val neighborShiftMs =
+                referenceCue.startTimeMs -
+                    transformTime(targetCue.startTimeMs, scale, interceptMs)
+            return abs(neighborShiftMs - expectedShiftMs) <=
+                GROUPED_REPLY_CONTEXT_SHIFT_TOLERANCE_MS
+        }
+        return false
+    }
+
+    private fun hasAmbiguousReferenceGap(
+        reference: List<SubtitleSyncCue>,
+        firstReferenceIndex: Int,
+        secondReferenceIndex: Int,
+    ): Boolean {
+        val first = reference[firstReferenceIndex]
+        val second = reference[secondReferenceIndex]
+        val gapStartMs = first.endTimeMs
+        val gapEndMs = second.startTimeMs
+        val startIndex = max(0, firstReferenceIndex - GROUPED_REPLY_REFERENCE_NEIGHBOR_RADIUS)
+        val endIndex = min(
+            reference.lastIndex,
+            secondReferenceIndex + GROUPED_REPLY_REFERENCE_NEIGHBOR_RADIUS,
+        )
+
+        for (index in startIndex..endIndex) {
+            if (index == firstReferenceIndex || index == secondReferenceIndex) continue
+            val cue = reference[index]
+            if (!isValidCueInterval(cue)) return true
+            if (cue.startTimeMs < gapEndMs && cue.endTimeMs > gapStartMs) return true
+            if (
+                abs(cue.startTimeMs - second.startTimeMs) <=
+                    GROUPED_REPLY_ENDPOINT_TOLERANCE_MS
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun isValidCueInterval(cue: SubtitleSyncCue): Boolean =
+        cue.startTimeMs >= 0L && cue.endTimeMs > cue.startTimeMs
+
+    private fun isValidRetimedCue(cue: AutoSyncRetimedCue): Boolean =
+        cue.startTimeMs >= 0L && cue.endTimeMs > cue.startTimeMs
+
+    /**
+     * Replaces each group shift further than [LOCAL_SHIFT_MAX_DEVIATION_MS] from the median shift
+     * of the groups within [LOCAL_SHIFT_RADIUS_GROUPS] on either side with that median.
+     * O(groups) with a tiny window.
+     */
+    private fun rejectLocalShiftOutliers(shifts: LongArray): LongArray {
+        val windowSize = LOCAL_SHIFT_RADIUS_GROUPS * 2 + 1
+        if (shifts.size < windowSize) return shifts
+
+        val window = LongArray(windowSize)
+        return LongArray(shifts.size) { index ->
+            val from = max(0, index - LOCAL_SHIFT_RADIUS_GROUPS)
+            val to = min(shifts.lastIndex, index + LOCAL_SHIFT_RADIUS_GROUPS)
+            val count = to - from + 1
+            shifts.copyInto(window, 0, from, to + 1)
+            window.sort(0, count)
+            val median = window[count / 2]
+            if (abs(shifts[index] - median) <= LOCAL_SHIFT_MAX_DEVIATION_MS) shifts[index] else median
+        }
+    }
+
+    private fun transplantGroupTiming(
         group: AutoSyncCueGroup,
         output: MutableList<AutoSyncRetimedCue>,
+        groupShiftMs: Long,
     ) {
         val targetStartIndex = group.targetStartIndex
         val targetEndIndex = group.targetStartIndex + group.targetCount - 1
-        val referenceStart = reference[group.referenceStartIndex].startTimeMs
 
         // The affine pass already preserves each external cue's duration (including FPS scaling).
-        // Move the matched group as one unit so its first cue starts with the embedded reference,
-        // but never inherit a foreign-language or estimated reference end time.
-        val groupShiftMs = referenceStart - output[targetStartIndex].startTimeMs
-
+        // Move the matched group as one unit toward its embedded reference start, but never
+        // inherit a foreign-language or estimated reference end time.
         for (index in targetStartIndex..targetEndIndex) {
             val cue = output[index]
             val durationMs = (cue.endTimeMs - cue.startTimeMs).coerceAtLeast(1L)
@@ -1582,6 +2112,8 @@ internal object AutoSyncTimelineRetimer {
 
     private fun transformTimeDouble(timeMs: Long, scale: Double, interceptMs: Double): Double =
         timeMs.toDouble() * scale + interceptMs
+
+    private fun round3(value: Double): Double = (value * 1_000.0).roundToLong() / 1_000.0
 
     private fun longestFalseRun(values: BooleanArray): Int {
         var longest = 0
@@ -1795,4 +2327,45 @@ internal data class AutoSyncTimelineRetimeResult(
     val activityMargin: Double = 0.0,
     val coverageSegmentsPassed: Int = 0,
     val simpleGroupRatio: Double = 0.0,
+    val localizedMismatchIgnored: Boolean = false,
+    /** Median |offset| matched groups still needed after the alignment transform. */
+    val medianGroupResidualMs: Double = 0.0,
+    /** Failed confidence gates, for debug logs; null when confident. */
+    val rejectReason: String? = null,
 )
+
+/**
+ * Largest correction the alignment transform applies anywhere in the subtitle's span. The
+ * transform is linear, so the extremes are at the first and last cue.
+ */
+internal fun AutoSyncTimelineRetimeResult.maxAlignmentShiftMs(): Double {
+    fun shiftAt(timeMs: Long): Double =
+        abs((alignmentScale - 1.0) * timeMs + alignmentInterceptMs)
+    val first = cues.firstOrNull()?.originalStartTimeMs ?: return abs(alignmentInterceptMs)
+    return max(shiftAt(first), shiftAt(cues.last().originalStartTimeMs))
+}
+
+private const val TRANSFORM_DISAGREEMENT_MS = 300.0
+
+/**
+ * Arbitrates two confident alignments of the same target made against different references.
+ * When their transforms disagree by more than [TRANSFORM_DISAGREEMENT_MS] anywhere on the
+ * target, at most one is right, and the one whose matched groups fit tighter wins. Returns null
+ * when the transforms agree (or fit equally), leaving the normal quality ranking in charge.
+ */
+internal fun preferTighterFitOnDisagreement(
+    candidate: AutoSyncTimelineRetimeResult,
+    current: AutoSyncTimelineRetimeResult,
+): Boolean? {
+    if (!candidate.confident || !current.confident) return null
+    val firstStartMs = candidate.cues.firstOrNull()?.originalStartTimeMs ?: return null
+    val lastStartMs = candidate.cues.last().originalStartTimeMs
+
+    fun gapAt(timeMs: Long): Double = abs(
+        (candidate.alignmentScale - current.alignmentScale) * timeMs +
+            candidate.alignmentInterceptMs - current.alignmentInterceptMs,
+    )
+    if (max(gapAt(firstStartMs), gapAt(lastStartMs)) <= TRANSFORM_DISAGREEMENT_MS) return null
+    if (candidate.medianGroupResidualMs == current.medianGroupResidualMs) return null
+    return candidate.medianGroupResidualMs < current.medianGroupResidualMs
+}

@@ -82,6 +82,7 @@ class PlayerRuntimeController(
     internal val streamBadgeSettingsDataStore: StreamBadgeSettingsDataStore,
     internal val bingeGroupCacheDataStore: BingeGroupCacheDataStore,
     internal val layoutPreferenceDataStore: com.nuvio.tv.data.local.LayoutPreferenceDataStore,
+    internal val episodeShufflePlayback: com.nuvio.tv.core.player.EpisodeShufflePlayback,
     internal val watchedItemsPreferences: com.nuvio.tv.data.local.WatchedItemsPreferences,
     internal val trackPreferenceDataStore: com.nuvio.tv.data.local.TrackPreferenceDataStore,
     internal val audioDelayRouteDataStore: AudioDelayRouteDataStore,
@@ -91,6 +92,7 @@ class PlayerRuntimeController(
     internal val tmdbMetadataService: com.nuvio.tv.core.tmdb.TmdbMetadataService,
     internal val tmdbSettingsDataStore: com.nuvio.tv.data.local.TmdbSettingsDataStore,
     internal val directDebridResolver: DirectDebridResolver,
+    internal val youTubeStreamResolver: com.nuvio.tv.core.streams.YouTubeStreamResolver,
     internal val directDebridStreamPreparer: DirectDebridStreamPreparer,
     internal val cloudLibraryRepository: CloudLibraryRepository,
     internal val cloudPlaybackProgressStore: CloudLibraryPlaybackProgressStore,
@@ -108,6 +110,7 @@ class PlayerRuntimeController(
 
     companion object {
         internal const val SUBTITLE_TIMING_CUE_CACHE_SIZE = 24
+        private val CONVERTIBLE_DV_PROFILES = setOf("5", "7")
         internal const val TAG = "PlayerViewModel"
         internal const val SWITCH_TRACE_TAG = "SwitchTrace"
         internal const val SWITCH_TRACE_ENABLED = false
@@ -187,6 +190,28 @@ class PlayerRuntimeController(
     internal val cloudSessionToken: String? = navigationArgs.cloudSessionToken
     internal val mediaSourceFactory = PlayerMediaSourceFactory(context.applicationContext)
 
+    // Resolved per sample so it follows the player across rebuilds.
+    private val bufferedAheadProvider: () -> Long = {
+        _exoPlayer?.let { player -> player.bufferedPosition - player.currentPosition } ?: -1L
+    }
+
+    // The file rate is the only one every container reports, so the playhead is placed in the
+    // file by how far through it is rather than by any declared bitrate.
+    private val vodCachePlayheadBytesProvider: () -> Long = {
+        val timeline = playbackTimeline.value
+        val sizeBytes = currentVideoSize ?: 0L
+        if (timeline.duration > 0L && sizeBytes > 0L && timeline.currentPosition > 0L) {
+            (sizeBytes.toDouble() * timeline.currentPosition / timeline.duration).toLong()
+        } else {
+            0L
+        }
+    }
+
+    init {
+        PlayerMemoryReporter.bufferedAheadProvider = bufferedAheadProvider
+        PlayerMediaSourceFactory.vodCachePlayheadBytesProvider = vodCachePlayheadBytesProvider
+    }
+
     internal var currentVideoHash: String? = navigationArgs.videoHash
     internal var currentVideoSize: Long? = navigationArgs.videoSize
     internal var currentFilename: String? = navigationArgs.filename
@@ -202,6 +227,7 @@ class PlayerRuntimeController(
     internal var currentVideoBitrate: Int? = null
     internal var currentStreamUrl: String
     internal var currentStreamResponseHeaders: Map<String, String> = emptyMap()
+    internal var currentStreamCacheKey: String? = null
     internal var currentStreamMimeType: String?
     internal var currentHeaders: Map<String, String>
     internal var streamSubtitles: List<Subtitle> = emptyList()
@@ -226,7 +252,46 @@ class PlayerRuntimeController(
     fun getCurrentHeaders(): Map<String, String> = currentHeaders
 
     fun stopAndRelease() {
+        // Cache counters only reach the card on a natural finish, so capture them when the user exits too.
+        val diagnostics = lastPlaybackDiagnosticsForReport
+        if (diagnostics.timestampMs > 0L) {
+            // Only a profile 5 or 7 source that actually converted counts; every other playback
+            // still runs the bridge self-test and would otherwise stamp a conversion that never ran.
+            val converted = diagnostics.dv7DoviSuccess > 0 &&
+                diagnostics.dvSourceProfile in CONVERTIBLE_DV_PROFILES
+            val updated = diagnostics.copy(
+                vodCacheStats = mediaSourceFactory.vodCacheStatsLabel(context),
+                dvConvertEndedAtMs = if (converted) {
+                    System.currentTimeMillis()
+                } else {
+                    diagnostics.dvConvertEndedAtMs
+                }
+            )
+            lastPlaybackDiagnosticsForReport = updated
+            scope.launch {
+                runCatching { playerSettingsDataStore.setLastPlaybackDiagnostics(updated) }
+            }
+        }
+        mediaSourceFactory.logVodCacheStats()
+        PlayerMemoryReporter.stopSampling(context)
+        releaseProcessWideReferences()
+        mediaSourceFactory.evictCachedSession()
         releasePlayer()
+    }
+
+    // These are process wide, so without this the exited player stays reachable until the next one
+    // replaces them; the identity checks keep a player that has already started from losing its own.
+    private fun releaseProcessWideReferences() {
+        if (PlayerMemoryReporter.bufferedAheadProvider === bufferedAheadProvider) {
+            PlayerMemoryReporter.bufferedAheadProvider = null
+        }
+        if (PlayerMediaSourceFactory.vodCachePlayheadBytesProvider === vodCachePlayheadBytesProvider) {
+            PlayerMediaSourceFactory.vodCachePlayheadBytesProvider = null
+        }
+        val ownAllocator = _loadControl?.allocator
+        if (ownAllocator != null && NuvioExoPlayerPerformanceHelper.liveAllocator === ownAllocator) {
+            NuvioExoPlayerPerformanceHelper.liveAllocator = null
+        }
     }
 
     internal var currentVideoId: String? = videoId
@@ -308,7 +373,7 @@ class PlayerRuntimeController(
         )
         val isLive = LivePlaybackUiPolicy.isLivePlayback(
             playerReportsLive = playerReportsLive,
-            contentType = contentType,
+            contentType = contentType.takeUnless { com.nuvio.tv.reshaped.livetv.LiveTvPlaybackRegistry.isCatchup(currentStreamUrl) }, // Nuvio RS hook: Live TV catch-up seeks like a film
             latchedLive = livePlaybackLatched
         )
         val watched = liveWatchClock.watchedDurationMs(
@@ -344,6 +409,7 @@ class PlayerRuntimeController(
     internal var vodTelemetryJob: Job? = null
     internal var firstFrameWatchdogJob: Job? = null
     internal var stallWatchdogJob: Job? = null
+    internal var seekSourceLogJob: Job? = null
     internal var hideControlsJob: Job? = null
     internal var hideSeekOverlayJob: Job? = null
     internal var watchProgressSaveJob: Job? = null
@@ -377,9 +443,8 @@ class PlayerRuntimeController(
     internal var subtitleTimingRescoreAttempts: Int = 0
     /** ExoPlayer sidecar path: external addon cues without setMediaSource (preserves buffer). */
     internal var sidecarSubtitleJob: Job? = null
-    internal var sidecarRawBodyDeferred: kotlinx.coroutines.CompletableDeferred<String?>? = null
-    internal var sidecarGenerationCounter: Long = 0L
-    internal var activeSidecarGeneration: Long = 0L
+    internal var sidecarGenerationCounter: Long = 0L // AutoSync hook
+    internal var activeSidecarGeneration: Long = 0L // AutoSync hook
     internal var activeSidecarSubtitleKey: String? = null
     internal var sidecarTimedCues: List<androidx.media3.extractor.text.CuesWithTiming> = emptyList()
     internal var lastSidecarCueSignature: Long? = null
@@ -443,6 +508,7 @@ class PlayerRuntimeController(
     /** Back buffer (ms) the user configured, captured at build to restore once DV7 status is known. */
     internal var configuredBackBufferMs: Int = 0
     internal var metaVideos: List<Video> = emptyList()
+    internal var playbackShuffleState: com.nuvio.tv.core.player.PlaybackShuffleState? = null
     internal var cloudPlaybackContext: CloudLibraryPlaybackContext? =
         cloudPlaybackSessionStore.load(cloudSessionToken)
     internal var metaGenres: List<String> = emptyList()
@@ -667,6 +733,8 @@ class PlayerRuntimeController(
         observeTorrentSettings()
         observeStreamBadgeSettings()
         observeDeviceLocalAspectMode()
+        observeDeviceLocalTransparentLetterbox()
+        observeDeviceLocalTunneledSurfaceFill()
         observePlayerStatsHud()
     }
 
@@ -695,6 +763,7 @@ class PlayerRuntimeController(
     fun onCleared() {
         releasePlayer()
         stopTorrentStream()
+        torrentService.shutdown()
         startupLoadingReportJob?.cancel()
         vodTelemetryJob?.cancel()
         mediaSourceFactory.shutdown()

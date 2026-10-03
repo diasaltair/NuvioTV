@@ -1,0 +1,21 @@
+name: Trigger AutoSync TV Stable Release
+
+# Fresh stable release: Live TV, seek previews, pill menu and the latest fork features
+
+# Trigger: AutoSync dense dialogue offset fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - subtitle-autosync
+    paths:
+      - ".github/workflows/trigger-autosync-stable-release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  stable-release:
+    uses: ./.github/workflows/autosync-stable-release.yml
+    secrets: inherit

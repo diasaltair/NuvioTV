@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import com.nuvio.tv.ui.screens.player.SubtitleSyncCue
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -35,11 +36,21 @@ internal object AutoSyncDebugLog {
     private const val TAG = "NuvioAutoSync"
     private const val MAX_REPORT_CHARS = 160_000
     private const val MAX_CUE_TEXT_CHARS = 500
+    // Timing dump has its own budget and is appended after the report, so it never crowds out
+    // the regular log lines. Roughly 8 characters per cue.
+    private const val MAX_TIMING_DUMP_CHARS = 400_000
+    private const val MAX_EARLY_LINES = 40
+    private const val MAX_EARLY_LINE_CHARS = 500
 
     private val lock = Any()
     private val buffer = StringBuilder()
+    private val timingTracks = LinkedHashMap<String, AutoSyncTimingDump.Track>()
+    // Lines logged between sessions, such as the embedded index prefetch that runs while the
+    // stream opens. The next report starts with them so a failed prefetch keeps its reason.
+    private val earlyLines = java.util.ArrayDeque<String>()
 
     private var sessionId: String = "none"
+    @Volatile
     private var startedElapsedMs: Long = 0L
     private var active: Boolean = false
 
@@ -53,6 +64,7 @@ internal object AutoSyncDebugLog {
             startedElapsedMs = SystemClock.elapsedRealtime()
             active = true
             buffer.setLength(0)
+            timingTracks.clear()
 
             appendRawLocked("=== Nuvio AutoSync verbose debug ===")
             appendRawLocked("session=$sessionId")
@@ -61,6 +73,12 @@ internal object AutoSyncDebugLog {
             appendRawLocked("addon=${safeSourceLabel(subtitleUrl)}")
             appendRawLocked("verbose=$VERBOSE")
             appendRawLocked("")
+            if (earlyLines.isNotEmpty()) {
+                appendRawLocked("=== BEFORE SESSION ===")
+                earlyLines.forEach(::appendRawLocked)
+                earlyLines.clear()
+                appendRawLocked("")
+            }
         }
         Log.i(TAG, "session=$sessionId started")
     }
@@ -110,6 +128,24 @@ internal object AutoSyncDebugLog {
         }
     }
 
+    /**
+     * Records a cue timeline for the report's replayable TIMING DUMP. Only references to the
+     * already immutable cue lists are kept; encoding happens once, when the report is finished.
+     */
+    fun timing(
+        label: String,
+        cues: List<SubtitleSyncCue>,
+        estimatedEndStartsMs: Set<Long> = emptySet(),
+        sdh: Boolean = false,
+    ) {
+        if (!ENABLED) return
+        synchronized(lock) {
+            if (label !in timingTracks) {
+                timingTracks[label] = AutoSyncTimingDump.Track(label, cues, estimatedEndStartsMs, sdh)
+            }
+        }
+    }
+
     fun latestReport(): String {
         if (!ENABLED) return ""
         return synchronized(lock) { buffer.toString() }
@@ -128,7 +164,7 @@ internal object AutoSyncDebugLog {
         info { "decision=$decision" }
         info { "elapsed=${elapsedMs()}ms" }
 
-        val report = latestReport()
+        val report = latestReport() + drainTimingDump()
         saveReport(context, report)
 
         val copied = runCatching {
@@ -153,6 +189,26 @@ internal object AutoSyncDebugLog {
         return copied
     }
 
+    private fun drainTimingDump(): String {
+        val tracks = synchronized(lock) {
+            timingTracks.values.toList().also { timingTracks.clear() }
+        }
+        if (tracks.isEmpty()) return ""
+
+        val dump = StringBuilder("\n=== TIMING DUMP ===\n")
+        var omitted = 0
+        for (track in tracks) {
+            val line = AutoSyncTimingDump.encode(track)
+            if (dump.length + line.length + 1 > MAX_TIMING_DUMP_CHARS) {
+                omitted++
+                continue
+            }
+            dump.append(line).append('\n')
+        }
+        if (omitted > 0) dump.append("omitted=").append(omitted).append('\n')
+        return dump.toString()
+    }
+
     private fun saveReport(context: Context, report: String) {
         runCatching {
             val directory = File(context.cacheDir, "autosync-debug").apply { mkdirs() }
@@ -165,8 +221,16 @@ internal object AutoSyncDebugLog {
     }
 
     private fun append(level: String, message: String) {
-        val line = "[+${elapsedMs()}ms][$level] $message"
-        appendRaw(line)
+        val line = synchronized(lock) {
+            if (active) {
+                "[+${elapsedMs()}ms][$level] $message".also(::appendRawLocked)
+            } else {
+                "[${clockTime()}][$level] $message".also { early ->
+                    earlyLines.addLast(early.take(MAX_EARLY_LINE_CHARS))
+                    while (earlyLines.size > MAX_EARLY_LINES) earlyLines.removeFirst()
+                }
+            }
+        }
         when (level) {
             "ERROR" -> Log.e(TAG, line)
             "WARN" -> Log.w(TAG, line)
@@ -192,7 +256,7 @@ internal object AutoSyncDebugLog {
     }
 
     private fun elapsedMs(): Long {
-        val started = synchronized(lock) { startedElapsedMs }
+        val started = startedElapsedMs
         return if (started == 0L) 0L else (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
     }
 
@@ -246,6 +310,9 @@ internal object AutoSyncDebugLog {
             millis,
         )
     }
+
+    private fun clockTime(): String =
+        SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
 
     private fun wallClock(): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(Date())

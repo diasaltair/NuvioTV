@@ -5,6 +5,8 @@
 
 package com.nuvio.tv.ui.screens.player
 
+import com.nuvio.tv.ui.screens.player.audiosync.SubtitleSyncStatusPanel
+import com.nuvio.tv.ui.screens.player.autosync.bubble.AutoSyncBubbleToastHost
 import com.nuvio.tv.ui.theme.NuvioMotion
 
 import com.nuvio.tv.ui.theme.NuvioTheme
@@ -35,6 +37,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,6 +71,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -124,7 +128,6 @@ import coil3.compose.rememberAsyncImagePainter
 import coil3.request.ImageRequest
 import androidx.compose.ui.res.stringResource
 import com.nuvio.tv.R
-import com.nuvio.tv.core.player.LetterboxRenderPolicy
 import com.nuvio.tv.core.player.PlayerWindowBackdrop
 import com.nuvio.tv.ui.util.localizeEpisodeTitle
 import com.nuvio.tv.data.local.InternalPlayerEngine
@@ -134,6 +137,12 @@ import com.nuvio.tv.data.local.StreamAutoPlayMode
 import com.nuvio.tv.domain.model.Subtitle
 import com.nuvio.tv.domain.model.WatchProgress
 import com.nuvio.tv.ui.components.LoadingIndicator
+import com.nuvio.tv.ui.screens.player.seekpreview.SeekPreviewAboveProgressBar
+import com.nuvio.tv.ui.screens.player.seekpreview.SeekPreviewCueTicks
+import com.nuvio.tv.ui.screens.player.seekpreview.SeekPreviewSyncLayer
+import com.nuvio.tv.ui.screens.player.seekpreview.SeekPreviewThumbnailHost
+import com.nuvio.tv.ui.screens.player.seekpreview.handleBack
+import com.nuvio.tv.ui.screens.player.seekpreview.seekPreviewSyncAction
 import android.text.format.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -146,6 +155,17 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.media3.exoplayer.ExoPlayer
 import io.github.peerless2012.ass.media.widget.AssSubtitleView
 import kotlin.math.abs
+
+private fun PlayerUiState.returnFocusSeasonEpisode(completed: Boolean): Pair<Int?, Int?> {
+    val next = nextEpisode?.takeIf {
+        it.hasAired && !(it.released.isNullOrBlank() && it.available == false)
+    }
+    return if (completed && next != null) {
+        next.season to next.episode
+    } else {
+        currentSeason to currentEpisode
+    }
+}
 
 @Composable
 fun PlayerScreen(
@@ -163,6 +183,7 @@ fun PlayerScreen(
     val context = LocalContext.current
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val containerFocusRequester = remember { FocusRequester() }
+    val liveTvPlayer = com.nuvio.tv.ui.reshaped.livetv.rememberLiveTvPlayer(viewModel.controller, containerFocusRequester) // Nuvio RS hook: Live TV
     val playPauseFocusRequester = remember { FocusRequester() }
     val progressBarFocusRequester = remember { FocusRequester() }
     val episodesFocusRequester = remember { FocusRequester() }
@@ -174,6 +195,7 @@ fun PlayerScreen(
     val postPlayRecommendationPlayerWindowFocusRequester = remember { FocusRequester() }
     var skipButtonActuallyVisible by remember { mutableStateOf(false) }
     var restoreStreamInfoFocus by remember { mutableStateOf(false) }
+    var focusPlayAfterMoreBack by remember { mutableStateOf(false) }
     val nextEpisodeFocusRequester = remember { FocusRequester() }
     var subtitleDelayFocusTarget by remember { mutableStateOf(SubtitleDelayFocusTarget.SLIDER) }
     val subtitleDelayResetFocusRequester = remember { FocusRequester() }
@@ -192,7 +214,14 @@ fun PlayerScreen(
             (!timeline.isLive &&
                 timeline.duration > 0L &&
                 (timeline.currentPosition.toFloat() / timeline.duration.toFloat()) >= WatchProgress.COMPLETED_THRESHOLD)
-        onBackPress(uiState.currentVideoId, uiState.currentSeason, uiState.currentEpisode, uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL, completed)
+        val (focusSeason, focusEpisode) = uiState.returnFocusSeasonEpisode(completed)
+        onBackPress(
+            uiState.currentVideoId,
+            focusSeason,
+            focusEpisode,
+            uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL,
+            completed
+        )
     }
     val exitPlayerFromError: () -> Unit = exitPlayerFromError@{
         if (exitDispatched) return@exitPlayerFromError
@@ -211,7 +240,9 @@ fun PlayerScreen(
     val currentOnBackPress by rememberUpdatedState(onBackPress)
     val currentOnPlayRecommendation by rememberUpdatedState(onPlayRecommendation)
     val currentOnOpenRecommendationDetails by rememberUpdatedState(onOpenRecommendationDetails)
-    val nextEpisodeForEndPrompt = uiState.nextEpisode?.takeIf { it.hasAired }
+    val nextEpisodeForEndPrompt = uiState.nextEpisode?.takeIf {
+        it.hasAired && !(it.released.isNullOrBlank() && it.available == false)
+    }
     val shouldConfirmNextEpisodeOnEnd =
         uiState.playbackEnded &&
             uiState.error == null &&
@@ -221,10 +252,11 @@ fun PlayerScreen(
             nextEpisodeForEndPrompt != null
     val returnToDetailsFromEndPrompt = {
         viewModel.stopAndRelease()
+        val (focusSeason, focusEpisode) = uiState.returnFocusSeasonEpisode(completed = true)
         currentOnBackPress(
             uiState.currentVideoId,
-            uiState.currentSeason,
-            uiState.currentEpisode,
+            focusSeason,
+            focusEpisode,
             true,
             true
         )
@@ -237,10 +269,11 @@ fun PlayerScreen(
             if (cb != null) {
                 cb(next.videoId, next.season, next.episode, null)
             } else {
+                val (focusSeason, focusEpisode) = uiState.returnFocusSeasonEpisode(completed = true)
                 currentOnBackPress(
                     uiState.currentVideoId,
-                    uiState.currentSeason,
-                    uiState.currentEpisode,
+                    focusSeason,
+                    focusEpisode,
                     false,
                     true
                 )
@@ -264,6 +297,7 @@ fun PlayerScreen(
 
     val handleBackPress = handleBackPress@{
         if (externalHandoffInProgress) return@handleBackPress
+        if (viewModel.seekPreview.handleBack(uiState)) return@handleBackPress
         if (postPlayRecommendationState.canReturnToPlayer && !uiState.playbackEnded) {
             returnToPlayerFromPostPlay()
             viewModel.hideControls()
@@ -280,6 +314,7 @@ fun PlayerScreen(
         } else if (uiState.showPauseOverlay) {
             viewModel.onEvent(PlayerEvent.OnDismissPauseOverlay)
         } else if (uiState.showMoreDialog) {
+            focusPlayAfterMoreBack = true
             viewModel.onEvent(PlayerEvent.OnDismissMoreDialog)
         } else if (uiState.showSubtitleTimingDialog) {
             viewModel.onEvent(PlayerEvent.OnDismissSubtitleTimingDialog)
@@ -343,10 +378,11 @@ fun PlayerScreen(
                 if (cb != null) {
                     cb(null, null, null, PlayerExitReason.StillWatchingPrompt)
                 } else {
+                    val (focusSeason, focusEpisode) = uiState.returnFocusSeasonEpisode(completed = true)
                     currentOnBackPress(
                         uiState.currentVideoId,
-                        uiState.currentSeason,
-                        uiState.currentEpisode,
+                        focusSeason,
+                        focusEpisode,
                         uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL,
                         true
                     )
@@ -355,15 +391,18 @@ fun PlayerScreen(
             }
             shouldDispatchNatural -> {
                 viewModel.stopAndRelease()
-                val next = uiState.nextEpisode?.takeIf { it.hasAired }
+                val next = uiState.nextEpisode?.takeIf {
+                    it.hasAired && !(it.released.isNullOrBlank() && it.available == false)
+                }
                 val cb = currentOnPlaybackEnded
                 if (cb != null) {
                     cb(next?.videoId, next?.season, next?.episode, null)
                 } else {
+                    val (focusSeason, focusEpisode) = uiState.returnFocusSeasonEpisode(completed = true)
                     currentOnBackPress(
                         uiState.currentVideoId,
-                        uiState.currentSeason,
-                        uiState.currentEpisode,
+                        focusSeason,
+                        focusEpisode,
                         uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL,
                         true
                     )
@@ -459,6 +498,7 @@ fun PlayerScreen(
     ) {
         if (shouldConfirmNextEpisodeOnEnd || postPlayRecommendationState.isVisible) return@LaunchedEffect
         if (uiState.error != null) return@LaunchedEffect
+        if (viewModel.seekPreview.isSyncOverlayOpen) return@LaunchedEffect
         if (uiState.showControls && !uiState.showEpisodesPanel && !uiState.showSourcesPanel &&
             !uiState.showAudioOverlay && !uiState.showSubtitleOverlay &&
             !uiState.showSubtitleStylePanel && !uiState.showSubtitleDelayOverlay &&
@@ -508,8 +548,20 @@ fun PlayerScreen(
             restoreStreamInfoFocus = false
         }
     }
+    val moreDialogOpen by rememberUpdatedState(uiState.showMoreDialog)
+    val controlsVisibleForMoreBack by rememberUpdatedState(uiState.showControls)
+    val playerHasError by rememberUpdatedState(uiState.error != null)
+    LaunchedEffect(focusPlayAfterMoreBack) {
+        if (!focusPlayAfterMoreBack) return@LaunchedEffect
+        runCatching { playPauseFocusRequester.requestFocus() }
+        delay(200)
+        if (!moreDialogOpen && controlsVisibleForMoreBack && !playerHasError) {
+            playPauseFocusRequester.requestFocusAfterFrames(frames = 0)
+        }
+        focusPlayAfterMoreBack = false
+    }
 
-    val transparentLetterbox = LetterboxRenderPolicy.defaultTransparentLetterbox() &&
+    val transparentLetterbox = uiState.transparentLetterbox &&
         uiState.internalPlayerEngine != InternalPlayerEngine.MVP_PLAYER
     DisposableEffect(transparentLetterbox) {
         if (!transparentLetterbox) {
@@ -526,6 +578,7 @@ fun PlayerScreen(
             .focusRequester(containerFocusRequester)
             .focusable(enabled = uiState.error == null)
             .onPreviewKeyEvent { keyEvent ->
+                if (liveTvPlayer.onPreviewKey(keyEvent.nativeKeyEvent, uiState)) return@onPreviewKeyEvent true // Nuvio RS hook: Live TV
                 // Consume the confirm KEY_UP that opened the subtitle timing dialog before
                 // the newly focused "Sync" button can treat it as a second click. Preview
                 // is required: after open, focus moves into the dialog so onKeyEvent on
@@ -699,7 +752,8 @@ fun PlayerScreen(
                         shouldConfirmNextEpisodeOnEnd ||
                         uiState.postPlayMode is PostPlayMode.StillWatching ||
                         postPlayRecommendationState.isVisible ||
-                        uiState.error != null
+                        uiState.error != null ||
+                        liveTvPlayer.panelOpen // Nuvio RS hook: Live TV channel list
                 if (panelOrDialogOpen) return@onKeyEvent false
 
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP) {
@@ -923,6 +977,8 @@ fun PlayerScreen(
                             isPlaying = uiState.isPlaying,
                             isBuffering = uiState.isBuffering,
                             aspectMode = uiState.aspectMode,
+                            tunnelingEnabled = uiState.tunnelingEnabled,
+                            tunneledSurfaceFill = uiState.tunneledSurfaceFill,
                             useLibass = uiState.useLibass,
                             libassRenderType = uiState.libassRenderType,
                             subtitleStyle = uiState.subtitleStyle,
@@ -983,6 +1039,7 @@ fun PlayerScreen(
                 onTrailerEnded = viewModel::onPostPlayTrailerEnded,
                 onPreviousRecommendation = viewModel::showPreviousPostPlayRecommendation,
                 onNextRecommendation = viewModel::showNextPostPlayRecommendation,
+                mdbListRatingOrder = postPlayRecommendationState.mdbListRatingOrder,
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(1f)
@@ -1061,6 +1118,9 @@ fun PlayerScreen(
                     .zIndex(2.75f)
             )
         }
+
+        SubtitleSyncStatusPanel(NuvioTheme.spacing.xl) // AutoSync hook: audio sync fallback status
+        AutoSyncBubbleToastHost(controlsVisible = uiState.showControls) // Nuvio RS hook: AutoSync bubble
 
         // Torrent stats overlay (top-right corner)
         TorrentOverlay(
@@ -1309,10 +1369,11 @@ fun PlayerScreen(
                             externalHandoffInProgress = false
                             if (launched && !exitDispatched) {
                                 exitDispatched = true
+                                val (focusSeason, focusEpisode) = uiState.returnFocusSeasonEpisode(completed)
                                 currentOnBackPress(
                                     uiState.currentVideoId,
-                                    uiState.currentSeason,
-                                    uiState.currentEpisode,
+                                    focusSeason,
+                                    focusEpisode,
                                     uiState.streamAutoPlayMode != StreamAutoPlayMode.MANUAL,
                                     completed
                                 )
@@ -1413,6 +1474,8 @@ fun PlayerScreen(
                 }
             )
         }
+
+        SeekPreviewSyncLayer(viewModel, uiState, onDismissed = { runCatching { containerFocusRequester.requestFocus() } })
 
         AnimatedVisibility(
             visible = uiState.showSeekOverlay && !uiState.showControls && uiState.error == null &&
@@ -1643,6 +1706,7 @@ fun PlayerScreen(
             SubtitleTimingDialogHost(
                 viewModel = viewModel,
                 modifier = Modifier.align(Alignment.TopCenter),
+                subtitleDelayMs = uiState.subtitleDelayMs,
                 selectedAddonSubtitle = uiState.selectedAddonSubtitle,
                 cues = uiState.subtitleAutoSyncCues,
                 capturedVideoMs = uiState.subtitleAutoSyncCapturedVideoMs,
@@ -1655,6 +1719,8 @@ fun PlayerScreen(
                 }
             )
         }
+
+        com.nuvio.tv.ui.reshaped.livetv.LiveTvPlayerOverlay(liveTvPlayer, uiState) // Nuvio RS hook: Live TV
 
         if (uiState.showSpeedDialog) {
             SpeedSelectionDialog(
@@ -1729,6 +1795,8 @@ private fun ExoPlayerSurface(
     isPlaying: Boolean,
     isBuffering: Boolean,
     aspectMode: AspectMode,
+    tunnelingEnabled: Boolean,
+    tunneledSurfaceFill: Boolean,
     useLibass: Boolean,
     libassRenderType: LibassRenderType,
     subtitleStyle: SubtitleStyleSettings,
@@ -1737,6 +1805,8 @@ private fun ExoPlayerSurface(
 ) {
     val context = LocalContext.current
     val latestAspectMode by rememberUpdatedState(aspectMode)
+    val latestTunnelingEnabled by rememberUpdatedState(tunnelingEnabled)
+    val latestTunneledSurfaceFill by rememberUpdatedState(tunneledSurfaceFill)
     val latestBindSubtitleView by rememberUpdatedState(onBindSubtitleView)
     val latestSubtitleStyle by rememberUpdatedState(subtitleStyle)
     val playerView = remember(context, player) {
@@ -1797,13 +1867,21 @@ private fun ExoPlayerSurface(
                     0f
                 }
                 playerView.post {
-                    playerView.applyExoAspectMode(latestAspectMode)
+                    playerView.syncExoSurfaceLayout(
+                        tunnelingEnabled = latestTunnelingEnabled,
+                        tunneledSurfaceFill = latestTunneledSurfaceFill,
+                        aspectMode = latestAspectMode
+                    )
                 }
             }
 
             override fun onRenderedFirstFrame() {
                 playerView.post {
-                    playerView.applyExoAspectMode(latestAspectMode)
+                    playerView.syncExoSurfaceLayout(
+                        tunnelingEnabled = latestTunnelingEnabled,
+                        tunneledSurfaceFill = latestTunneledSurfaceFill,
+                        aspectMode = latestAspectMode
+                    )
                 }
             }
 
@@ -1817,7 +1895,11 @@ private fun ExoPlayerSurface(
         }
         player.addListener(listener)
         playerView.post {
-            playerView.applyExoAspectMode(latestAspectMode)
+            playerView.syncExoSurfaceLayout(
+                tunnelingEnabled = latestTunnelingEnabled,
+                tunneledSurfaceFill = latestTunneledSurfaceFill,
+                aspectMode = latestAspectMode
+            )
         }
         onDispose {
             player.removeListener(listener)
@@ -1827,7 +1909,11 @@ private fun ExoPlayerSurface(
     DisposableEffect(playerView) {
         val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             playerView.post {
-                playerView.applyExoAspectMode(latestAspectMode)
+                playerView.syncExoSurfaceLayout(
+                    tunnelingEnabled = latestTunnelingEnabled,
+                    tunneledSurfaceFill = latestTunneledSurfaceFill,
+                    aspectMode = latestAspectMode
+                )
             }
         }
         val removeListener = addExoAspectLayoutChangeListener(playerView, listener)
@@ -1843,8 +1929,12 @@ private fun ExoPlayerSurface(
         }
     }
 
-    LaunchedEffect(playerView, aspectMode) {
-        playerView.applyExoAspectMode(aspectMode)
+    LaunchedEffect(playerView, aspectMode, tunnelingEnabled, tunneledSurfaceFill) {
+        playerView.syncExoSurfaceLayout(
+            tunnelingEnabled = tunnelingEnabled,
+            tunneledSurfaceFill = tunneledSurfaceFill,
+            aspectMode = aspectMode
+        )
     }
 
     LaunchedEffect(playerView, player, useLibass, libassRenderType) {
@@ -1858,6 +1948,8 @@ private fun ExoPlayerSurface(
     LaunchedEffect(playerView, subtitleStyle) {
         playerView.applySubtitleStyleIfNeeded(subtitleStyle)
     }
+    // Nuvio RS hook: custom subtitle font, re-applied when it finishes loading or changes
+    LaunchedEffect(playerView) { com.nuvio.tv.reshaped.subtitlefont.SubtitleFontStore.font.collect { playerView.applySubtitleStyleIfNeeded(latestSubtitleStyle, force = true) } }
 }
 
 private fun PlayerView.enableComposeSurfaceSyncWorkaroundIfAvailable() {
@@ -1871,6 +1963,21 @@ private fun PlayerView.enableComposeSurfaceSyncWorkaroundIfAvailable() {
 private fun PlayerView.applyExoAspectMode(mode: AspectMode) {
     setTag(R.id.player_view_aspect_mode_tag, mode)
     applyExoAspectMode(this, mode)
+}
+
+private fun PlayerView.syncExoSurfaceLayout(
+    tunnelingEnabled: Boolean,
+    tunneledSurfaceFill: Boolean,
+    aspectMode: AspectMode
+) {
+    val targetResizeMode = PlayerDisplayModeUtils.exoSurfaceResizeMode(
+        tunnelingEnabled = tunnelingEnabled,
+        tunneledSurfaceFill = tunneledSurfaceFill
+    )
+    if (resizeMode != targetResizeMode) {
+        resizeMode = targetResizeMode
+    }
+    applyExoAspectMode(aspectModeAppliedToExoSurface(tunnelingEnabled, aspectMode))
 }
 
 private data class SubtitleAppliedConfig(
@@ -1930,7 +2037,9 @@ private fun PlayerView.applySubtitleStyleIfNeeded(
         setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, scaledFontSize)
         setApplyEmbeddedFontSizes(false)
 
-        val typeface = if (subtitleStyle.bold) {
+        // Nuvio RS hook: custom subtitle font (null = default system font)
+        val typeface = com.nuvio.tv.reshaped.subtitlefont.SubtitleFontStore.exoTypeface(context, subtitleStyle.bold)
+            ?: if (subtitleStyle.bold) {
             android.graphics.Typeface.DEFAULT_BOLD
         } else {
             android.graphics.Typeface.DEFAULT
@@ -2210,6 +2319,7 @@ private fun PlayerControlsOverlay(
             if (!isLivePlayback) {
                 // Progress bar — always LTR regardless of locale
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    SeekPreviewAboveProgressBar(viewModel)
                     PlayerControlsProgressBarHost(
                         viewModel = viewModel,
                         focusRequester = progressBarFocusRequester,
@@ -2378,6 +2488,16 @@ private fun PlayerControlsOverlay(
                                 onDownKey = onHideControls,
                                 onFocused = onResetHideTimer
                             )
+                            seekPreviewSyncAction(viewModel)?.let { openSync ->
+                                ControlButton(
+                                    icon = Icons.Default.Tune,
+                                    contentDescription = stringResource(R.string.cd_seek_preview_sync),
+                                    onClick = openSync,
+                                    upFocusRequester = progressUpTarget,
+                                    onDownKey = onHideControls,
+                                    onFocused = onResetHideTimer
+                                )
+                            }
                             if (uiState.playbackIssueReportsEnabled) {
                                 ReportControlButton(
                                     reportId = uiState.playbackIssueReportId,
@@ -2440,7 +2560,8 @@ private fun PlayerControlsProgressBarHost(
         downFocusRequester = downFocusRequester,
         onUpKey = onUpKey,
         onFocused = onFocused,
-        bufferedPosition = playbackTimeline.bufferedPosition
+        bufferedPosition = playbackTimeline.bufferedPosition,
+        overlay = { SeekPreviewCueTicks(viewModel, playbackTimeline.duration, Modifier.matchParentSize()) }
     )
 }
 
@@ -2592,7 +2713,9 @@ private fun ProgressBar(
     onUpKey: (() -> Unit)? = null,
     onFocused: (() -> Unit)? = null,
     /** Position (ms) up to which content is buffered. Pass 0 to skip the overlay. */
-    bufferedPosition: Long = 0L
+    bufferedPosition: Long = 0L,
+    /** Drawn over the track, e.g. seek-preview cue ticks. */
+    overlay: @Composable BoxScope.() -> Unit = {}
 ) {
     val accentBrush = NuvioTheme.palette.accentBrush()
     val progress = if (duration > 0) {
@@ -2729,6 +2852,7 @@ private fun ProgressBar(
                 .clip(RoundedCornerShape(3.dp))
                 .background(accentBrush)
         )
+        overlay()
     }
 }
 
@@ -2736,7 +2860,9 @@ private fun ProgressBar(
 private fun SeekOverlay(
     currentPosition: Long,
     duration: Long,
-    bufferedPosition: Long = 0L
+    bufferedPosition: Long = 0L,
+    preview: @Composable () -> Unit = {},
+    progressOverlay: @Composable BoxScope.() -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -2744,12 +2870,14 @@ private fun SeekOverlay(
             .padding(horizontal = NuvioTheme.spacing.xxl, vertical = NuvioTheme.spacing.xl)
     ) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            preview()
             ProgressBar(
                 currentPosition = currentPosition,
                 duration = duration,
                 onSeekPreview = {},
                 onSeekCommit = {},
-                bufferedPosition = bufferedPosition
+                bufferedPosition = bufferedPosition,
+                overlay = progressOverlay
             )
 
             Spacer(modifier = Modifier.height(NuvioTheme.spacing.md))
@@ -2776,7 +2904,9 @@ private fun SeekOverlayHost(viewModel: PlayerViewModel) {
     SeekOverlay(
         currentPosition = playbackTimeline.currentPosition,
         duration = playbackTimeline.duration,
-        bufferedPosition = playbackTimeline.bufferedPosition
+        bufferedPosition = playbackTimeline.bufferedPosition,
+        preview = { SeekPreviewThumbnailHost(viewModel = viewModel) },
+        progressOverlay = { SeekPreviewCueTicks(viewModel, playbackTimeline.duration, Modifier.matchParentSize()) }
     )
 }
 
@@ -2848,6 +2978,7 @@ private fun PlayerClockOverlayHost(viewModel: PlayerViewModel, playbackSpeed: Fl
 private fun SubtitleTimingDialogHost(
     viewModel: PlayerViewModel,
     modifier: Modifier = Modifier,
+    subtitleDelayMs: Int,
     selectedAddonSubtitle: Subtitle?,
     cues: List<SubtitleSyncCue>,
     capturedVideoMs: Long?,
@@ -2862,6 +2993,7 @@ private fun SubtitleTimingDialogHost(
     SubtitleTimingDialog(
         modifier = modifier,
         currentPositionMs = playbackTimeline.currentPosition,
+        subtitleDelayMs = subtitleDelayMs,
         selectedAddonSubtitle = selectedAddonSubtitle,
         cues = cues,
         capturedVideoMs = capturedVideoMs,

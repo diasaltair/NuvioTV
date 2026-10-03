@@ -11,6 +11,7 @@ internal fun PlayerRuntimeController.releasePlayer() {
 internal fun PlayerRuntimeController.releasePlayer(flushPlaybackState: Boolean) {
     logScrobbleDiagnostic("release_player", "flushPlaybackState=$flushPlaybackState")
     isReleasingPlayer = true
+    com.nuvio.tv.core.connection.PlaybackThroughput.finish()
     com.nuvio.tv.core.recommendations.TvRecommendationManager.isPlaybackActive.value = false
     if (flushPlaybackState) {
         stopTorrentStream()
@@ -35,6 +36,8 @@ internal fun PlayerRuntimeController.releasePlayer(flushPlaybackState: Boolean) 
     hideControlsJob?.cancel()
     watchProgressSaveJob?.cancel()
     seekProgressSyncJob?.cancel()
+    seekSourceLogJob?.cancel()
+    seekSourceLogJob = null
     frameRateProbeJob?.cancel()
     hideStreamSourceIndicatorJob?.cancel()
     hideStreamSourceIndicatorJob = null
@@ -42,8 +45,8 @@ internal fun PlayerRuntimeController.releasePlayer(flushPlaybackState: Boolean) 
     hidePlayerEngineSwitchInfoJob?.cancel()
     hideSubtitleDelayOverlayJob?.cancel()
     subtitleAutoSyncLoadJob?.cancel()
-    automaticSubtitleSyncJob?.cancel()
-    automaticSubtitleSyncJob = null
+    cancelAutomaticSubtitleSync() // AutoSync hook
+    com.nuvio.tv.ui.screens.player.seekpreview.local.LocalPreviewSources.unregister(this) // Nuvio RS hook: on-device seek previews
     subtitleTimingMatchJob?.cancel()
     subtitleTimingMatchJob = null
     subtitleSyncArbiterJob?.cancel()

@@ -2,6 +2,7 @@ package com.nuvio.tv.ui.screens.player.autosync
 
 import com.nuvio.tv.ui.screens.player.SubtitleSyncCue
 import kotlin.math.abs
+import kotlin.math.roundToLong
 import org.junit.Assert.assertEquals as junitAssertEquals
 import org.junit.Assert.assertNotNull as junitAssertNotNull
 import org.junit.Assert.assertTrue as junitAssertTrue
@@ -44,6 +45,118 @@ class AutoSyncTimelineRetimeTest {
     }
 
     @Test
+    fun supportedTwoToTwoReplyGapMovesOnlyTheEarlySecondStart() {
+        val reference = listOf(
+            SubtitleSyncCue(5_000L, 6_000L, "r0"),
+            SubtitleSyncCue(10_000L, 11_000L, "r1"),
+            SubtitleSyncCue(13_000L, 14_000L, "r2"),
+            SubtitleSyncCue(18_000L, 19_000L, "r3"),
+        )
+        val target = listOf(
+            SubtitleSyncCue(5_000L, 6_000L, "t0"),
+            SubtitleSyncCue(10_000L, 12_000L, "t1"),
+            SubtitleSyncCue(12_000L, 14_000L, "t2"),
+            SubtitleSyncCue(18_000L, 19_000L, "t3"),
+        )
+
+        val result = assertNotNull(
+            AutoSyncTimelineRetimer.retime(
+                reference = reference,
+                target = target,
+                coarseScale = 1.0,
+                coarseInterceptMs = 0.0,
+            ),
+        )
+
+        assertTrue(result.confident)
+        assertEquals("provided", result.alignmentSource)
+        assertEquals(1, result.twoToTwoGroups)
+        assertEquals(10_000L, result.cues[1].startTimeMs)
+        assertEquals(12_000L, result.cues[1].endTimeMs)
+        assertEquals(13_000L, result.cues[2].startTimeMs)
+        assertEquals(14_000L, result.cues[2].endTimeMs)
+        assertEquals(target[2].startTimeMs, result.cues[2].originalStartTimeMs)
+        assertEquals(target[2].endTimeMs, result.cues[2].originalEndTimeMs)
+    }
+
+    @Test
+    fun groupedReplyRepairAbstainsWithoutTwoSidedSimpleContext() {
+        val reference = listOf(
+            SubtitleSyncCue(10_000L, 11_000L, "r0"),
+            SubtitleSyncCue(13_000L, 14_000L, "r1"),
+            SubtitleSyncCue(18_000L, 19_000L, "r2"),
+            SubtitleSyncCue(22_000L, 23_000L, "r3"),
+        )
+        val target = listOf(
+            SubtitleSyncCue(10_000L, 12_000L, "t0"),
+            SubtitleSyncCue(12_000L, 14_000L, "t1"),
+            SubtitleSyncCue(18_000L, 19_000L, "t2"),
+            SubtitleSyncCue(22_000L, 23_000L, "t3"),
+        )
+
+        val result = assertNotNull(AutoSyncTimelineRetimer.retime(reference, target, 1.0, 0.0))
+
+        assertTrue(result.confident)
+        assertEquals(1, result.twoToTwoGroups)
+        assertEquals(12_000L, result.cues[1].startTimeMs)
+        assertEquals(14_000L, result.cues[1].endTimeMs)
+    }
+
+    @Test
+    fun groupedReplyRepairNeverUsesEstimatedReferenceEnds() {
+        val reference = listOf(
+            SubtitleSyncCue(5_000L, 6_000L, "r0"),
+            SubtitleSyncCue(10_000L, 11_000L, "r1"),
+            SubtitleSyncCue(13_000L, 14_000L, "r2"),
+            SubtitleSyncCue(18_000L, 19_000L, "r3"),
+        )
+        val target = listOf(
+            SubtitleSyncCue(5_000L, 6_000L, "t0"),
+            SubtitleSyncCue(10_000L, 12_000L, "t1"),
+            SubtitleSyncCue(12_000L, 14_000L, "t2"),
+            SubtitleSyncCue(18_000L, 19_000L, "t3"),
+        )
+
+        val result = assertNotNull(
+            AutoSyncTimelineRetimer.retime(
+                reference = reference,
+                target = target,
+                coarseScale = 1.0,
+                coarseInterceptMs = 0.0,
+                referenceEstimatedEndStartsMs = setOf(10_000L),
+            ),
+        )
+
+        assertTrue(result.confident)
+        assertEquals(1, result.twoToTwoGroups)
+        assertEquals(12_000L, result.cues[2].startTimeMs)
+        assertEquals(14_000L, result.cues[2].endTimeMs)
+    }
+
+    @Test
+    fun groupedReplyRepairAbstainsFromLargeInternalStartMoves() {
+        val reference = listOf(
+            SubtitleSyncCue(5_000L, 6_000L, "r0"),
+            SubtitleSyncCue(10_000L, 11_000L, "r1"),
+            SubtitleSyncCue(13_500L, 14_500L, "r2"),
+            SubtitleSyncCue(18_000L, 19_000L, "r3"),
+        )
+        val target = listOf(
+            SubtitleSyncCue(5_000L, 6_000L, "t0"),
+            SubtitleSyncCue(10_000L, 12_000L, "t1"),
+            SubtitleSyncCue(12_000L, 14_500L, "t2"),
+            SubtitleSyncCue(18_000L, 19_000L, "t3"),
+        )
+
+        val result = assertNotNull(AutoSyncTimelineRetimer.retime(reference, target, 1.0, 0.0))
+
+        assertTrue(result.confident)
+        assertEquals(1, result.twoToTwoGroups)
+        assertEquals(12_000L, result.cues[2].startTimeMs)
+        assertEquals(14_500L, result.cues[2].endTimeMs)
+    }
+
+    @Test
     fun activityAlignmentFindsConstantOffsetWithoutProvidedSeed() {
         val reference = irregularTimeline(220)
         val target = shift(reference, -12_750L)
@@ -57,6 +170,76 @@ class AutoSyncTimelineRetimeTest {
         assertEquals(3, result.coverageSegmentsPassed)
         assertTrue(result.groups.isNotEmpty())
         assertTrue(result.referenceCoverage > 0.0)
+    }
+
+    @Test
+    fun validatedDelayOnlyKeepsOneUniformOffsetDespiteLocalReferenceTimingDifferences() {
+        val externalBase = irregularTimeline(220)
+        val reference = externalBase.mapIndexed { index, cue ->
+            val localAdjustmentMs = when (index % 5) {
+                0 -> -300L
+                1 -> 200L
+                2 -> 0L
+                3 -> 300L
+                else -> -100L
+            }
+            cue.copy(
+                startTimeMs = cue.startTimeMs + localAdjustmentMs,
+                endTimeMs = cue.endTimeMs + localAdjustmentMs,
+            )
+        }
+        val target = shift(externalBase, -4_000L)
+
+        val result = assertNotNull(
+            AutoSyncTimelineRetimer.retime(
+                reference = reference,
+                target = target,
+                coarseScale = 1.0,
+                coarseInterceptMs = 0.0,
+                discoverAlignment = true,
+            ),
+        )
+
+        assertTrue(result.confident)
+        assertEquals("delay-only-validated", result.alignmentSource)
+        assertTrue(result.groups.isNotEmpty())
+        val expectedOffsetMs = result.alignmentInterceptMs.roundToLong()
+        result.cues.forEach { cue ->
+            assertEquals(expectedOffsetMs, cue.startTimeMs - cue.originalStartTimeMs)
+            assertEquals(expectedOffsetMs, cue.endTimeMs - cue.originalEndTimeMs)
+        }
+    }
+
+    @Test
+    fun precomputedDelayFastPathOutputsOnlyTheValidatedUniformOffset() {
+        val reference = irregularTimeline(220)
+        val target = shift(reference, -8_400L)
+        val alignment = assertNotNull(
+            AutoSyncTimelineRetimer.findDelayOnlyAlignment(reference, target),
+        )
+        var path: String? = null
+
+        val result = assertNotNull(
+            AutoSyncTimelineRetimer.retime(
+                reference = reference,
+                target = target,
+                coarseScale = 1.0,
+                coarseInterceptMs = 0.0,
+                discoverAlignment = true,
+                precomputedDelayOnly = alignment,
+                timingObserver = { timing -> path = timing.path },
+            ),
+        )
+
+        assertTrue(result.confident)
+        assertEquals("fast-delay", path)
+        assertEquals("delay-only-validated", result.alignmentSource)
+        assertTrue(result.groups.isNotEmpty())
+        val expectedOffsetMs = result.alignmentInterceptMs.roundToLong()
+        result.cues.forEach { cue ->
+            assertEquals(expectedOffsetMs, cue.startTimeMs - cue.originalStartTimeMs)
+            assertEquals(expectedOffsetMs, cue.endTimeMs - cue.originalEndTimeMs)
+        }
     }
 
     @Test
@@ -101,6 +284,12 @@ class AutoSyncTimelineRetimeTest {
         )
         assertTrue(result.confident)
         assertEquals("activity-correlation", result.alignmentSource)
+        assertTrue(
+            result.cues
+                .map { cue -> cue.startTimeMs - cue.originalStartTimeMs }
+                .distinct()
+                .size > 1,
+        )
     }
 
     @Test
@@ -353,6 +542,33 @@ class AutoSyncTimelineRetimeTest {
     }
 
     @Test
+    fun localizedSkipRunIsAcceptedWhenEveryOtherConfidenceGatePasses() {
+        val reference = irregularTimeline(220)
+        val localizedExtras = (0 until 14).map { index ->
+            val start = 5_000L + index * 1_250L
+            SubtitleSyncCue(start, start + 700L, "local extra $index")
+        }
+        val target = (localizedExtras + reference).sortedBy { it.startTimeMs }
+
+        val result = assertNotNull(
+            AutoSyncTimelineRetimer.retime(
+                reference = reference,
+                target = target,
+                coarseScale = 1.0,
+                coarseInterceptMs = 0.0,
+                discoverAlignment = true,
+            ),
+        )
+
+        assertTrue(result.confident)
+        assertTrue(result.longestTargetSkipRun > 12)
+        assertTrue(result.localizedMismatchIgnored)
+        assertTrue(result.targetCoverage >= 0.90)
+        assertTrue(result.coverageSegmentsPassed >= 3)
+        assertTrue(result.simpleGroupRatio >= 0.55)
+    }
+
+    @Test
     fun activityAlignmentRejectsUnrelatedTimeline() {
         val reference = irregularTimeline(220)
         val target = (0 until 205).map { index ->
@@ -499,6 +715,83 @@ class AutoSyncTimelineRetimeTest {
         assertTrue(checkpoints >= 4)
     }
 
+    @Test
+    fun mismatchedGroupTakesLocalMedianShiftButSmallCorrectionsSurvive() {
+        val target = irregularTimeline(60)
+        val reference = target.mapIndexed { index, cue ->
+            val deltaMs = when (index) {
+                20 -> 150L // genuine per-line correction
+                30 -> 900L // mis-timed reference line, still inside the match tolerance
+                else -> 0L
+            }
+            cue.copy(startTimeMs = cue.startTimeMs + deltaMs, endTimeMs = cue.endTimeMs + deltaMs)
+        }
+
+        val result = assertNotNull(AutoSyncTimelineRetimer.retime(reference, target, 1.0, 0.0))
+
+        assertTrue(result.confident, result.rejectReason)
+        assertEquals(target[20].startTimeMs + 150L, result.cues[20].startTimeMs)
+        assertEquals(target[30].startTimeMs, result.cues[30].startTimeMs)
+    }
+
+    @Test
+    fun maxAlignmentShiftCoversTheWholeSubtitleSpan() {
+        val reference = irregularTimeline(220)
+        val delayed = assertNotNull(
+            AutoSyncTimelineRetimer.retime(reference, shift(reference, -400L), 1.0, 0.0, true),
+        )
+        assertTrue(abs(delayed.maxAlignmentShiftMs() - abs(delayed.alignmentInterceptMs)) < 0.001)
+
+        // No shift at the start, but drift adds up to ~1.3 s by the end: never "within tolerance".
+        val drifting = delayed.copy(alignmentScale = 1.002, alignmentInterceptMs = 0.0)
+        val lastStartMs = drifting.cues.last().originalStartTimeMs
+        assertTrue(abs(drifting.maxAlignmentShiftMs() - lastStartMs * 0.002) < 0.001)
+        assertTrue(drifting.maxAlignmentShiftMs() > 500.0)
+    }
+
+    @Test
+    fun rejectedResultReportsFailedGates() {
+        val reference = irregularTimeline(240)
+        val target = reference.mapIndexed { index, cue ->
+            if (index < reference.size / 2) cue else cue.copy(startTimeMs = cue.startTimeMs - 5_000L, endTimeMs = cue.endTimeMs - 5_000L)
+        }
+        val result = AutoSyncTimelineRetimer.retime(reference, target, 1.0, 0.0, true)
+            ?: return
+        assertTrue(!result.confident)
+        assertTrue(!result.rejectReason.isNullOrBlank())
+    }
+
+    @Test
+    fun partialSubtitleIsFoundBeyondDefaultOffsetRange() {
+        // A CD2-style subtitle that restarts at zero for the second part of the film.
+        val reference = irregularTimeline(400)
+        val deltaMs = reference[250].startTimeMs - 4_000L
+        val target = shift(reference.drop(250), -deltaMs)
+        assertTrue(deltaMs > 180_000L)
+
+        val result = assertNotNull(AutoSyncTimelineRetimer.retime(reference, target, 1.0, 0.0, true))
+
+        assertTrue(result.confident, result.rejectReason)
+        assertTrue(abs(result.alignmentInterceptMs - deltaMs) <= 500.0)
+    }
+
+    @Test
+    fun tighterFitWinsOnlyWhenReferenceTransformsDisagree() {
+        val reference = irregularTimeline(220)
+        val precise = assertNotNull(
+            AutoSyncTimelineRetimer.retime(reference, shift(reference, -2_000L), 1.0, 0.0, true),
+        )
+        assertTrue(precise.confident, precise.rejectReason)
+        val loose = precise.copy(
+            alignmentInterceptMs = precise.alignmentInterceptMs + 3_000.0,
+            medianGroupResidualMs = precise.medianGroupResidualMs + 400.0,
+        )
+
+        assertEquals(true, preferTighterFitOnDisagreement(precise, loose))
+        assertEquals(false, preferTighterFitOnDisagreement(loose, precise))
+        val agreeing = loose.copy(alignmentInterceptMs = precise.alignmentInterceptMs + 100.0)
+        assertEquals(null, preferTighterFitOnDisagreement(precise, agreeing))
+    }
 
     private fun shift(cues: List<SubtitleSyncCue>, deltaMs: Long) = cues.map { cue ->
         cue.copy(startTimeMs = cue.startTimeMs + deltaMs, endTimeMs = cue.endTimeMs + deltaMs)

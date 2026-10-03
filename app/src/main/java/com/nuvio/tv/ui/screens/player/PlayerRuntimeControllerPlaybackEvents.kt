@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.SeekParameters
 import com.nuvio.tv.R
+import com.nuvio.tv.core.connection.PlaybackThroughput
 import com.nuvio.tv.core.player.LastPlaybackDiagnostics
 import com.nuvio.tv.core.tracking.TRACKING_SCROBBLE_DIAGNOSTIC_TAG
 import com.nuvio.tv.core.tracking.TrackingMediaKind
@@ -20,6 +21,7 @@ import com.nuvio.tv.data.repository.PlaybackIssuePlaybackSettingsInput
 import com.nuvio.tv.data.repository.PlaybackIssueReportInput
 import com.nuvio.tv.data.repository.SkipInterval
 import com.nuvio.tv.domain.model.WatchProgress
+import com.nuvio.tv.ui.screens.player.seekpreview.seekPreviewCommitSeekParameters
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -29,9 +31,14 @@ internal const val AUDIO_AMPLIFICATION_MIN_DB = 0
 internal const val AUDIO_AMPLIFICATION_MAX_DB = 10
 internal const val CENTER_MIX_LEVEL_MIN_DB = -10
 internal const val CENTER_MIX_LEVEL_MAX_DB = 30
-internal const val AUDIO_DELAY_MIN_MS = -3000
-internal const val AUDIO_DELAY_MAX_MS = 3000
+internal const val AUDIO_DELAY_MIN_MS = -60000
+internal const val AUDIO_DELAY_MAX_MS = 60000
 internal const val AUDIO_DELAY_STEP_MS = 25
+internal const val AUDIO_DELAY_HOLD_STEP_MS = 50
+internal const val AUDIO_DELAY_HOLD_FAST_STEP_MS = 100
+internal const val AUDIO_DELAY_HOLD_THRESHOLD_MS = 1000L
+internal const val AUDIO_DELAY_HOLD_FAST_THRESHOLD_MS = 2000L
+internal const val AUDIO_DELAY_HOLD_REPEAT_INTERVAL_MS = 100L
 internal const val WATCH_PROGRESS_SAVE_INTERVAL_MS = 90_000L
 
 internal fun PlayerRuntimeController.applyAudioDelay(
@@ -261,6 +268,7 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         )
                     }
                     updateMpvAvailableTracks()
+                    view.sampleThroughput(context, currentStreamUrl)
                     updateActiveSkipInterval(pos)
                     if (!_playbackTimeline.value.isLive) {
                         evaluatePostPlayOverlayVisibility(
@@ -292,6 +300,8 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     playerReportsLive = player.isCurrentMediaItemLive,
                     isPlaying = player.isPlaying
                 )
+                // Nuvio RS hook: read-ahead's connection; a live stream only arrives at its own bitrate, so it says nothing about the network.
+                PlaybackThroughput.onExoTick(context, currentStreamUrl, !player.isCurrentMediaItemLive && playerDuration != androidx.media3.common.C.TIME_UNSET && player.isLoading)
                 playbackAnalyticsDiagnostics.recordProgressSnapshot(
                     player = player,
                     hasRenderedFirstFrame = hasRenderedFirstFrame,
@@ -745,7 +755,13 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
                 )
             }
             runCatching { tvRecommendationManager.onProgressRemoved(normalizedProgress.contentId) }
-        } else {
+        } else if (!hasMarkedCurrentEpisodeCompleted) {
+            // Only save in-progress when the episode has not already been
+            // marked as completed during this playback session.  After
+            // natural playback completion the player can report stale
+            // position/duration values (e.g. duration=0 → fallbackPercent=5)
+            // which would overwrite the completed entry in the mutation
+            // store and push an incorrect low-progress value to remote.
             watchProgressRepository.saveProgress(
                 normalizedProgress,
                 profileId = profileId,
@@ -1086,8 +1102,7 @@ internal fun PlayerRuntimeController.setSubtitleDelayMs(targetMs: Int, showOverl
         _uiState.update {
             it.copy(
                 subtitleDelayMs = newDelayMs,
-                showSubtitleDelayOverlay = false,
-                showControls = true
+                showSubtitleDelayOverlay = false
             )
         }
     }
@@ -1242,7 +1257,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             if (_playbackTimeline.value.isLive) return
             val target = pendingPreviewSeekPosition
             if (target != null) {
-                seekPlaybackTo(target, SeekParameters.CLOSEST_SYNC)
+                seekPlaybackTo(target, seekPreviewCommitSeekParameters())
                 updatePlaybackTimeline(currentPosition = target)
                 pendingPreviewSeekPosition = null
                 scheduleProgressSyncAfterSeek()
@@ -1324,6 +1339,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             pendingAddonSubtitleTrackId = null
             pendingAudioSelectionAfterSubtitleRefresh = null
             resetSubtitleAutoSyncState()
+            stopAutomaticSubtitleSync() // AutoSync hook
             rememberInternalSubtitleSelection(event.index)
             selectSubtitleTrack(event.index)
             _uiState.update {
@@ -1347,6 +1363,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             pendingAddonSubtitleTrackId = null
             pendingAudioSelectionAfterSubtitleRefresh = null
             resetSubtitleAutoSyncState()
+            stopAutomaticSubtitleSync() // AutoSync hook
             rememberSubtitleDisabled()
             disableSubtitles()
             _uiState.update {
@@ -1372,11 +1389,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             autoSubtitleSelected = true
             rememberAddonSubtitleSelection(event.subtitle)
             selectAddonSubtitle(event.subtitle)
-            maybeRunAutomaticSubtitleSync(
-                selectedSubtitle = event.subtitle,
-                candidateScope =
-                    com.nuvio.tv.ui.screens.player.autosync.AutoSyncCandidateScope.SELECTED_ONLY,
-            )
+            runSelectedAutomaticSubtitleSync(event.subtitle) // AutoSync hook
             _uiState.update {
                 it.copy(
                     showSubtitleOverlay = true,
@@ -1730,11 +1743,27 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
         PlayerEvent.OnToggleAspectRatio -> {
             val state = _uiState.value
             if (state.tunnelingEnabled) {
+                val fill = !state.tunneledSurfaceFill
+                val label = PlayerDisplayModeUtils.resizeModeLabel(
+                    PlayerDisplayModeUtils.exoSurfaceResizeMode(
+                        tunnelingEnabled = true,
+                        tunneledSurfaceFill = fill
+                    ),
+                    context
+                )
+                Log.d(
+                    PlayerRuntimeController.TAG,
+                    "Tunneled surface resize toggled: fill=$fill ($label)"
+                )
                 _uiState.update {
                     it.copy(
+                        tunneledSurfaceFill = fill,
                         showAspectRatioIndicator = true,
-                        aspectRatioIndicatorText = context.getString(R.string.player_aspect_tunneling_unavailable)
+                        aspectRatioIndicatorText = label
                     )
+                }
+                scope.launch {
+                    deviceLocalPlayerPreferences.setTunneledSurfaceFill(fill)
                 }
                 hideAspectRatioIndicatorJob?.cancel()
                 hideAspectRatioIndicatorJob = scope.launch {
