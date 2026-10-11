@@ -16,6 +16,7 @@ import com.nuvio.tv.core.tracking.buildTrackingMediaReference
 import com.nuvio.tv.core.tracking.scrobbleDiagnosticIdentity
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.data.local.SubtitleStyleSettings
+import com.nuvio.tv.data.mediaserver.ServerItemRef
 import com.nuvio.tv.data.repository.PlaybackIssueErrorInput
 import com.nuvio.tv.data.repository.PlaybackIssuePlaybackSettingsInput
 import com.nuvio.tv.data.repository.PlaybackIssueReportInput
@@ -285,6 +286,7 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         handleNaturalPlaybackEnded()
                     }
                 }
+                reportServerPlayback()
                 delay(500)
                 continue
             }
@@ -373,6 +375,7 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     }
                 }
             }
+            reportServerPlayback()
             delay(500)
         }
     }
@@ -703,6 +706,28 @@ internal fun PlayerRuntimeController.cancelNextEpisodeAutoPlayOnFatalError() {
     stillWatchingPromptJob = null
 }
 
+internal fun PlayerRuntimeController.currentWatchProgress(
+    parentContentId: String,
+    parentContentType: String,
+    position: Long,
+    duration: Long,
+    lastWatched: Long
+) = WatchProgress(
+    contentId = parentContentId,
+    contentType = parentContentType,
+    name = contentName ?: title,
+    poster = poster,
+    backdrop = backdrop,
+    logo = logo,
+    videoId = currentVideoId ?: parentContentId,
+    season = currentSeason,
+    episode = currentEpisode,
+    episodeTitle = currentEpisodeTitle,
+    position = position,
+    duration = duration,
+    lastWatched = lastWatched
+)
+
 internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, duration: Long, syncRemote: Boolean = true) {
     if (contentType.equals("cloud", ignoreCase = true)) {
         saveCloudLibraryProgress(position, duration, completed = false)
@@ -715,22 +740,8 @@ internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, d
 
     val fallbackPercent = if (duration <= 0L) 5f else null
 
-    val progress = WatchProgress(
-        contentId = parentContentId,
-        contentType = parentContentType,
-        name = contentName ?: title,
-        poster = poster,
-        backdrop = backdrop,
-        logo = logo,
-        videoId = currentVideoId ?: parentContentId,
-        season = currentSeason,
-        episode = currentEpisode,
-        episodeTitle = currentEpisodeTitle,
-        position = position,
-        duration = duration,
-        lastWatched = System.currentTimeMillis(),
-        progressPercent = fallbackPercent
-    )
+    val progress = currentWatchProgress(parentContentId, parentContentType, position, duration, System.currentTimeMillis())
+        .copy(progressPercent = fallbackPercent)
 
     scope.launch(kotlinx.coroutines.NonCancellable) {
         val effectiveContentId = watchProgressRepository.normalizeParentContentId(
@@ -802,10 +813,12 @@ internal fun PlayerRuntimeController.refreshScrobbleItem() {
 
 internal fun PlayerRuntimeController.buildScrobbleItem(): TrackingMediaReference? {
     val rawContentId = contentId ?: return null
+    val isServerItem = ServerItemRef.isServerId(rawContentId)
+    val parentMetaId = if (isServerItem) serverImdbId(rawContentId) ?: return null else rawContentId
     val reference = buildTrackingMediaReference(
         contentType = contentType ?: "movie",
-        parentMetaId = rawContentId,
-        videoId = currentVideoId,
+        parentMetaId = parentMetaId,
+        videoId = currentVideoId.takeUnless { isServerItem },
         title = contentName ?: title,
         releaseInfo = year,
         seasonNumber = currentSeason,
@@ -1279,8 +1292,12 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
                 stage = "event-select-audio",
                 message = "index=${event.index}"
             )
-            rememberAudioSelection(event.index)
-            selectAudioTrack(event.index)
+            if (_uiState.value.serverAudioTracks.isNotEmpty()) {
+                selectServerAudio(event.index)
+            } else {
+                rememberAudioSelection(event.index)
+                selectAudioTrack(event.index)
+            }
             _uiState.update {
                 it.copy(
                     showAudioOverlay = false,
@@ -1334,8 +1351,12 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             pendingAudioSelectionAfterSubtitleRefresh = null
             resetSubtitleAutoSyncState()
             stopAutomaticSubtitleSync() // AutoSync hook
-            rememberInternalSubtitleSelection(event.index)
-            selectSubtitleTrack(event.index)
+            if (_uiState.value.serverSubtitleTracks.isNotEmpty()) {
+                selectServerSubtitle(event.index)
+            } else {
+                rememberInternalSubtitleSelection(event.index)
+                selectSubtitleTrack(event.index)
+            }
             _uiState.update {
                 it.copy(
                     showSubtitleOverlay = true,
@@ -1360,6 +1381,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             stopAutomaticSubtitleSync() // AutoSync hook
             rememberSubtitleDisabled()
             disableSubtitles()
+            if (hasBurnedInServerSubtitle) clearServerSubtitle()
             _uiState.update {
                 it.copy(
                     showSubtitleOverlay = true,
@@ -1383,6 +1405,7 @@ fun PlayerRuntimeController.onEvent(event: PlayerEvent) {
             autoSubtitleSelected = true
             rememberAddonSubtitleSelection(event.subtitle)
             selectAddonSubtitle(event.subtitle)
+            if (hasBurnedInServerSubtitle) clearServerSubtitle()
             runSelectedAutomaticSubtitleSync(event.subtitle) // AutoSync hook
             _uiState.update {
                 it.copy(
@@ -1882,7 +1905,8 @@ internal fun PlayerRuntimeController.buildStreamInfoData(): StreamInfoData {
             com.nuvio.tv.data.local.InternalPlayerEngine.EXOPLAYER -> context.getString(R.string.playback_engine_exoplayer)
             com.nuvio.tv.data.local.InternalPlayerEngine.MVP_PLAYER -> context.getString(R.string.playback_engine_mvplayer)
             com.nuvio.tv.data.local.InternalPlayerEngine.AUTO -> null
-        }
+        },
+        serverPlayback = serverPlaybackSummary()
     )
 }
 
