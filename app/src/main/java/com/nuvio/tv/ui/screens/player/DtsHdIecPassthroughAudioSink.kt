@@ -735,6 +735,12 @@ internal class DtsHdIecPassthroughAudioSink(
 
     private fun drainPending(track: AudioTrack): Boolean {
         val rest = pendingBurst ?: return true
+        if (rest.remaining() < iecChannels * 2) {
+            // AudioTrack writes whole frames only; a sub-frame tail would block every write.
+            Log.w(TAG, "dropping ${rest.remaining()}B sub-frame burst tail")
+            pendingBurst = null
+            return true
+        }
         if (writeBurst(track, rest)) {
             pendingBurst = null
             return true
@@ -812,8 +818,13 @@ internal class DtsHdIecPassthroughAudioSink(
         }
         val pktOffset = (period * 4).toInt()
         val outBytes = DTSHD_START_CODE.size + 2 + length
+        // putPayloadSwapped emits whole 16-bit words, so an odd payload takes one byte more.
+        // Padding must use that size (FFmpeg: FFALIGN(out_bytes, 2)); otherwise the burst is
+        // pktOffset + 1 bytes, AudioTrack only accepts whole 16-byte frames, and the trailing
+        // byte stays pending forever: writes return 0, the track drains and the HAL xruns.
+        val payloadBytes = (outBytes + 1) and 1.inv()
         lastFrameDurationUs = (blocks shl 5).toLong() * C.MICROS_PER_SECOND / coreSampleRate
-        if (outBytes > pktOffset - BURST_HEADER_SIZE) {
+        if (payloadBytes > pktOffset - BURST_HEADER_SIZE) {
             Log.w(TAG, "DTS-HD frame too large for burst: $outBytes > ${pktOffset - BURST_HEADER_SIZE}")
             lastFrameDurationUs = -1
             return false
@@ -832,7 +843,7 @@ internal class DtsHdIecPassthroughAudioSink(
         // Payload bytes are emitted as 16-bit little-endian words of the big-endian stream,
         // i.e. every byte pair is swapped (FFmpeg ff_spdif_bswap_buf16).
         putPayloadSwapped(src, offset, length)
-        val padding = pktOffset - BURST_HEADER_SIZE - outBytes
+        val padding = pktOffset - BURST_HEADER_SIZE - payloadBytes
         repeat(padding) { burst.put(0) }
         writtenBursts++
         return true
