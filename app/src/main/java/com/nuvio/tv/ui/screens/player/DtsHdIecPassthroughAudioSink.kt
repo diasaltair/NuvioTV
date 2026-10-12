@@ -86,6 +86,7 @@ internal class DtsHdIecPassthroughAudioSink(
 
     private var lastUnderrunCount: Int = 0
     private var lastFeedMs: Long = 0
+    private val feedDiag = IecFeedDiagnostics(TAG)
 
     // Stall detection (same idea as media3's AudioTrackPositionTracker.isStalled): the head
     // position stops moving while data is pending and the track is playing.
@@ -347,6 +348,8 @@ internal class DtsHdIecPassthroughAudioSink(
             fallbackToWrappedSink("AudioTrack init failed")
             return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         }
+        feedDiag.onHandle(buffer.remaining(), presentationTimeUs)
+        feedDiag.tick(track, playing, writtenFrames, rawHeadFrames(track))
 
         if (isTrackStalled(track)) {
             if (trackRestarts >= MAX_TRACK_RESTARTS) {
@@ -364,6 +367,7 @@ internal class DtsHdIecPassthroughAudioSink(
                 fallbackToWrappedSink("$stalledWrites consecutive stalled writes")
                 return super.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
             }
+            feedDiag.onPendingBlocked()
             return false
         }
 
@@ -380,6 +384,10 @@ internal class DtsHdIecPassthroughAudioSink(
             val frameEnd = findNextCoreSync(buffer, frameStart + 4)
             val frameLen = frameEnd - frameStart
             if (!buildBurst(buffer, frameStart, frameLen)) {
+                feedDiag.onDrop(
+                    noSync = frameLen < 4 || readBE32(buffer, frameStart) != DCA_SYNCWORD_CORE_BE,
+                    head = "len=$frameLen pts=${presentationTimeUs / 1000}ms " + hexHead(buffer, frameStart, frameLen)
+                )
                 if (iecTunnelActive && lastFrameDurationUs < 0) {
                     // Frame larger than the tunnel-shaped burst: leave the tunnel, keep the audio.
                     abandonTunnel("DTS-HD frame does not fit the ${iecChannels}ch IEC burst")
@@ -388,6 +396,7 @@ internal class DtsHdIecPassthroughAudioSink(
                 buffer.position(frameEnd)
                 continue
             }
+            feedDiag.onBurst()
             buffer.position(frameEnd)
             burst.flip()
             val fullyWritten = writeBurst(track, burst)
@@ -436,6 +445,7 @@ internal class DtsHdIecPassthroughAudioSink(
     override fun getCurrentPositionUs(sourceEnded: Boolean): Long {
         if (!iecActive) return super.getCurrentPositionUs(sourceEnded)
         val track = audioTrack ?: return AudioSink.CURRENT_POSITION_NOT_SET
+        feedDiag.tick(track, playing, writtenFrames, rawHeadFrames(track))
         if (startMediaTimeUs == C.TIME_UNSET) return AudioSink.CURRENT_POSITION_NOT_SET
         val played = (playedFrames(track) - anchorFrames).coerceAtLeast(0)
         return startMediaTimeUs + played * C.MICROS_PER_SECOND / IEC_SAMPLE_RATE
@@ -703,6 +713,7 @@ internal class DtsHdIecPassthroughAudioSink(
         } else {
             track.write(data, before, AudioTrack.WRITE_NON_BLOCKING)
         }
+        feedDiag.onWrite(written)
         if (written < 0) {
             Log.w(TAG, "AudioTrack.write error $written")
             // Treat a write error like a stall limit: the caller falls back to the wrapped sink.
@@ -865,6 +876,11 @@ internal class DtsHdIecPassthroughAudioSink(
 
     private fun readBE16(b: ByteBuffer, i: Int): Int =
         ((b.get(i).toInt() and 0xff) shl 8) or (b.get(i + 1).toInt() and 0xff)
+
+    private fun hexHead(b: ByteBuffer, offset: Int, length: Int): String {
+        val n = minOf(8, length, b.limit() - offset)
+        return (0 until n).joinToString("") { "%02x".format(b.get(offset + it)) }
+    }
 
     private fun readBE32(b: ByteBuffer, i: Int): Int =
         (readBE16(b, i) shl 16) or readBE16(b, i + 2)
