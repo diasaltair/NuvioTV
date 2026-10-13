@@ -33,13 +33,21 @@ jobs:
       - name: Prepare local properties
         env:
           SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
         run: |
           touch local.properties
           touch local.dev.properties
-          # Read at build time into BuildConfig.SIMKL_CLIENT_ID; without it Simkl login is missing.
-          if [ -n "$SIMKL_CLIENT_ID" ]; then
-            echo "SIMKL_CLIENT_ID=$SIMKL_CLIENT_ID" >> local.properties
-          fi
+          # Read at build time into BuildConfig; a missing value disables that login in the app.
+          for key in SIMKL_CLIENT_ID TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET MDBLIST_CLIENT_ID; do
+            value="${!key}"
+            if [ -n "$value" ]; then
+              echo "$key=$value" >> local.properties
+            else
+              echo "::warning::$key secret not set, that integration will be disabled"
+            fi
+          done
 
       - name: Prepare signing config
         env:
