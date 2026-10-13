@@ -31,9 +31,15 @@ jobs:
           restore-keys: iec-build-cache-${{ runner.os }}-
 
       - name: Prepare local properties
+        env:
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
         run: |
           touch local.properties
           touch local.dev.properties
+          # Read at build time into BuildConfig.SIMKL_CLIENT_ID; without it Simkl login is missing.
+          if [ -n "$SIMKL_CLIENT_ID" ]; then
+            echo "SIMKL_CLIENT_ID=$SIMKL_CLIENT_ID" >> local.properties
+          fi
 
       - name: Prepare signing config
         env:
