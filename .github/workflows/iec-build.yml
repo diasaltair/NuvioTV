@@ -40,6 +40,13 @@ jobs:
           touch local.properties
           touch local.dev.properties
           # Read at build time into BuildConfig; a missing value disables that login in the app.
+          # Public service URLs, same values as the AutoSync release workflows. IntroDB is the
+          # skip intro/recap/outro source for movies and series; empty disables it in the app.
+          {
+            echo "INTRODB_API_URL=https://api.introdb.app/"
+            echo "IMDB_RATINGS_API_BASE_URL=https://seriesgraph.com/"
+            echo "IMDB_TAPFRAME_API_BASE_URL=https://imdb.tapframe.space/"
+          } >> local.properties
           for key in SIMKL_CLIENT_ID TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET MDBLIST_CLIENT_ID; do
             value="${!key}"
             if [ -n "$value" ]; then
