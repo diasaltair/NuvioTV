@@ -184,6 +184,12 @@ internal object EmbeddedSubtitleTimelineLoader {
                 // The owning load was cancelled (e.g. its player closed). Load for this caller
                 // unless this caller itself is the one being cancelled.
                 currentCoroutineContext().ensureActive()
+                // The cancellation can resume us synchronously, before the owner's finally has
+                // unmapped its Deferred: drop the dead entry first, or the retry joins it again,
+                // fails at once and recurses until StackOverflowError.
+                synchronized(cacheLock) {
+                    if (inFlight[cacheKey] === activeLoad) inFlight.remove(cacheKey)
+                }
                 return load(sourceUrl, sourceHeaders, retryAfterJoinedFailure)
             }
             if (joined != null || !retryAfterJoinedFailure) return joined
@@ -199,10 +205,12 @@ internal object EmbeddedSubtitleTimelineLoader {
             return loadAndCache(cacheKey, sourceUrl, sourceHeaders)
                 .also(ownedLoad::complete)
         } finally {
-            ownedLoad.cancel()
+            // Unmap before cancelling: cancel() resumes joiners immediately, and they must not
+            // find this Deferred in inFlight anymore.
             synchronized(cacheLock) {
                 if (inFlight[cacheKey] === ownedLoad) inFlight.remove(cacheKey)
             }
+            ownedLoad.cancel()
         }
     }
 
