@@ -1,9 +1,7 @@
 package com.nuvio.tv.ui.screens.player
 
 import android.media.MediaCodecList
-import android.media.MediaFormat
 import android.os.Build
-import android.util.Log
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
@@ -40,55 +38,14 @@ internal fun hardwareFirstVideoDecoders(format: Format, decoders: List<MediaCode
         runCatching { it.isFormatSupported(format) }.getOrDefault(false)
     }
 
-/**
- * The platform video renderer with [hardwareFirstVideoDecoders] applied to its decoder list.
- * [onInvalidDolbyVisionHdrMetadata] runs on the playback thread, at most once, when the DV
- * decoder output fails [DolbyVisionHdrMetadataPolicy].
- */
-internal class HardwareFirstVideoRenderer(
-    builder: MediaCodecVideoRenderer.Builder,
-    private val onInvalidDolbyVisionHdrMetadata: (() -> Unit)? = null,
-) : MediaCodecVideoRenderer(builder) {
-    private var reportedInvalidHdrMetadata = false
-
-    private companion object {
-        const val TAG = "HardwareFirstVideo"
-    }
-
+/** The platform video renderer with [hardwareFirstVideoDecoders] applied to its decoder list. */
+internal class HardwareFirstVideoRenderer(builder: MediaCodecVideoRenderer.Builder) : MediaCodecVideoRenderer(builder) {
     override fun getDecoderInfos(
         mediaCodecSelector: MediaCodecSelector,
         format: Format,
         requiresSecureDecoder: Boolean,
     ): List<MediaCodecInfo> =
         hardwareFirstVideoDecoders(format, super.getDecoderInfos(mediaCodecSelector, format, requiresSecureDecoder))
-
-    override fun onOutputFormatChanged(format: Format, mediaFormat: MediaFormat?) {
-        super.onOutputFormatChanged(format, mediaFormat)
-        Log.i(
-            TAG,
-            "VIDEO_OUTPUT_FORMAT: mime=${format.sampleMimeType} codecs=${format.codecs} " +
-                "hdrCheck=${onInvalidDolbyVisionHdrMetadata != null} mediaFormat=${mediaFormat != null}"
-        )
-        val callback = onInvalidDolbyVisionHdrMetadata ?: return
-        if (reportedInvalidHdrMetadata || mediaFormat == null) return
-        if (format.sampleMimeType != MimeTypes.VIDEO_DOLBY_VISION) return
-        val outputIsPq = DolbyVisionHdrMetadataPolicy.outputIsPq(mediaFormat)
-        val outputMaxLuminanceNits = DolbyVisionHdrMetadataPolicy.outputMaxLuminanceNits(mediaFormat)
-        val strip = DolbyVisionHdrMetadataPolicy.shouldStripDolbyVision(
-            codecs = format.codecs,
-            outputIsPq = outputIsPq,
-            outputMaxLuminanceNits = outputMaxLuminanceNits,
-        )
-        Log.i(
-            TAG,
-            "DV_OUTPUT_FORMAT: codecs=${format.codecs} outputPq=$outputIsPq " +
-                "outputMaxNits=$outputMaxLuminanceNits strip=$strip"
-        )
-        if (strip) {
-            reportedInvalidHdrMetadata = true
-            callback()
-        }
-    }
 }
 
 internal fun isSoftwareDecoder(info: MediaCodecInfo): Boolean =
