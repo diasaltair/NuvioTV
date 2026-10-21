@@ -849,12 +849,18 @@ internal fun PlayerRuntimeController.initializePlayer(
             // OR the error handler's per-stream override (preserved for retry-after-failure).
             val mapDv7ToHevcEnabled = effectiveDv7Mode == Dv7HandlingMode.HDR10_BASE_LAYER ||
                     dv7ToHevcForcedStreamUrls.contains(url)
-            val isHdr10BaseLayerModeActive = when (playerSettings.dv7HandlingMode) {
+            val dvStripForcedForUrl = dvStripForcedStreamUrls.contains(url)
+            val isHdr10BaseLayerModeActive = dvStripForcedForUrl || when (playerSettings.dv7HandlingMode) {
                 Dv7HandlingMode.AUTO -> dv7AutoResult?.displayDv != true
                 else -> effectiveDv7Mode == Dv7HandlingMode.HDR10_BASE_LAYER ||
                         effectiveDv7Mode == Dv7HandlingMode.STRIP_DV
             }
             com.nuvio.tv.core.player.dvmkv.DolbyVisionCompatibility.setHdr10BaseLayerModeActive(isHdr10BaseLayerModeActive)
+            // A per-stream strip comes from DolbyVisionHdrMetadataPolicy: the DV decoder broke
+            // this file's HDR metadata on an earlier attempt.
+            val stripDvRpuEnabled = playerSettings.dv7HandlingMode == Dv7HandlingMode.STRIP_DV ||
+                    effectiveDv7Mode == Dv7HandlingMode.HDR10_BASE_LAYER ||
+                    dvStripForcedForUrl
             isMapDv7ToHevcActiveForCurrentPlayback = mapDv7ToHevcEnabled
             val convertToDv81Active = !mapDv7ToHevcEnabled &&
                     dv7AutoResult?.decision == DolbyVisionBaseLayerPolicy.Decision.CONVERT_TO_DV81
@@ -926,6 +932,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                 initialForcePcm = hasTriedAudioPcmFallback || isBluetoothAudioOutput,
                 preferSoftwareAudioOnly = isBluetoothAudioOutput,
                 mapDv7ToHevc = mapDv7ToHevcEnabled,
+                onInvalidDolbyVisionHdrMetadata = if (stripDvRpuEnabled) null else fun() {
+                    scope.launch { handleInvalidDolbyVisionHdrMetadata(url) }
+                },
                 onPlaybackSpeedAwareAudioSinkCreated = { playbackSpeedAwareAudioSink = it },
                 onFfmpegAudioRendererChanged = { renderer ->
                     ffmpegAudioRenderer = renderer
@@ -946,8 +955,6 @@ internal fun PlayerRuntimeController.initializePlayer(
 
             // The app-level factory performs DV7 conversion for the in-band-RPU containers
             // (MP4/fMP4/TS); MKV goes through the vendored extractor. Pass-through for non-DV.
-            val stripDvRpuEnabled = playerSettings.dv7HandlingMode == Dv7HandlingMode.STRIP_DV ||
-                    effectiveDv7Mode == Dv7HandlingMode.HDR10_BASE_LAYER
             if (stripDvRpuEnabled) {
                 Log.i(PlayerRuntimeController.TAG, "DV_RPU_STRIP: enabled — will remove DV RPU NALs")
             }
@@ -2153,6 +2160,7 @@ private class SubtitleOffsetRenderersFactory(
      */
     private val preferSoftwareAudioOnly: Boolean = false,
     private val mapDv7ToHevc: Boolean = false,
+    private val onInvalidDolbyVisionHdrMetadata: (() -> Unit)? = null,
     private val onPlaybackSpeedAwareAudioSinkCreated: (PlaybackSpeedAwareAudioSink) -> Unit,
     private val onFfmpegAudioRendererChanged: (FfmpegAudioRenderer?) -> Unit,
     private val onCuesShown: (List<Cue>) -> Unit = {}
@@ -2196,7 +2204,7 @@ private class SubtitleOffsetRenderersFactory(
                     .setEventListener(eventListener)
                     .setMaxDroppedFramesToNotify(DefaultRenderersFactory.MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
                     .setMapDV7ToHevc(mapDv7ToHevc)
-                out.add(HardwareFirstVideoRenderer(builder))
+                out.add(HardwareFirstVideoRenderer(builder, onInvalidDolbyVisionHdrMetadata))
             } else {
                 out.add(renderer)
             }

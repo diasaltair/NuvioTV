@@ -764,6 +764,23 @@ internal fun PlayerRuntimeController.retryCurrentStreamWithDolbyVisionFallback(f
     scheduleDeferredPlayerReinitialize(fromPositionMs = fromPositionMs, clearResumeProgress = true)
 }
 
+/**
+ * The DV decoder of a Profile 8 stream dropped its HDR metadata (see
+ * [DolbyVisionHdrMetadataPolicy]), which makes the box fall back to SDR. Replays the stream once
+ * at the current position with the DV layer stripped, so it plays as HDR10.
+ */
+internal fun PlayerRuntimeController.handleInvalidDolbyVisionHdrMetadata(streamUrl: String) {
+    if (streamUrl != currentStreamUrl || isUsingMpvEngine()) return
+    if (!dvStripForcedStreamUrls.add(streamUrl)) return
+    val position = _exoPlayer?.currentPosition ?: 0L
+    Log.i(
+        PlayerRuntimeController.TAG,
+        "DV_INVALID_HDR_METADATA: DV decoder dropped the HDR metadata; " +
+            "replaying as HDR10 at ${position}ms"
+    )
+    scheduleDeferredPlayerReinitialize(fromPositionMs = position, clearResumeProgress = true)
+}
+
 internal fun PlayerRuntimeController.retryCurrentStreamWithDv7Mode1Fallback(fromPositionMs: Long) {
     scheduleDeferredPlayerReinitialize(fromPositionMs = fromPositionMs, clearResumeProgress = true)
 }
