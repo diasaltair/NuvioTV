@@ -3,6 +3,7 @@ package com.nuvio.tv.ui.screens.player
 import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Build
+import android.util.Log
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.exoplayer.mediacodec.MediaCodecInfo
@@ -50,6 +51,10 @@ internal class HardwareFirstVideoRenderer(
 ) : MediaCodecVideoRenderer(builder) {
     private var reportedInvalidHdrMetadata = false
 
+    private companion object {
+        const val TAG = "HardwareFirstVideo"
+    }
+
     override fun getDecoderInfos(
         mediaCodecSelector: MediaCodecSelector,
         format: Format,
@@ -59,14 +64,28 @@ internal class HardwareFirstVideoRenderer(
 
     override fun onOutputFormatChanged(format: Format, mediaFormat: MediaFormat?) {
         super.onOutputFormatChanged(format, mediaFormat)
+        Log.i(
+            TAG,
+            "VIDEO_OUTPUT_FORMAT: mime=${format.sampleMimeType} codecs=${format.codecs} " +
+                "hdrCheck=${onInvalidDolbyVisionHdrMetadata != null} mediaFormat=${mediaFormat != null}"
+        )
         val callback = onInvalidDolbyVisionHdrMetadata ?: return
         if (reportedInvalidHdrMetadata || mediaFormat == null) return
         if (format.sampleMimeType != MimeTypes.VIDEO_DOLBY_VISION) return
+        val inputHasHdrStaticInfo = format.colorInfo?.hdrStaticInfo != null
+        val outputIsPq = DolbyVisionHdrMetadataPolicy.outputIsPq(mediaFormat)
+        val outputMaxLuminanceNits = DolbyVisionHdrMetadataPolicy.outputMaxLuminanceNits(mediaFormat)
         val strip = DolbyVisionHdrMetadataPolicy.shouldStripDolbyVision(
             codecs = format.codecs,
-            inputHasHdrStaticInfo = format.colorInfo?.hdrStaticInfo != null,
-            outputIsPq = DolbyVisionHdrMetadataPolicy.outputIsPq(mediaFormat),
-            outputMaxLuminanceNits = DolbyVisionHdrMetadataPolicy.outputMaxLuminanceNits(mediaFormat),
+            inputHasHdrStaticInfo = inputHasHdrStaticInfo,
+            outputIsPq = outputIsPq,
+            outputMaxLuminanceNits = outputMaxLuminanceNits,
+        )
+        Log.i(
+            TAG,
+            "DV_OUTPUT_FORMAT: codecs=${format.codecs} inputStaticInfo=$inputHasHdrStaticInfo " +
+                "inputTransfer=${format.colorInfo?.colorTransfer} outputPq=$outputIsPq " +
+                "outputMaxNits=$outputMaxLuminanceNits strip=$strip"
         )
         if (strip) {
             reportedInvalidHdrMetadata = true
