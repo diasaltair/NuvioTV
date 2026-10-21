@@ -11,13 +11,12 @@ import org.junit.Test
 class DolbyVisionHdrMetadataPolicyTest {
 
     @Test
-    fun `profile 8 whose decoder dropped the static info is stripped`() {
-        assertTrue(strip(codecs = "dvhe.08.06", outputNits = null))
+    fun `profile 8 whose decoder zeroed the static info is stripped`() {
+        assertTrue(strip(codecs = "dvhe.08.06", outputNits = 0))
     }
 
     @Test
-    fun `profile 8 with nonsense mastering luminance is stripped`() {
-        assertTrue(strip(codecs = "dvh1.08.06", outputNits = 0))
+    fun `profile 8 with out of range mastering luminance is stripped`() {
         assertTrue(strip(codecs = "dvh1.08.06", outputNits = 65_535))
     }
 
@@ -28,18 +27,18 @@ class DolbyVisionHdrMetadataPolicyTest {
     }
 
     @Test
-    fun `profile 5 is never stripped, it has no HDR10 base layer`() {
-        assertFalse(strip(codecs = "dvhe.05.06", outputNits = null))
+    fun `profile 8 without any output static info is left alone`() {
+        assertFalse(strip(codecs = "dvhe.08.06", outputNits = null))
     }
 
     @Test
-    fun `a stream without its own HDR metadata is left alone`() {
-        assertFalse(strip(codecs = "dvhe.08.06", inputHasStaticInfo = false, outputNits = null))
+    fun `profile 5 is never stripped, it has no HDR10 base layer`() {
+        assertFalse(strip(codecs = "dvhe.05.06", outputNits = 0))
     }
 
     @Test
     fun `non PQ output is left alone`() {
-        assertFalse(strip(codecs = "dvhe.08.06", outputIsPq = false, outputNits = null))
+        assertFalse(strip(codecs = "dvhe.08.06", outputIsPq = false, outputNits = 0))
     }
 
     @Test
@@ -53,12 +52,10 @@ class DolbyVisionHdrMetadataPolicyTest {
 
     private fun strip(
         codecs: String,
-        inputHasStaticInfo: Boolean = true,
         outputIsPq: Boolean = true,
         outputNits: Int?,
     ): Boolean = DolbyVisionHdrMetadataPolicy.shouldStripDolbyVision(
         codecs = codecs,
-        inputHasHdrStaticInfo = inputHasStaticInfo,
         outputIsPq = outputIsPq,
         outputMaxLuminanceNits = outputNits,
     )

@@ -7,9 +7,9 @@ import java.nio.ByteOrder
 /**
  * Some Dolby Vision Profile 8 releases (re-encodes and upscales) carry an RPU whose mastering
  * metadata is nonsense, e.g. 10,000,000 nits. The Amlogic DV decoder copies it into its output
- * format, the platform drops it as invalid, and the box then falls back from HDR to SDR on the
- * HDMI output a few seconds in. The same file decoded as HEVC keeps its valid HDR10 metadata,
- * so playing it with the DV layer stripped is the fix.
+ * format, the platform rejects it and leaves the static info zeroed, and the box then falls back
+ * from HDR to SDR on the HDMI output a few seconds in. The same file decoded as HEVC keeps its
+ * valid HDR10 metadata, so playing it with the DV layer stripped is the fix.
  *
  * Profile 8 always has an HDR10 base layer, so only it is stripped. Profile 5 has no such
  * layer and is never touched.
@@ -24,20 +24,17 @@ internal object DolbyVisionHdrMetadataPolicy {
     private const val MAX_LUMINANCE_OFFSET = 17
 
     /**
-     * True when the DV decoder dropped or mangled HDR metadata that the stream itself carries.
-     * [inputHasHdrStaticInfo] is the track's own HDR10 metadata, so a file that has none never
-     * qualifies; [outputMaxLuminanceNits] is null when the decoder output has no static info.
+     * True when the DV decoder output carries static info whose mastering luminance is zero or
+     * out of range. [outputMaxLuminanceNits] is null when the output has no static info at all;
+     * that says nothing about the stream, so it never qualifies.
      */
     fun shouldStripDolbyVision(
         codecs: String?,
-        inputHasHdrStaticInfo: Boolean,
         outputIsPq: Boolean,
         outputMaxLuminanceNits: Int?,
     ): Boolean {
-        if (!isProfile8(codecs) || !inputHasHdrStaticInfo || !outputIsPq) return false
-        return outputMaxLuminanceNits == null ||
-            outputMaxLuminanceNits <= 0 ||
-            outputMaxLuminanceNits > MAX_VALID_MASTERING_NITS
+        if (!isProfile8(codecs) || !outputIsPq || outputMaxLuminanceNits == null) return false
+        return outputMaxLuminanceNits <= 0 || outputMaxLuminanceNits > MAX_VALID_MASTERING_NITS
     }
 
     internal fun isProfile8(codecs: String?): Boolean {

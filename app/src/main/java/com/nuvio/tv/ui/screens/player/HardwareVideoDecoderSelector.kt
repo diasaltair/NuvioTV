@@ -72,19 +72,16 @@ internal class HardwareFirstVideoRenderer(
         val callback = onInvalidDolbyVisionHdrMetadata ?: return
         if (reportedInvalidHdrMetadata || mediaFormat == null) return
         if (format.sampleMimeType != MimeTypes.VIDEO_DOLBY_VISION) return
-        val inputHasHdrStaticInfo = format.colorInfo?.hdrStaticInfo != null
         val outputIsPq = DolbyVisionHdrMetadataPolicy.outputIsPq(mediaFormat)
         val outputMaxLuminanceNits = DolbyVisionHdrMetadataPolicy.outputMaxLuminanceNits(mediaFormat)
         val strip = DolbyVisionHdrMetadataPolicy.shouldStripDolbyVision(
             codecs = format.codecs,
-            inputHasHdrStaticInfo = inputHasHdrStaticInfo,
             outputIsPq = outputIsPq,
             outputMaxLuminanceNits = outputMaxLuminanceNits,
         )
         Log.i(
             TAG,
-            "DV_OUTPUT_FORMAT: codecs=${format.codecs} inputStaticInfo=$inputHasHdrStaticInfo " +
-                "inputTransfer=${format.colorInfo?.colorTransfer} outputPq=$outputIsPq " +
+            "DV_OUTPUT_FORMAT: codecs=${format.codecs} outputPq=$outputIsPq " +
                 "outputMaxNits=$outputMaxLuminanceNits strip=$strip"
         )
         if (strip) {
