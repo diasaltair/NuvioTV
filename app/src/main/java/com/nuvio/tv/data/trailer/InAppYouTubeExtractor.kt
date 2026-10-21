@@ -1,9 +1,12 @@
 package com.nuvio.tv.data.trailer
 
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.google.gson.Gson
 import com.nuvio.tv.BuildConfig
+import com.nuvio.tv.core.player.TrailerMemoryPolicy
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +70,8 @@ internal data class StreamCandidate(
     // Only meaningful for audio candidates: false means this format is an
     // alternate-language dub track, not the video's original/default audio.
     // Always true for video/progressive candidates, so it never affects them.
-    val isDefaultAudioTrack: Boolean = true
+    val isDefaultAudioTrack: Boolean = true,
+    val width: Int = 0
 )
 
 internal enum class PlaybackSourceKind {
@@ -153,7 +157,13 @@ private val CLIENTS = listOf(
 )
 
 @Singleton
-class InAppYouTubeExtractor @Inject constructor() {
+class InAppYouTubeExtractor internal constructor(private val trailerMaxHeight: () -> Int) {
+    @Inject
+    constructor(@ApplicationContext context: Context) : this(
+        { if (TrailerMemoryPolicy.isLowMemory(context)) TrailerMemoryPolicy.LOW_MEMORY_MAX_HEIGHT else Int.MAX_VALUE }
+    )
+
+    internal constructor() : this({ Int.MAX_VALUE })
     private val gson = Gson()
 
     private val httpClient by lazy {
@@ -274,12 +284,15 @@ class InAppYouTubeExtractor @Inject constructor() {
         maxVideoHeight: Int = Int.MAX_VALUE
     ): TrailerPlaybackSource? = withContext(Dispatchers.IO) {
         if (youtubeUrl.isBlank()) return@withContext null
+        // Single-URL extraction also serves full-screen/external players; keep their quality unchanged.
+        val deviceMaxHeight = if (singleUrl) Int.MAX_VALUE else trailerMaxHeight()
 
         Log.d(TAG, "Starting Kotlin extraction for ${summarizeUrl(youtubeUrl)}")
         var source: TrailerPlaybackSource? = null
         try {
             source = withTimeout(EXTRACTOR_TIMEOUT_MS) {
-                extractPlaybackSourceInternal(youtubeUrl, forceRefreshConfig = false, singleUrl = singleUrl, maxVideoHeight = maxVideoHeight)
+                extractPlaybackSourceInternal(youtubeUrl, forceRefreshConfig = false, singleUrl = singleUrl,
+                    maxVideoHeight = maxVideoHeight, deviceMaxHeight = deviceMaxHeight)
             }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             // A timeout is a failed attempt, not a cancellation of the caller.
@@ -295,7 +308,8 @@ class InAppYouTubeExtractor @Inject constructor() {
             Log.d(TAG, "First attempt failed, retrying with fresh watch config...")
             try {
                 source = withTimeout(EXTRACTOR_TIMEOUT_MS) {
-                    extractPlaybackSourceInternal(youtubeUrl, forceRefreshConfig = true, singleUrl = singleUrl, maxVideoHeight = maxVideoHeight)
+                    extractPlaybackSourceInternal(youtubeUrl, forceRefreshConfig = true, singleUrl = singleUrl,
+                    maxVideoHeight = maxVideoHeight, deviceMaxHeight = deviceMaxHeight)
                 }
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                 Log.w(TAG, "Kotlin extractor retry timed out for $youtubeUrl")
@@ -323,7 +337,8 @@ class InAppYouTubeExtractor @Inject constructor() {
         youtubeUrl: String,
         forceRefreshConfig: Boolean,
         singleUrl: Boolean,
-        maxVideoHeight: Int
+        maxVideoHeight: Int,
+        deviceMaxHeight: Int
     ): TrailerPlaybackSource? {
         val videoId = extractVideoId(youtubeUrl) ?: return null
 
@@ -388,7 +403,8 @@ class InAppYouTubeExtractor @Inject constructor() {
                         itag = format.stringValue("itag").orEmpty(),
                         height = height,
                         fps = fps,
-                        ext = if (mimeType.contains("webm")) "webm" else "mp4"
+                        ext = if (mimeType.contains("webm")) "webm" else "mp4",
+                        width = (format.numberValue("width") ?: 0.0).toInt()
                     )
                 }
 
@@ -467,7 +483,7 @@ class InAppYouTubeExtractor @Inject constructor() {
         var bestManifest: ManifestCandidate? = null
         for ((clientKey, priority, manifestUrl) in manifestUrls) {
             try {
-                val variant = parseHlsManifest(manifestUrl) ?: continue
+                val variant = parseHlsManifest(manifestUrl, deviceMaxHeight) ?: continue
                 val candidate = ManifestCandidate(
                     client = clientKey,
                     priority = priority,
@@ -490,8 +506,12 @@ class InAppYouTubeExtractor @Inject constructor() {
             }
         }
 
-        val bestProgressive = sortCandidates(progressive).firstOrNull()
-        val bestVideo = pickBestForClient(capVideoHeight(adaptiveVideo, maxVideoHeight), PREFERRED_SEPARATE_CLIENT)
+        // The device cap is strict (memory); the requested cap falls back to the tallest stream.
+        val bestProgressive = sortCandidates(capVideoSize(progressive, deviceMaxHeight)).firstOrNull()
+        val bestVideo = pickBestForClient(
+            capVideoHeight(capVideoSize(adaptiveVideo, deviceMaxHeight), maxVideoHeight),
+            PREFERRED_SEPARATE_CLIENT
+        )
         if (bestVideo != null) {
             Log.d(TAG, "Adaptive video: ${bestVideo.width}x${bestVideo.height} itag=${bestVideo.itag} (maxHeight=$maxVideoHeight)")
         }
@@ -608,7 +628,7 @@ class InAppYouTubeExtractor @Inject constructor() {
         return parsed ?: emptyMap<String, Any>()
     }
 
-    private fun parseHlsManifest(manifestUrl: String): ManifestBestVariant? {
+    private fun parseHlsManifest(manifestUrl: String, maxVideoHeight: Int): ManifestBestVariant? {
         val response = performRequest(
             url = manifestUrl,
             method = "GET",
@@ -636,6 +656,7 @@ class InAppYouTubeExtractor @Inject constructor() {
 
             val resolution = attrs["RESOLUTION"].orEmpty()
             val (width, height) = parseResolution(resolution)
+            if (!withinVideoSize(width, height, maxVideoHeight)) continue
             val bandwidth = attrs["BANDWIDTH"]?.toLongOrNull() ?: 0L
 
             val candidate = ManifestBestVariant(
@@ -773,6 +794,12 @@ class InAppYouTubeExtractor @Inject constructor() {
         val maxWidth = maxHeight * 16 / 9
         return items.filter { it.height <= maxHeight && it.width <= maxWidth }.ifEmpty { items }
     }
+    /** Never fall back to an oversized direct stream: track selection cannot downscale that URL. */
+    internal fun capVideoSize(items: List<StreamCandidate>, maxHeight: Int): List<StreamCandidate> =
+        items.filter { withinVideoSize(it.width, it.height, maxHeight) }
+
+    internal fun withinVideoSize(width: Int, height: Int, maxHeight: Int): Boolean =
+        maxHeight == Int.MAX_VALUE || (height <= maxHeight && width.toLong() <= maxHeight.toLong() * 16 / 9)
 
     private fun pickBestForClient(items: List<StreamCandidate>, clientKey: String): StreamCandidate? {
         val sameClient = items.filter { it.client == clientKey }

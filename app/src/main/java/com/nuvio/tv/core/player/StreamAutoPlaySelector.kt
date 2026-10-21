@@ -1,5 +1,6 @@
 package com.nuvio.tv.core.player
 
+import com.nuvio.tv.core.streams.ranking.StreamRegexRanking
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.data.local.StreamAutoPlayMode
 import com.nuvio.tv.data.local.StreamAutoPlaySource
@@ -57,6 +58,39 @@ object StreamAutoPlaySelector {
 
 
 
+    suspend fun selectAutoPlayStreamAsync(
+        streams: List<Stream>,
+        mode: StreamAutoPlayMode,
+        regexPattern: String,
+        source: StreamAutoPlaySource,
+        installedAddonNames: Set<String>,
+        selectedAddons: Set<String>,
+        selectedPlugins: Set<String>,
+        preferredBingeGroup: String? = null,
+        preferBingeGroupInSelection: Boolean = false,
+        bingeGroupOnly: Boolean = false,
+        rankedRegexPatterns: List<String> = emptyList()
+    ): Stream? {
+        return com.nuvio.tv.core.streams.ranking.RankedRegexWork.run(
+            enabled = mode == StreamAutoPlayMode.REGEX_MATCH && rankedRegexPatterns.isNotEmpty() && !bingeGroupOnly
+        ) { checkpoint ->
+            selectAutoPlayStream(
+                streams = streams,
+                mode = mode,
+                regexPattern = regexPattern,
+                source = source,
+                installedAddonNames = installedAddonNames,
+                selectedAddons = selectedAddons,
+                selectedPlugins = selectedPlugins,
+                preferredBingeGroup = preferredBingeGroup,
+                preferBingeGroupInSelection = preferBingeGroupInSelection,
+                bingeGroupOnly = bingeGroupOnly,
+                rankedRegexPatterns = rankedRegexPatterns,
+                rankedRegexCheckCancelled = checkpoint
+            )
+        }
+    }
+
     fun selectAutoPlayStream(
         streams: List<Stream>,
         mode: StreamAutoPlayMode,
@@ -67,7 +101,9 @@ object StreamAutoPlaySelector {
         selectedPlugins: Set<String>,
         preferredBingeGroup: String? = null,
         preferBingeGroupInSelection: Boolean = false,
-        bingeGroupOnly: Boolean = false
+        bingeGroupOnly: Boolean = false,
+        rankedRegexPatterns: List<String> = emptyList(),
+        rankedRegexCheckCancelled: () -> Unit = {}
     ): Stream? {
         if (streams.isEmpty()) return null
 
@@ -94,13 +130,11 @@ object StreamAutoPlaySelector {
         }
         if (candidateStreams.isEmpty()) return null
 
-        // Binge group matching takes priority over mode and source filters — even in MANUAL mode,
-        // a persisted binge group should auto-play without showing the picker.
-        // Search ALL streams, not just candidateStreams, since binge group reuse should
-        // not be limited by autoplay source/addon selection filters.
+        // Binge continuity takes priority over mode/ranking, including MANUAL mode,
+        // but stays within the user's source and addon/plugin selections.
         val targetBingeGroup = preferredBingeGroup?.trim().orEmpty()
         if (preferBingeGroupInSelection && targetBingeGroup.isNotEmpty()) {
-            val bingeGroupMatch = streams.firstOrNull { stream ->
+            val bingeGroupMatch = candidateStreams.firstOrNull { stream ->
                 !stream.isExternal() &&
                     stream.behaviorHints?.bingeGroup == targetBingeGroup &&
                     isPlayable(stream)
@@ -120,6 +154,11 @@ object StreamAutoPlaySelector {
             StreamAutoPlayMode.MANUAL -> null
             StreamAutoPlayMode.FIRST_STREAM -> candidateStreams.firstOrNull { isPlayable(it) }
             StreamAutoPlayMode.REGEX_MATCH -> {
+                if (rankedRegexPatterns.isNotEmpty()) {
+                    return StreamRegexRanking.rank(
+                        candidateStreams.filter { isPlayable(it) }, rankedRegexPatterns, rankedRegexCheckCancelled
+                    )?.firstOrNull()
+                }
                 val pattern = regexPattern.trim()
  
                 // Try to compile the user regex

@@ -1,5 +1,6 @@
 package com.nuvio.tv.ui.screens.player
 
+import com.nuvio.tv.ui.screens.player.seekpreview.seekPreviewLoadControl
 import com.nuvio.tv.ui.screens.player.audiosync.AudioSyncTaps
 import android.content.Context
 import android.content.res.Resources
@@ -157,13 +158,17 @@ internal fun PlayerRuntimeController.initializePlayer(
     startPaused: Boolean = false
 ) {
     if (url.isEmpty()) {
-        _uiState.update { it.copy(error = context.getString(R.string.player_error_no_stream_url), showLoadingOverlay = false) }
+        val message = context.getString(R.string.player_error_no_stream_url)
+        if (autoSourceRecovery?.failDefinitively(message) == true) return
+        _uiState.update { it.copy(error = message, showLoadingOverlay = false) }
         return
     }
+    sourceRecoveryPickerError = null
     mpvMediaLoadPrepared = false
     val afrPreflightToken = afrPreflightGate.token()
 
-    scope.launch {
+    playerInitializationJob?.cancel()
+    playerInitializationJob = scope.launch {
         try {
             if (allowEngineFailover) {
                 startupEngineFailoverTriggered = false
@@ -281,7 +286,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             if (effectiveInternalPlayerEngine == InternalPlayerEngine.MVP_PLAYER) {
                 mpvInitializationInProgress = true
                 try {
-                    val awaitedAfr = withTimeoutOrNull(AFR_PREFLIGHT_TOTAL_TIMEOUT_MS) {
+                    val awaitedAfr = withTimeoutOrNull(autoSourceRecovery?.remainingMs()?.coerceIn(1L, 3_000L) ?: AFR_PREFLIGHT_TOTAL_TIMEOUT_MS) {
                         afrJob.await()
                     }
                     if (awaitedAfr == null) {
@@ -625,7 +630,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             isVc1TrackSelectionBypassActiveForCurrentPlayback = vc1TrackSelectionBypassActive
 
             val startupSubtitlePreparation = prepareStreamStartSubtitles(playerSettings)
-            val awaitedAfr = withTimeoutOrNull(AFR_PREFLIGHT_TOTAL_TIMEOUT_MS) {
+            val awaitedAfr = withTimeoutOrNull(autoSourceRecovery?.remainingMs()?.coerceIn(1L, 3_000L) ?: AFR_PREFLIGHT_TOTAL_TIMEOUT_MS) {
                 afrJob.await()
             }
             if (awaitedAfr == null) {
@@ -993,7 +998,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .setTrackSelector(trackSelector!!)
                     .setMediaSourceFactory(DefaultMediaSourceFactory(playerDataSourceFactory, effectiveExtractorsFactory))
                     .setRenderersFactory(renderersFactory)
-                    .setLoadControl(loadControl)
+                    .setLoadControl(seekPreviewLoadControl(loadControl, playerSettings))
                     .setReleaseTimeoutMs(PLAYER_RELEASE_TIMEOUT_MS)
                     .setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
                     .build()
@@ -1007,7 +1012,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 val playerDataSourceFactory = PlayerPlaybackNetworking.createDataSourceFactory(context, headers)
                 ExoPlayer.Builder(context)
                     .setBandwidthMeter(bandwidthMeter)
-                    .setLoadControl(loadControl)
+                    .setLoadControl(seekPreviewLoadControl(loadControl, playerSettings))
                     .setTrackSelector(trackSelector!!)
                     .setMediaSourceFactory(DefaultMediaSourceFactory(playerDataSourceFactory, effectiveExtractorsFactory))
                     .setReleaseTimeoutMs(PLAYER_RELEASE_TIMEOUT_MS)
@@ -1437,7 +1442,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                         if (isReleasingPlayer && error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) return
                         if (!isInBackground && com.nuvio.tv.reshaped.livetv.LiveEdgeRecovery.tryRejoin(error, _exoPlayer)) return // Nuvio RS hook: rejoin the live edge
                         cancelFirstFrameWatchdog()
+                        val status = error.findInvalidResponseCodeException()?.responseCode
                         val detailedError = error.toDisplayMessage(context)
+                        if (status in listOf(401, 403, 404, 410) && autoSourceRecovery?.failDefinitively(detailedError) == true) return
                         cancelStableProgressReset()
 
                         if (Vc1VideoFormatHeuristics.isVc1PlaybackFailure(
@@ -1688,6 +1695,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                              error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
                              error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
                              error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED)
+                        if (autoSourceRecovery?.failDefinitively(detailedError) == true) return
                         _uiState.update {
                             it.copy(
                                 error = detailedError,
@@ -1906,6 +1914,8 @@ internal fun PlayerRuntimeController.initializePlayer(
             if (!startupSubtitlePreparation.fetchCompleted) {
                 fetchAddonSubtitles()
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             if (
                 maybeAutoSwitchInternalPlayerOnStartupError(
@@ -1934,6 +1944,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             scope.launch {
                 runCatching { playerSettingsDataStore.setLastPlaybackDiagnostics(diagnostics) }
             }
+            if (autoSourceRecovery?.failDefinitively(displayError) == true) return@launch
             _uiState.update {
                 it.copy(
                     error = displayError,

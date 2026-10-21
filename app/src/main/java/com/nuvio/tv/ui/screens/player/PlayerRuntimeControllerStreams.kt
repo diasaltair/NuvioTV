@@ -1,5 +1,10 @@
 package com.nuvio.tv.ui.screens.player
 
+import com.nuvio.tv.ui.screens.player.seekpreview.seekPreviewNextEpisode
+import com.nuvio.tv.core.player.recovery.AutoSourceRecoveryPlan
+import com.nuvio.tv.core.player.recovery.AutoSourceRecoverySettings
+import com.nuvio.tv.core.player.recovery.prepareAutoSource
+
 import com.nuvio.tv.ui.reshaped.livetv.keepPlayerForLiveTvZap // Nuvio RS hook
 import android.content.Intent
 import android.net.Uri
@@ -8,6 +13,7 @@ import androidx.media3.common.util.UnstableApi
 import com.nuvio.tv.core.connection.StreamConnectionFit
 import com.nuvio.tv.core.debrid.DirectDebridPlayableResult
 import com.nuvio.tv.core.network.NetworkResult
+import kotlinx.coroutines.sync.withLock
 import com.nuvio.tv.core.player.StreamAutoPlaySelector
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.local.StreamAutoPlayMode
@@ -110,6 +116,7 @@ private fun Stream.sourceBadgeMergeKey(): String {
 }
 
 internal fun PlayerRuntimeController.showEpisodesPanel() {
+    autoSourceRecovery?.cancel()
     _uiState.update {
         it.copy(
             showEpisodesPanel = true,
@@ -136,6 +143,7 @@ private fun Stream.isReadyForDebridPreparation(): Boolean =
         (isDirectDebrid() || (needsLocalDebridResolve() && debridCacheStatus?.state == StreamDebridCacheState.CACHED))
 
 internal fun PlayerRuntimeController.showSourcesPanel() {
+    autoSourceRecovery?.cancel()
     _uiState.update {
         it.copy(
             showSourcesPanel = true,
@@ -397,8 +405,11 @@ internal fun PlayerRuntimeController.dismissSourcesPanel() {
     sourceStreamsJob = null
     sourceChipErrorDismissJob?.cancel()
     streamRepository.setLocalPluginSearchPaused(true)
+    val recoveryError = sourceRecoveryPickerError
+    sourceRecoveryPickerError = null
     _uiState.update {
         it.copy(
+            error = it.error ?: recoveryError,
             showSourcesPanel = false,
             isLoadingSourceStreams = false
         )
@@ -781,8 +792,13 @@ private fun PlayerRuntimeController.openExternalStreamInBrowser(
 
 @androidx.annotation.OptIn(UnstableApi::class)
 internal fun PlayerRuntimeController.switchToSourceStream(
-    stream: Stream
+    stream: Stream,
+    resumeSavedProgress: Boolean = true
 ) {
+    if (!resumeSavedProgress) {
+        pendingResumeProgress = null
+        _uiState.update { it.copy(pendingSeekPosition = null) }
+    }
     sourceStreamsScope?.cancel()
     sourceStreamsScope = null
     sourceStreamsJob = null
@@ -813,7 +829,7 @@ internal fun PlayerRuntimeController.switchToSourceStream(
             val resolved = resolveYouTubeStream(stream)
             debridResolveJob = null
             if (resolved != null) {
-                switchToSourceStream(resolved)
+                switchToSourceStream(resolved, resumeSavedProgress)
             } else {
                 _uiState.update {
                     it.copy(
@@ -833,9 +849,9 @@ internal fun PlayerRuntimeController.switchToSourceStream(
             val resolved = resolveDirectDebridStreamIfNeeded(stream, currentSeason, currentEpisode)
             debridResolveJob = null
             if (resolved != null && !resolved.getStreamUrl().isNullOrBlank()) {
-                switchToSourceStream(resolved)
+                switchToSourceStream(resolved, resumeSavedProgress)
             } else if (resolved != null) {
-                switchToTorrentSourceStream(resolved)
+                switchToTorrentSourceStream(resolved, resumeSavedProgress)
             } else {
                 _uiState.update {
                     it.copy(
@@ -857,7 +873,7 @@ internal fun PlayerRuntimeController.switchToSourceStream(
                 val resolved = resolveDirectDebridStreamIfNeeded(stream, currentSeason, currentEpisode)
                 if (resolved != null && !resolved.getStreamUrl().isNullOrBlank()) {
                     debridResolveJob = null
-                    switchToSourceStream(resolved)
+                    switchToSourceStream(resolved, resumeSavedProgress)
                 } else {
                     debridResolveJob = null
                     _uiState.update {
@@ -958,14 +974,17 @@ internal fun PlayerRuntimeController.switchToSourceStream(
                 player.playWhenReady = true
                 player.prepare()
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: context.getString(com.nuvio.tv.R.string.player_error_play_stream_failed)) }
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                val message = e.message ?: context.getString(com.nuvio.tv.R.string.player_error_play_stream_failed)
+                if (autoSourceRecovery?.failDefinitively(message) == true) return@launch
+                _uiState.update { it.copy(error = message) }
             }
         }
     } ?: run {
         initializePlayer(playbackUrl, playbackHeaders)
     }
 
-    loadSavedProgressFor(currentSeason, currentEpisode)
+    if (resumeSavedProgress) loadSavedProgressFor(currentSeason, currentEpisode)
 }
 
 internal fun PlayerRuntimeController.dismissEpisodesPanel() {
@@ -1004,9 +1023,11 @@ internal fun PlayerRuntimeController.selectEpisodesSeason(season: Int) {
 
 @androidx.annotation.OptIn(UnstableApi::class)
 private fun PlayerRuntimeController.switchToTorrentSourceStream(
-    stream: Stream
+    stream: Stream,
+    resumeSavedProgress: Boolean = true
 ) {
     val infoHash = stream.getEffectiveInfoHash() ?: return
+    sourceRecoveryPickerError = null
     sourceStreamsScope?.cancel()
     sourceStreamsScope = null
     sourceStreamsJob = null
@@ -1045,7 +1066,7 @@ private fun PlayerRuntimeController.switchToTorrentSourceStream(
     currentFilename = stream.behaviorHints?.filename ?: navigationArgs.filename
     showStreamSourceIndicator(stream)
     resetPostPlayOverlayState(clearEpisode = false)
-    launchTorrentSourceStream(stream, infoHash, loadSavedProgress = true)
+    launchTorrentSourceStream(stream, infoHash, loadSavedProgress = resumeSavedProgress)
     persistTorrentStreamForReuse(stream)
 }
 
@@ -1352,6 +1373,7 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
     forcedTargetVideo: Video? = null,
     isAutoPlay: Boolean = false
 ) {
+    autoSourceRecovery?.cancel()
     if (openExternalStreamInBrowser(stream = stream, fromEpisodePanel = true)) {
         return
     }
@@ -1762,7 +1784,9 @@ internal fun PlayerRuntimeController.preloadNextEpisodeSources() {
             videoId = nextVideo.id,
             season = nextVideo.season,
             episode = nextVideo.episode
-        ).collect { /* results cached by StreamSearchSessionCache */ }
+        ).collect { result ->
+            if (result is NetworkResult.Success) seekPreviewNextEpisode(result.data.flatMap { it.streams }, nextVideo.season, nextVideo.episode)
+        }
     }
 }
 
@@ -1869,13 +1893,16 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             // finishes, so the waiting code below resumes without polling.
             val searchSettled = CompletableDeferred<Unit>()
 
-            fun trySelectStream(data: List<AddonStreams>): Stream? {
+            val selectionMutex = kotlinx.coroutines.sync.Mutex()
+            suspend fun trySelectStream(data: List<AddonStreams>): Stream? = selectionMutex.withLock {
+                if (autoSelectTriggered) return@withLock null
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder, preferredServerNames)
                 val allStreams = orderedStreams.flatMap { it.streams }
-                return StreamAutoPlaySelector.selectAutoPlayStream(
+                StreamAutoPlaySelector.selectAutoPlayStreamAsync(
                     streams = allStreams,
                     mode = effectiveMode,
                     regexPattern = effectiveRegex,
+                    rankedRegexPatterns = playerSettings.streamAutoPlayRankedRegex,
                     source = effectiveSource,
                     installedAddonNames = installedAddonOrder.toSet(),
                     selectedAddons = effectiveSelectedAddons,
@@ -1890,14 +1917,15 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 )
             }
 
-            fun tryBingeGroupOnly(data: List<AddonStreams>): Stream? {
+            suspend fun tryBingeGroupOnly(data: List<AddonStreams>): Stream? {
                 if (currentStreamBingeGroup == null || !playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode) return null
                 val orderedStreams = StreamAutoPlaySelector.orderAddonStreams(data, installedAddonOrder, preferredServerNames)
                 val allStreams = orderedStreams.flatMap { it.streams }
-                return StreamAutoPlaySelector.selectAutoPlayStream(
+                return StreamAutoPlaySelector.selectAutoPlayStreamAsync(
                     streams = allStreams,
                     mode = effectiveMode,
                     regexPattern = effectiveRegex,
+                    rankedRegexPatterns = playerSettings.streamAutoPlayRankedRegex,
                     source = effectiveSource,
                     installedAddonNames = installedAddonOrder.toSet(),
                     selectedAddons = effectiveSelectedAddons,
@@ -1909,6 +1937,7 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
             }
 
             fun recordSelection(candidate: Stream) {
+                if (autoSelectTriggered) return
                 autoSelectTriggered = true
                 selectedStream = candidate
                 searchSettled.complete(Unit)
@@ -1984,11 +2013,33 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                 innerJob.cancel()
             }
 
-            val streamToPlay = selectedStream?.let {
-                resolveDirectDebridStreamIfNeeded(it, nextVideo.season, nextVideo.episode)
+            val recoverySettings = playerSettings.copy(
+                streamAutoPlayMode = effectiveMode,
+                streamAutoPlaySource = effectiveSource,
+                streamAutoPlaySelectedAddons = effectiveSelectedAddons,
+                streamAutoPlaySelectedPlugins = effectiveSelectedPlugins,
+                streamAutoPlayRegex = effectiveRegex
+            )
+            val recoveryPlan = if (AutoSourceRecoverySettings.applies(context, playerSettings)) AutoSourceRecoveryPlan.create(
+                streams = StreamAutoPlaySelector.orderAddonStreams(lastSuccessData.orEmpty(), installedAddonOrder).flatMap { it.streams },
+                settings = recoverySettings,
+                installedAddonNames = installedAddonOrder.toSet(),
+                preferredBingeGroup = if (playerSettings.streamAutoPlayPreferBingeGroupForNextEpisode) currentStreamBingeGroup else null,
+                initialSource = selectedStream, profileId = profileId, videoId = nextVideo.id,
+                bingeGroupOnly = bingeGroupOnlyManualMode
+            ) else null
+            val resolveSource: suspend (Stream) -> Stream? = { candidate ->
+                val resolved = if (candidate.youTubeIdToResolve() != null) resolveYouTubeStream(candidate)
+                    else resolveDirectDebridStreamIfNeeded(candidate, nextVideo.season, nextVideo.episode)
+                resolved?.takeIf { it.getStreamUrl() != null || torrentSettings.settings.first().p2pEnabled }
             }
+            val prepared = recoveryPlan?.let {
+                prepareAutoSource(it, android.os.SystemClock::elapsedRealtime, resolve = resolveSource)
+            }
+            val streamToPlay = if (recoveryPlan != null) prepared?.value else selectedStream?.let { resolveSource(it) }
             if (streamToPlay != null) {
                 val sourceName = (streamToPlay.name?.takeIf { it.isNotBlank() } ?: streamToPlay.addonName).trim()
+                val countdownStartedAt = android.os.SystemClock.elapsedRealtime()
                 for (remaining in 3 downTo 1) {
                     _uiState.update { current ->
                         val episodeForMode = current.nextEpisode ?: nextInfo
@@ -2010,11 +2061,19 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                         playbackEnded = false,
                     )
                 }
+                val countdownMs = android.os.SystemClock.elapsedRealtime() - countdownStartedAt
                 switchToEpisodeStream(
                     stream = streamToPlay,
                     forcedTargetVideo = nextVideo,
                     isAutoPlay = !userInitiated
                 )
+                // The intentional next-episode countdown is not a playback attempt.
+                prepared?.let { result ->
+                    val budget = result.plan.startupState?.let {
+                        it.copy(sessionStartedAtMs = it.sessionStartedAtMs + countdownMs, attemptStartedAtMs = it.attemptStartedAtMs + countdownMs)
+                    }
+                    beginAutoSourceRecovery(result.plan.copy(startupState = budget))
+                }
             } else {
                 _uiState.update {
                     it.copy(

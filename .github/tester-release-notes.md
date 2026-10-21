@@ -1,1 +1,3 @@
-- Netflix-style Home: less work on every remote press. Moving along a row now redraws only the title text under it instead of the whole row, and moving between titles or rows no longer rebuilds the whole Home page. Nothing looks or behaves differently, except that Back from a later title in a row now always returns to the row's first title.
+- Audio sync now shows a message only for the first confirmed sync of a title. Fine-tuning estimates, "timing changed, re-synced" updates and later confirmations (another cut in the release, recognition taking over) adjust the subtitles silently.
+- Messages that are not about timing are unchanged: speech model download, Wi-Fi needed, and a sync that could not be confirmed.
+- Includes tester.23's faster start of word recognition on titles with many subtitles.

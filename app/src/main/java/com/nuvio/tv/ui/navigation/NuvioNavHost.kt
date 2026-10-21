@@ -615,6 +615,7 @@ private fun PlaybackNavHost(
                                 fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage,
+                                autoSourceRecoveryToken = playbackInfo.autoSourceRecoveryToken,
                                 profileId = playbackInfo.profileId
                             )
                         )
@@ -656,6 +657,7 @@ private fun PlaybackNavHost(
                                 fileIdx = playbackInfo.fileIdx,
                                 sources = playbackInfo.sources,
                                 contentLanguage = playbackInfo.contentLanguage,
+                                autoSourceRecoveryToken = playbackInfo.autoSourceRecoveryToken,
                                 profileId = playbackInfo.profileId
                             )
                         ) {
@@ -797,6 +799,11 @@ private fun PlaybackNavHost(
                     defaultValue = null
                 },
                 navArgument("cloudSessionToken") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
+                },
+                navArgument("autoSourceRecoveryToken") {
                     type = NavType.StringType
                     nullable = true
                     defaultValue = null
