@@ -7,6 +7,9 @@
         android:protectionLevel="signature" />
     <uses-permission android:name="com.nuvio.reshaped.tv.permission.MIGRATE" />
 
+    <!-- Lets the in-app updater install its own updates without a confirmation screen on Android 12+. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+
     <queries>
         <package android:name="com.nuviodebug.com" />
         <package android:name="com.nuvioreshaped.tv" />
@@ -18,6 +21,14 @@
             android:authorities="${applicationId}.reshaped.migration"
             android:exported="true"
             android:permission="com.nuvio.reshaped.tv.permission.MIGRATE" />
-    </application>
 
+        <service
+            android:name=".updater.UpdateJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <receiver
+            android:name=".updater.UpdateInstallResultReceiver"
+            android:exported="false" />
+    </application>
 </manifest>

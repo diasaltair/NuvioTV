@@ -280,6 +280,14 @@ internal fun PlayerRuntimeController.observeBlurUnwatchedEpisodes() {
     }
 }
 
+internal fun PlayerRuntimeController.observeEpisodeOptionsOverlayStyle() {
+    scope.launch {
+        layoutPreferenceDataStore.episodeOptionsOverlayStyle.collectLatest { style ->
+            _uiState.update { it.copy(episodeOptionsOverlayStyle = style) }
+        }
+    }
+}
+
 internal fun PlayerRuntimeController.observeEpisodeWatchProgress() {
     val id = contentId ?: return
     val type = contentType ?: return
@@ -959,7 +967,7 @@ internal fun PlayerRuntimeController.scheduleDeferredPlayerReinitialize(
     scope.launch {
         yield()
         runCatching {
-            releasePlayer()
+            releasePlayer(flushPlaybackState = true, keepTorrentStream = true)
             initializePlayer(currentStreamUrl, currentHeaders)
         }.onFailure { e ->
             val message = e.toDisplayMessage(context)

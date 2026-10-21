@@ -38,6 +38,8 @@ internal fun PlayerRuntimeController.maybeAutoSwitchInternalPlayerOnStartupError
     showRecoveryOverlay()
     _uiState.update {
         it.copy(
+            chapters = emptyList(),
+            showChaptersPanel = false,
             internalPlayerEngine = targetEngine,
             showPlayerEngineSwitchInfo = true,
             playerEngineSwitchInfoText = switchMessage
@@ -103,6 +105,8 @@ internal fun PlayerRuntimeController.switchToInternalPlayerEngine(
             showSubtitleDelayOverlay = false,
             showSpeedDialog = false,
             showMoreDialog = false,
+            chapters = emptyList(),
+            showChaptersPanel = false,
             internalPlayerEngine = targetEngine,
             showPlayerEngineSwitchInfo = true,
             playerEngineSwitchInfoText = switchMessage
@@ -113,7 +117,7 @@ internal fun PlayerRuntimeController.switchToInternalPlayerEngine(
     pendingMpvHardRestartOnNextAttach = switchingToMpv
     delayMpvResumeSeekUntilVideoTrack = switchingToMpv
 
-    releasePlayer(flushPlaybackState = true)
+    releasePlayer(flushPlaybackState = true, keepTorrentStream = true)
     initializePlayer(
         url = currentStreamUrl,
         headers = currentHeaders,
