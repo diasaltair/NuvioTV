@@ -21,9 +21,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URL
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import android.content.Context
-import com.nuvio.tv.core.player.TrailerMemoryPolicy
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -191,18 +188,10 @@ private val CLIENTS = listOf(
 
 @Singleton
 class InAppYouTubeExtractor internal constructor(
-    private val trailerMaxHeight: () -> Int = { Int.MAX_VALUE },
     private val canDecodeVideo: (codecs: String, width: Int, height: Int, fps: Int) -> Boolean
 ) {
     @Inject
-    constructor(@ApplicationContext context: Context) : this(
-        trailerMaxHeight = {
-            if (TrailerMemoryPolicy.isLowMemory(context)) TrailerMemoryPolicy.LOW_MEMORY_MAX_HEIGHT else Int.MAX_VALUE
-        },
-        canDecodeVideo = VideoDecoderSupport::canDecode
-    )
-
-    internal constructor() : this(canDecodeVideo = VideoDecoderSupport::canDecode)
+    constructor() : this(VideoDecoderSupport::canDecode)
 
     private val gson = Gson()
 
@@ -589,16 +578,13 @@ class InAppYouTubeExtractor internal constructor(
         singleUrl: Boolean,
         maxVideoHeight: Int
     ): TrailerPlaybackSource? {
-        // Single-URL extraction also serves full-screen/external players; keep their quality unchanged.
-        val deviceMaxHeight = if (singleUrl) Int.MAX_VALUE else trailerMaxHeight()
         for (kind in sourcePreference(singleUrl)) {
             kotlinx.coroutines.yield()
             val source = when (kind) {
                 // Adaptive video + audio (best quality, separate streams)
                 PlaybackSourceKind.ADAPTIVE -> {
                     val bestVideo = pickBestForClient(
-                        // The device cap is strict (memory); the requested cap falls back to the tallest stream.
-                        capVideoHeight(capVideoSize(playableVideo(streams.adaptiveVideo), deviceMaxHeight), maxVideoHeight),
+                        capVideoHeight(playableVideo(streams.adaptiveVideo), maxVideoHeight),
                         PREFERRED_SEPARATE_CLIENT
                     )
                     if (bestVideo != null) {
@@ -616,7 +602,7 @@ class InAppYouTubeExtractor internal constructor(
                         ?.let { TrailerPlaybackSource(videoUrl = it.manifestUrl, audioUrl = null) }
                 // Progressive (combined video+audio, usually low quality)
                 PlaybackSourceKind.PROGRESSIVE ->
-                    sortCandidates(capVideoSize(streams.progressive, deviceMaxHeight)).firstOrNull()?.url?.let { resolveReachableUrl(it) }
+                    sortCandidates(streams.progressive).firstOrNull()?.url?.let { resolveReachableUrl(it) }
                         ?.let { TrailerPlaybackSource(videoUrl = it, audioUrl = null) }
             }
             if (source != null) return source
@@ -927,13 +913,6 @@ class InAppYouTubeExtractor internal constructor(
             transfer.contains("ARIB_STD_B67") ||
             format.stringValue("qualityLabel").orEmpty().contains("HDR", ignoreCase = true)
     }
-
-    /** Never fall back to an oversized direct stream: track selection cannot downscale that URL. */
-    internal fun capVideoSize(items: List<StreamCandidate>, maxHeight: Int): List<StreamCandidate> =
-        items.filter { withinVideoSize(it.width, it.height, maxHeight) }
-
-    internal fun withinVideoSize(width: Int, height: Int, maxHeight: Int): Boolean =
-        maxHeight == Int.MAX_VALUE || (height <= maxHeight && width.toLong() <= maxHeight.toLong() * 16 / 9)
 
     /** Streams within the 16:9 box of [maxHeight], or all of them when none fits. */
     internal fun capVideoHeight(items: List<StreamCandidate>, maxHeight: Int): List<StreamCandidate> {

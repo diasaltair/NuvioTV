@@ -73,8 +73,6 @@ class TrailerPlayerPool @Inject constructor(
     // Height cap currently applied to the player's track selection; reset when the player is rebuilt.
     private var appliedMaxHeight: Int? = null
 
-    private val lowMemory by lazy { TrailerMemoryPolicy.isLowMemory(context) }
-
     // Kept current so a player rebuilt after [yield] picks up buffer changes made since launch.
     init {
         settingsScope.launch {
@@ -218,12 +216,6 @@ class TrailerPlayerPool @Inject constructor(
                     .clearVideoSizeConstraints()
                     .setForceHighestSupportedBitrate(true)
                     .setMaxVideoSize(Integer.MAX_VALUE, Integer.MAX_VALUE)
-                    .apply {
-                        if (lowMemory) {
-                            setMaxVideoSize(1920, TrailerMemoryPolicy.LOW_MEMORY_MAX_HEIGHT)
-                            setExceedVideoConstraintsIfNecessary(false)
-                        }
-                    }
             )
         }
         return ExoPlayer.Builder(context)
