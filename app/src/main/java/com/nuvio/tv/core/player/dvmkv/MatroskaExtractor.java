@@ -134,6 +134,9 @@ public class MatroskaExtractor implements Extractor {
       return true;
     }
 
+    /** Asks the transformer to drop the Dolby Vision RPU from every sample of this stream. */
+    default void forceRpuStrip() {}
+
     /**
      * Called when Dolby Vision BlockAdditional data is encountered for an HEVC track.
      *
@@ -3366,6 +3369,15 @@ public class MatroskaExtractor implements Extractor {
               if (DolbyVisionCompatibility.isHdr10BaseLayerModeActive()) {
                 mimeType = MimeTypes.VIDEO_H265;
                 codecs = hevcCodecsString;
+              } else if (com.nuvio.tv.core.player.DolbyVisionDecodeLimits.shouldPlayAsHdr10(
+                  codecs, initializationData)) {
+                Log.i(
+                    TAG,
+                    "DV_CODED_HEIGHT_FALLBACK: " + codecs
+                        + " is coded taller than the DV core takes; playing the HDR10 base layer");
+                mimeType = MimeTypes.VIDEO_H265;
+                codecs = hevcCodecsString;
+                dolbyVisionSampleTransformer.forceRpuStrip();
               }
             }
           }

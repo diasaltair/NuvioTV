@@ -73,7 +73,7 @@ internal class DolbyVisionExtractorsFactory(
                 /* flags= */ 0,
                 DolbyVisionMatroskaTransformer(
                     config = if (config.active) config else DolbyVisionConversionConfig(active = false),
-                    stripRpuOnly = stripDvRpu && !config.active,
+                    stripRpuOnlyRequested = stripDvRpu && !config.active,
                     stripHdr10PlusSei = stripHdr10PlusSei,
                 )
             ).also { it.setSubtitleTimingListener(subtitleTimingListener) }

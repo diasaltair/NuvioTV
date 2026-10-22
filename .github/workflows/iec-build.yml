@@ -100,7 +100,7 @@ jobs:
         run: ./gradlew :app:assembleFullDebug --stacktrace --no-daemon
 
       - name: Unit tests (subtitle timing matcher)
-        run: ./gradlew :app:testFullDebugUnitTest --tests "*SubtitleTimingMatcherTest*" --stacktrace --no-daemon
+        run: ./gradlew :app:testFullDebugUnitTest --tests "*SubtitleTimingMatcherTest*" --tests "*HevcSpsTest*" --stacktrace --no-daemon
 
       - name: List APKs
         run: find app/build/outputs/apk -name '*.apk' -exec ls -la {} \;

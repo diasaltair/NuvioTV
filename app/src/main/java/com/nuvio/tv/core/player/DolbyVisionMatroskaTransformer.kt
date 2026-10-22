@@ -28,11 +28,22 @@ import java.io.ByteArrayOutputStream
 @UnstableApi
 internal class DolbyVisionMatroskaTransformer(
     private val config: DolbyVisionConversionConfig,
-    private val stripRpuOnly: Boolean = false,
+    private val stripRpuOnlyRequested: Boolean = false,
     private val stripHdr10PlusSei: Boolean = false,
 ) : MatroskaExtractor.DolbyVisionSampleTransformer {
 
     private var lastTransformedLength = 0
+
+    // Set by the extractor when this device cannot play the DV layer of the stream.
+    @Volatile
+    private var forcedRpuStrip = false
+
+    private val stripRpuOnly: Boolean
+        get() = stripRpuOnlyRequested || forcedRpuStrip
+
+    override fun forceRpuStrip() {
+        forcedRpuStrip = true
+    }
 
     // Reused across samples; grows to the largest frame once.
     private val scratch = ExposedByteArrayOutputStream(64 * 1024)
