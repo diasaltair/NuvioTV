@@ -10,7 +10,6 @@ import `is`.xyz.mpv.BaseMPVView
 import `is`.xyz.mpv.MPV
 import `is`.xyz.mpv.Utils
 import java.util.Locale
-import kotlin.math.pow
 import kotlin.math.roundToLong
 
 internal const val MPV_TRACK_LIST_PROPERTY = "track-list"
@@ -21,6 +20,7 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
 ) : BaseMPVView(context, attrs) {
 
     private var initialized = false
+    private var appliedAmplificationFilter = ""
     private var hasQueuedInitialMedia = false
     private var lastMediaRequestKey: String? = null
     private var pendingInitialMediaUrl: String? = null
@@ -286,11 +286,12 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
     fun applyAudioAmplificationDb(db: Int) {
         if (!initialized) return
         val clampedDb = db.coerceIn(AUDIO_AMPLIFICATION_MIN_DB, AUDIO_AMPLIFICATION_MAX_DB)
-        // Nuvio RS: mpv volume is cubic (gain = (volume/100)^3), so +N dB is 10^(N/60), not 10^(N/20).
-        val linearScale = 10.0.pow(clampedDb / 60.0)
-        val targetVolumePercent = (100.0 * linearScale).coerceIn(0.0, MPV_MAX_VOLUME_PERCENT)
+        val chain = mpvAmplificationFilter(clampedDb)
+        if (chain == appliedAmplificationFilter) return
         runCatching {
-            mpv.setPropertyDouble("volume", targetVolumePercent)
+            mpv.setPropertyDouble("volume", 100.0)
+            mpv.setPropertyString("af", chain)
+            appliedAmplificationFilter = chain
         }.onFailure {
             Log.w(TAG, "Failed to apply audio amplification on mpv (db=$clampedDb): ${it.message}")
         }
@@ -755,6 +756,7 @@ class NuvioMpvSurfaceView @JvmOverloads constructor(
         runCatching { destroy() }
             .onFailure { Log.w(TAG, "Failed to destroy libmpv view cleanly: ${it.message}") }
         initialized = false
+        appliedAmplificationFilter = ""
         hasQueuedInitialMedia = false
         lastMediaRequestKey = null
         pendingInitialMediaUrl = null
