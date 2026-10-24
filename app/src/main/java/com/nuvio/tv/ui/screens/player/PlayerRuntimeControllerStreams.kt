@@ -53,7 +53,7 @@ internal fun PlayerRuntimeController.scheduleSourceBadgeApplication() {
         val allNewStreams = newAddons.flatMap { addonName ->
             _uiState.value.sourceAllStreams.filter { it.addonName == addonName }
         }
-        if (allNewStreams.isEmpty()) {
+        if (allNewStreams.isEmpty() || !streamBadgePresentation.hasActiveFilters()) {
             sourceBadgedAddonNames = sourceBadgedAddonNames + newAddons.toSet()
             return@launch
         }
@@ -679,7 +679,7 @@ private fun PlayerRuntimeController.applySelectedStreamState(
  */
 private fun PlayerRuntimeController.applyStreamMetadata(stream: Stream) {
     currentStreamBingeGroup = stream.behaviorHints?.bingeGroup
-    applyStreamAudioDelay(stream.behaviorHints?.audioDelayMs)
+    applyStreamAudioDelay(stream.behaviorHints?.audioDelayMs, stream.behaviorHints?.audioDelayLanguage)
     currentVideoHash = stream.behaviorHints?.videoHash
     currentVideoSize = stream.behaviorHints?.videoSize
     streamSubtitles = stream.subtitles
@@ -783,7 +783,8 @@ private fun PlayerRuntimeController.persistSelectedStreamForReuse(
             bingeGroup = stream.behaviorHints?.bingeGroup,
             contentLanguage = contentLanguage,
             year = year,
-            audioDelayMs = stream.behaviorHints?.audioDelayMs
+            audioDelayMs = stream.behaviorHints?.audioDelayMs,
+            audioDelayLanguage = stream.behaviorHints?.audioDelayLanguage
         )
     }
 }
@@ -811,7 +812,8 @@ private fun PlayerRuntimeController.persistTorrentStreamForReuse(stream: Stream)
             bingeGroup = stream.behaviorHints?.bingeGroup,
             contentLanguage = contentLanguage,
             year = year,
-            audioDelayMs = stream.behaviorHints?.audioDelayMs
+            audioDelayMs = stream.behaviorHints?.audioDelayMs,
+            audioDelayLanguage = stream.behaviorHints?.audioDelayLanguage
         )
     }
 }

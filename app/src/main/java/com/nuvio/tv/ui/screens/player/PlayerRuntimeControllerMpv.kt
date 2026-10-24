@@ -35,7 +35,7 @@ internal fun PlayerRuntimeController.attachMpvView(view: NuvioMpvSurfaceView?) {
             secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage
         )
         view.applySubtitleStyle(_uiState.value.effectiveSubtitleStyle)
-        view.setSubtitleDelayMs(_uiState.value.subtitleDelayMs)
+        view.setSubtitleDelayMs(mpvSubtitleDelayMs(_uiState.value.subtitleDelayMs))
         view.applyBluetoothAudioRoute(currentAudioOutputRoute?.isBluetooth == true)
         view.setAudioDelayMs(_uiState.value.audioDelayMs)
         view.applyAspectMode(_uiState.value.aspectMode)
@@ -154,7 +154,7 @@ internal fun PlayerRuntimeController.initializeMpvPlayer(
             secondary = _uiState.value.subtitleStyle.secondaryPreferredLanguage
         )
         view.applySubtitleStyle(_uiState.value.effectiveSubtitleStyle)
-        view.setSubtitleDelayMs(_uiState.value.subtitleDelayMs)
+        view.setSubtitleDelayMs(mpvSubtitleDelayMs(_uiState.value.subtitleDelayMs))
         view.applyBluetoothAudioRoute(currentAudioOutputRoute?.isBluetooth == true)
         view.setAudioDelayMs(_uiState.value.audioDelayMs)
         view.applyAspectMode(_uiState.value.aspectMode)
@@ -545,7 +545,7 @@ internal fun PlayerRuntimeController.applyPendingMpvSeekIfNeeded(
     if (!canSeekNow) return
 
     view.seekToMs(target)
-    view.setSubtitleDelayMs(state.subtitleDelayMs)
+    view.setSubtitleDelayMs(mpvSubtitleDelayMs(state.subtitleDelayMs))
     view.setAudioDelayMs(state.audioDelayMs)
     if (state.pendingSeekPosition != target) {
         _uiState.update { it.copy(pendingSeekPosition = target) }
@@ -605,7 +605,7 @@ internal fun PlayerRuntimeController.seekPlaybackTo(
         mpvView?.let { view ->
             if (exact) view.seekToMsExact(positionMs) else view.seekToMs(positionMs)
             // Keep subtitle/audio delay sticky during FF/RW seeks.
-            view.setSubtitleDelayMs(_uiState.value.subtitleDelayMs)
+            view.setSubtitleDelayMs(mpvSubtitleDelayMs(_uiState.value.subtitleDelayMs))
             view.setAudioDelayMs(_uiState.value.audioDelayMs)
         }
     } else {
