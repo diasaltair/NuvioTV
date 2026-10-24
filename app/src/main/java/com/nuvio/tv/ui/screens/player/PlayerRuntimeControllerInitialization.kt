@@ -920,8 +920,6 @@ internal fun PlayerRuntimeController.initializePlayer(
                 downmixNormalizationEnabled = !playerSettings.maintainOriginalAudioOnDownmix,
                 forceOpticalPassthrough = isForcePassthroughActive,
                 bluetoothForcePcm = isBluetoothAudioOutput,
-                iecTunnelSurround = playerSettings.iecTunnelSurround,
-                iecTunnelEnabled = playerSettings.iecTunnelEnabled,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
                 initialForcePcm = hasTriedAudioPcmFallback || isBluetoothAudioOutput,
                 preferSoftwareAudioOnly = isBluetoothAudioOutput,
@@ -2143,8 +2141,6 @@ private class SubtitleOffsetRenderersFactory(
     private val downmixNormalizationEnabled: Boolean,
     private val forceOpticalPassthrough: Boolean,
     private val bluetoothForcePcm: Boolean = false,
-    private val iecTunnelSurround: Boolean = false,
-    private val iecTunnelEnabled: Boolean = false,
     private val playbackSpeedProvider: () -> Float,
     private val initialForcePcm: Boolean = false,
     /**
@@ -2225,18 +2221,7 @@ private class SubtitleOffsetRenderersFactory(
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
             .setAudioProcessors(arrayOf(gainAudioProcessor))
-        // DTS-HD is framed in-app as IEC61937 (see DtsHdIecPassthroughAudioSink); every other
-        // format goes straight to DefaultAudioSink. Bluetooth/PCM policy above still wins because
-        // PlaybackSpeedAwareAudioSink rejects direct playback before this layer is consulted.
-        val baseAudioSink: AudioSink = if (bluetoothForcePcm) {
-            builder.build()
-        } else {
-            DtsHdIecPassthroughAudioSink(
-                builder.build(),
-                tunnelAllowed = iecTunnelEnabled,
-                surroundTunnelAllowed = iecTunnelSurround
-            )
-        }
+        val baseAudioSink = builder.build()
         val playbackSpeedAwareAudioSink = PlaybackSpeedAwareAudioSink(
             sink = baseAudioSink,
             initialForcePcm = initialForcePcm,

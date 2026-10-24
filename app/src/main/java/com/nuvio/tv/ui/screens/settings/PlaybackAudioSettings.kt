@@ -97,23 +97,6 @@ internal fun PlaybackAudioSection(
         onToggle = { onUpdate { setTunnelingEnabled(!settings.effectiveTunnelingEnabled) } },
         enabled = enabled && settings.isTunnelingCompatible
     )
-    // DTS-HD over an app-framed IEC61937 track: tunneled only when asked, since some
-    // HALs accept the tunneled track and then play silence or noise.
-    val iecTunnelOn = settings.iecTunnelEnabled && settings.effectiveTunnelingEnabled
-    SettingsToggleRow(
-        title = stringResource(R.string.audio_iec_tunnel_enabled),
-        subtitle = stringResource(R.string.audio_iec_tunnel_enabled_sub),
-        checked = iecTunnelOn,
-        onToggle = { onUpdate { setIecTunnelEnabled(!settings.iecTunnelEnabled) } },
-        enabled = enabled && settings.isTunnelingCompatible && settings.effectiveTunnelingEnabled
-    )
-    SettingsToggleRow(
-        title = stringResource(R.string.audio_iec_tunnel_surround),
-        subtitle = stringResource(R.string.audio_iec_tunnel_surround_sub),
-        checked = iecTunnelOn && settings.iecTunnelSurround,
-        onToggle = { onUpdate { setIecTunnelSurround(!settings.iecTunnelSurround) } },
-        enabled = enabled && iecTunnelOn
-    )
     SettingsToggleRow(
         title = stringResource(R.string.audio_force_optical_passthrough),
         subtitle = stringResource(R.string.audio_force_optical_passthrough_sub),

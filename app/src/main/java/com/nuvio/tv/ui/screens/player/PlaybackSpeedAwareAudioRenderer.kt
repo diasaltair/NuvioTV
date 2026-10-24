@@ -46,23 +46,10 @@ internal class PlaybackSpeedAwareAudioRenderer(
         if (supportsFormatDrm && (!formatHasDrm || MediaCodecUtil.getDecryptOnlyDecoderInfo() != null)) {
             audioOffloadSupport = getRendererAudioOffloadSupport(format, forcePcm)
             if (!forcePcm && playbackSpeedAwareAudioSink.supportsFormat(format)) {
-                // App-framed IEC61937 passthrough (DTS-HD) stays tunneled only when the HAL
-                // opens an IEC61937 track with HW_AV_SYNC. Otherwise reporting no tunneling
-                // support makes the track selector play this title non-tunneled instead of
-                // failing the sink.
-                val iecOwned = playbackSpeedAwareAudioSink.demandsNonTunneledPlayback(format)
-                val tunnelingSupport = if (iecOwned) TUNNELING_NOT_SUPPORTED else TUNNELING_SUPPORTED
-                if (format.sampleMimeType?.let { MimeTypes.isAudio(it) && it != MimeTypes.AUDIO_RAW } == true) {
-                    android.util.Log.i(
-                        "DtsHdIecSink",
-                        "supportsFormat: mime=${format.sampleMimeType} sinkDirect=true iecOwned=$iecOwned " +
-                            "tunneling=${if (iecOwned) "NOT_SUPPORTED" else "SUPPORTED"}"
-                    )
-                }
                 return RendererCapabilities.create(
                     C.FORMAT_HANDLED,
                     ADAPTIVE_NOT_SEAMLESS,
-                    tunnelingSupport,
+                    TUNNELING_SUPPORTED,
                     audioOffloadSupport
                 )
             }
