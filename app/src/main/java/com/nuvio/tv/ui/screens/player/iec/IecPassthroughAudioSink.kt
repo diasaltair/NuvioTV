@@ -23,6 +23,7 @@ internal class IecPassthroughAudioSink(
     private val keepAliveEnabled: Boolean = true,
     private val keepAliveThreadEnabled: Boolean = true,
     private val audioOutputReady: () -> Boolean = { true },
+    private val dtsHdIecEnabled: Boolean = true,
     private val onIecBecameReady: (() -> Unit)? = null
 ) : ForwardingAudioSink(sink) {
 
@@ -134,7 +135,7 @@ internal class IecPassthroughAudioSink(
         get() = keepAliveEnabled && mode == Mode.TRUEHD && iecTrack != null && trackStarted
 
     fun claimsHbr(format: Format): Boolean {
-        return hbrIecEnabled && !iecFailedThisSession && isHbrPassthrough(format) && iecAvailable(format)
+        return hbrIecEnabled && !iecFailedThisSession && iecCarries(format) && iecAvailable(format)
     }
 
     override fun getFormatSupport(format: Format): Int {
@@ -148,7 +149,7 @@ internal class IecPassthroughAudioSink(
     }
 
     private fun hbrIecRoute(format: Format): Boolean {
-        if (iecFailedThisSession || !isHbrPassthrough(format)) return false
+        if (iecFailedThisSession || !iecCarries(format)) return false
         if (iecAvailable(format)) return true
         if (hbrIecEnabled && !trackFactory.iec61937Ready()) hbrAnsweredBeforeProbe = true
         return false
@@ -162,7 +163,7 @@ internal class IecPassthroughAudioSink(
         configuredOutputChannels = outputChannels
         dropReplays()
         releaseIec()
-        configuredHbr = isHbrPassthrough(inputFormat)
+        configuredHbr = iecCarries(inputFormat)
         iecChosenForFormat = false
         reopenedAtNanos = NEVER
         reopensForFormat = 0
@@ -170,7 +171,7 @@ internal class IecPassthroughAudioSink(
         if (hbrIecEnabled) trackFactory.startProbe()
         val tunnelReady = !tunnelingRequested
         val tryCustomHbr = hbrIecEnabled && !iecFailedThisSession && tunnelReady &&
-            (isTrueHd(inputFormat) || (isHbrPassthrough(inputFormat) && trackFactory.iec61937Ready()))
+            (isTrueHd(inputFormat) || (iecCarries(inputFormat) && trackFactory.iec61937Ready()))
         if (tryCustomHbr) {
             val opened = openIec(inputFormat)
             if (opened) {
@@ -454,7 +455,7 @@ internal class IecPassthroughAudioSink(
     private fun refreshPassthroughLive() {
         val format = configuredFormat
         val hbrWaitingOnIec = format != null &&
-            isHbrPassthrough(format) &&
+            iecCarries(format) &&
             hbrIecEnabled &&
             !isIecActive &&
             !iecFailedThisSession &&
@@ -481,6 +482,9 @@ internal class IecPassthroughAudioSink(
         if (!iecReadyDelivered.compareAndSet(false, true)) return
         onIecBecameReady?.invoke()
     }
+
+    private fun iecCarries(format: Format): Boolean =
+        carriesOnIec(format.sampleMimeType, dtsHdIecEnabled)
 
     private fun iecAvailable(format: Format): Boolean {
         if (!hbrIecEnabled) return false
@@ -1194,6 +1198,12 @@ internal class IecPassthroughAudioSink(
 
         fun isHbrPassthrough(format: Format): Boolean {
             return PassthroughWaterLevelPacer.isHbrMime(format.sampleMimeType)
+        }
+
+        /** With [dtsHdIecEnabled] off, DTS-HD and DTS:X go through Android's own path; TrueHD stays on IEC. */
+        fun carriesOnIec(mimeType: String?, dtsHdIecEnabled: Boolean): Boolean {
+            if (!PassthroughWaterLevelPacer.isHbrMime(mimeType)) return false
+            return dtsHdIecEnabled || mimeType == MimeTypes.AUDIO_TRUEHD
         }
 
         private fun hasDtsCoreSyncWord(head: ByteArray): Boolean {

@@ -319,6 +319,83 @@ class IecPassthroughAudioSinkTest {
     }
 
     @Test
+    fun tvPassthrough_sendsDtsHdAndDtsXThroughAndroid() {
+        for (format in listOf(dtsHdFormat(), dtsXFormat())) {
+            val inner = RecordingSink(innerSupport = AudioSink.SINK_FORMAT_UNSUPPORTED)
+            val sink = IecPassthroughAudioSink(
+                sink = inner,
+                trackFactory = ReadyFactory(FakeIecAudioTrack(192_000, 16)),
+                dtsHdIecEnabled = false
+            )
+            assertFalse(sink.claimsHbr(format))
+            assertFalse(sink.supportsFormat(format))
+            assertEquals(AudioSink.SINK_FORMAT_UNSUPPORTED, sink.getFormatSupport(format))
+            sink.configure(format, 0, null)
+            assertFalse(sink.isIecActive)
+            assertFalse(sink.iecInvolved)
+            assertEquals(1, inner.configured)
+        }
+    }
+
+    @Test
+    fun standard_keepsDtsHdAndDtsXOnTheIecTrack() {
+        for (format in listOf(dtsHdFormat(), dtsXFormat())) {
+            val inner = RecordingSink(innerSupport = AudioSink.SINK_FORMAT_UNSUPPORTED)
+            val sink = IecPassthroughAudioSink(
+                sink = inner,
+                trackFactory = ReadyFactory(FakeIecAudioTrack(192_000, 16))
+            )
+            assertTrue(sink.claimsHbr(format))
+            assertEquals(AudioSink.SINK_FORMAT_SUPPORTED_DIRECTLY, sink.getFormatSupport(format))
+            sink.configure(format, 0, null)
+            assertTrue(sink.isIecActive)
+            assertEquals(0, inner.configured)
+        }
+    }
+
+    @Test
+    fun tvPassthrough_leavesTrueHdOnTheIecTrack() {
+        val inner = RecordingSink()
+        val sink = IecPassthroughAudioSink(
+            sink = inner,
+            trackFactory = IecAudioTrackFactory { _, _, _, _ -> FakeIecAudioTrack(sampleRate = 192_000, frameSizeBytes = 16) },
+            dtsHdIecEnabled = false
+        )
+        sink.configure(trueHdFormat(), 0, null)
+        assertTrue(sink.isIecActive)
+        assertEquals(0, inner.configured)
+    }
+
+    @Test
+    fun carriesOnIec_onlyTheDtsHdFamilyFollowsTheSetting() {
+        for (dtsHdIec in listOf(true, false)) {
+            assertTrue(IecPassthroughAudioSink.carriesOnIec(MimeTypes.AUDIO_TRUEHD, dtsHdIec))
+            assertEquals(dtsHdIec, IecPassthroughAudioSink.carriesOnIec(MimeTypes.AUDIO_DTS_HD, dtsHdIec))
+            assertEquals(dtsHdIec, IecPassthroughAudioSink.carriesOnIec(MimeTypes.AUDIO_DTS_X, dtsHdIec))
+            assertFalse(IecPassthroughAudioSink.carriesOnIec(MimeTypes.AUDIO_DTS, dtsHdIec))
+            assertEquals(dtsHdIec, IecPassthroughAudioSink.carriesOnIec(MimeTypes.AUDIO_DTS_EXPRESS, dtsHdIec))
+            assertFalse(IecPassthroughAudioSink.carriesOnIec(MimeTypes.AUDIO_AC3, dtsHdIec))
+            assertFalse(IecPassthroughAudioSink.carriesOnIec(MimeTypes.AUDIO_E_AC3, dtsHdIec))
+            assertFalse(IecPassthroughAudioSink.carriesOnIec(null, dtsHdIec))
+        }
+    }
+
+    @Test
+    fun tvPassthrough_plainDtsIsForwardedAsBefore() {
+        val inner = RecordingSink()
+        val sink = IecPassthroughAudioSink(
+            sink = inner,
+            trackFactory = ReadyFactory(FakeIecAudioTrack(192_000, 16)),
+            dtsHdIecEnabled = false
+        )
+        val dts = stereoBitstreamFormat(MimeTypes.AUDIO_DTS)
+        assertFalse(sink.claimsHbr(dts))
+        sink.configure(dts, 0, null)
+        assertFalse(sink.isIecActive)
+        assertEquals(1, inner.configured)
+    }
+
+    @Test
     fun configure_hbrRawWaitingOnIec_doesNotBlockTheProbe() {
         val factory = ReadyFactory(
             track = FakeIecAudioTrack(192_000, 16),
@@ -662,6 +739,14 @@ class IecPassthroughAudioSinkTest {
         return Format.Builder()
             .setSampleMimeType(mimeType)
             .setChannelCount(2)
+            .setSampleRate(48_000)
+            .build()
+    }
+
+    private fun dtsXFormat(): Format {
+        return Format.Builder()
+            .setSampleMimeType(MimeTypes.AUDIO_DTS_X)
+            .setChannelCount(8)
             .setSampleRate(48_000)
             .build()
     }
