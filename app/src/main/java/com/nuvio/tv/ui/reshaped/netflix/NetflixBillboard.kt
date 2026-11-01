@@ -51,6 +51,7 @@ import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import coil3.request.allowHardware
 import coil3.request.crossfade
 import com.nuvio.tv.R
 import com.nuvio.tv.domain.model.MetaPreview
@@ -175,7 +176,7 @@ private fun NetflixBillboardPage(item: MetaPreview, showImdbRatings: Boolean) {
     }
     val backdrop = item.background ?: item.landscapePoster ?: item.poster
     val model = remember(backdrop, sizePx) {
-        ImageRequest.Builder(context).data(backdrop).crossfade(false).size(sizePx.first, sizePx.second).build()
+        ImageRequest.Builder(context).data(backdrop).crossfade(false).allowHardware(true).size(sizePx.first, sizePx.second).build()
     }
     val leftShade = remember {
         Brush.horizontalGradient(

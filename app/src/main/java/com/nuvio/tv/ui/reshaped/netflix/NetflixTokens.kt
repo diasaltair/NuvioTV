@@ -77,6 +77,8 @@ internal object NetflixTokens {
     // Wide art preloading in the focused row: the titles either side of focus are fetched once
     // focus rests for PRELOAD_DWELL_MS, and dropped from memory once focus is PRELOAD_KEEP away.
     const val PRELOAD_DWELL_MS = 150L
+    // Wide art arriving from disk or network fades in over this, instead of popping in.
+    const val ART_FADE_MS = 120
     const val PRELOAD_KEEP = 3
 }
 

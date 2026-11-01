@@ -45,6 +45,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.animation.Crossfade
@@ -107,6 +108,7 @@ internal fun NetflixCatalogRow(
     restorerFocusedIndex: Int,
     onItemFocused: (itemIndex: Int) -> Unit,
     forceFocusRequest: Boolean = false,
+    onPrefetchNeighbors: (List<MetaPreview>) -> Unit = {},
     modifier: Modifier = Modifier,
     seeAllLabel: String? = null,
     showSeeAll: Boolean = catalogRow.hasMore || catalogRow.items.size >= 15,
@@ -276,6 +278,23 @@ internal fun NetflixCatalogRow(
                 if (rowHasFocus && motion.held.targetValue == 0f) motion.position.targetValue.roundToInt() else null
             }
         )
+    }
+
+    // Nuvio RS: enrich the next titles before focus gets there, so their final TMDB art is what
+    // the preload above fetches and what the tile opens on.
+    val latestOnPrefetchNeighbors by rememberUpdatedState(onPrefetchNeighbors)
+    LaunchedEffect(motion) {
+        snapshotFlow {
+            if (rowHasFocus && motion.held.targetValue == 0f) motion.position.targetValue.roundToInt() else null
+        }.collectLatest { focus ->
+            if (focus == null) return@collectLatest
+            kotlinx.coroutines.delay(NetflixTokens.PRELOAD_DWELL_MS)
+            val list = latestItems
+            val neighbors = intArrayOf(focus + 1, focus - 1, focus + 2, focus + 3).mapNotNull { index ->
+                list.getOrNull(index)?.takeUnless { it.id.startsWith("__placeholder_") }
+            }
+            if (neighbors.isNotEmpty()) latestOnPrefetchNeighbors(neighbors)
+        }
     }
 
     Column(

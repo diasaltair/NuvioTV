@@ -37,7 +37,15 @@ internal suspend fun netflixPreloadRowArt(
     }
 
     try {
-        snapshotFlow { center() }.collectLatest { focus ->
+        // Keyed on the neighbours' art URLs too: when enrichment swaps a title's art for the TMDB
+        // backdrop, the new image is fetched without waiting for the next focus move.
+        snapshotFlow {
+            center()?.let { focus ->
+                val list = items()
+                focus to PRELOAD_OFFSETS.map { list.getOrNull(focus + it)?.netflixArtworkUrl() }
+            }
+        }.collectLatest { snapshot ->
+            val focus = snapshot?.first
             if (focus == null) {
                 held.keys.toList().forEach(::drop)
                 return@collectLatest
@@ -48,7 +56,7 @@ internal suspend fun netflixPreloadRowArt(
             }
             delay(NetflixTokens.PRELOAD_DWELL_MS)
             val list = items()
-            for (index in intArrayOf(focus + 1, focus - 1)) {
+            for (index in PRELOAD_OFFSETS.map { focus + it }) {
                 val item = list.getOrNull(index) ?: continue
                 if (item.id.startsWith("__placeholder_")) continue
                 val url = item.netflixArtworkUrl() ?: continue
@@ -62,3 +70,5 @@ internal suspend fun netflixPreloadRowArt(
         held.keys.toList().forEach(::drop)
     }
 }
+
+private val PRELOAD_OFFSETS = intArrayOf(1, -1, 2)

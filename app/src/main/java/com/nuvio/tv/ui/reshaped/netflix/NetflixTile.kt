@@ -51,6 +51,7 @@ import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import coil3.request.allowHardware
 import coil3.request.crossfade
 import coil3.size.Scale
 import androidx.compose.ui.unit.Density
@@ -199,11 +200,16 @@ internal fun NetflixTile(
                 return@Box
             }
             if (!item.poster.isNullOrBlank()) {
+                // Kept at the closed tile's width: while the wide art loads, the widening tile shows
+                // the poster as it was plus the dark tile, not a zoomed, blurred crop of it.
                 AsyncImage(
                     model = posterModel,
                     contentDescription = item.name,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .wrapContentWidth(align = Alignment.Start, unbounded = true)
+                        .requiredWidth(collapsedWidth)
                 )
             } else {
                 Text(
@@ -344,7 +350,10 @@ internal fun netflixArtworkRequest(context: Context, url: String, sizePx: Pair<I
     ImageRequest.Builder(context)
         .data(url)
         .memoryCacheKey(netflixArtworkCacheKey(url, sizePx))
-        .crossfade(false)
+        // Fades in only when it comes from disk or network; a memory-cache hit shows at once.
+        .crossfade(NetflixTokens.ART_FADE_MS)
+        // Wide art is drawn every frame of the open/close motion: keep it as a GPU bitmap.
+        .allowHardware(true)
         .size(sizePx.first, sizePx.second)
         .scale(Scale.FILL)
         .build()
