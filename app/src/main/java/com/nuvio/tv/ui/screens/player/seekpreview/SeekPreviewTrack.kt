@@ -1,6 +1,7 @@
 package com.nuvio.tv.ui.screens.player.seekpreview
 
 import android.graphics.Bitmap
+import com.nuvio.tv.ui.screens.player.seekpreview.colourmatch.PreviewColourAdjustment
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +28,8 @@ data class SeekPreviewThumbnail(
     val origin: String = "UNKNOWN",
     val actualFrameMs: Long? = null,
     val crop: android.graphics.Rect? = null,
+    /** Display-only calibration; original cached bytes and bitmaps stay unchanged. */
+    val colourAdjustment: PreviewColourAdjustment? = null,
 )
 
 /**
@@ -68,6 +71,12 @@ interface SeekPreviewTrack {
      */
     fun keyframeNear(positionMs: Long, toleranceMs: Long): Long? = null
     fun noteScrubDirection(direction: Int) = Unit
+
+    /**
+     * True while a remote key is held and the scrub moves faster than a network fetch. Tracks
+     * that download frames answer from what they already hold and fetch in the background.
+     */
+    fun noteHeldScrub(held: Boolean) = Unit
     fun externalPreviewAvailable(positionMs: Long) = Unit
 
     /** Stops background work; the track is not fed again. */

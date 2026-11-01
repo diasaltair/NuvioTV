@@ -87,7 +87,10 @@ class UpdateJobService : JobService() {
         val channel = preferences.getOrInitializeUpdateChannel()
         val update = entryPoint.updateRepository().getLatestUpdate(channel).getOrThrow()
         preferences.setLastCheckAtMs(System.currentTimeMillis())
-        if (!VersionUtils.isRemoteNewer(update.tag, BuildConfig.VERSION_NAME)) return
+        if (!TesterChannel.isRemoteNewer(
+                update.tag, update.publishedAt, update.prerelease,
+                BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong()
+            )) return
         if (update.tag == preferences.ignoredTag.first()) return
 
         downloadStore.download(update).getOrThrow()

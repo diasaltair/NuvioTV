@@ -1,3 +1,2 @@
-- Audio sync now shows a message only for the first confirmed sync of a title. Fine-tuning estimates, "timing changed, re-synced" updates and later confirmations (another cut in the release, recognition taking over) adjust the subtitles silently.
-- Messages that are not about timing are unchanged: speech model download, Wi-Fi needed, and a sync that could not be confirmed.
-- Includes tester.23's faster start of word recognition on titles with many subtitles.
+- TorBox seek previews stay complete while you hold left or right: the side frames no longer go missing, and the whole filmstrip moves together on every step.
+- Held scrubbing reuses each decoded preview sheet for every frame on it and prepares the next sheet in the direction you are moving, so fast holds keep up. This uses about 12 MB only while the key is held (playback is paused then) and is freed when you let go.

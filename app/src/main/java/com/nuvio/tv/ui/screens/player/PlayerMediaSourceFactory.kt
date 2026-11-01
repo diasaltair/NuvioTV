@@ -141,6 +141,26 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
             .build()
     }
 
+    private val chunkSessionLanes = java.util.concurrent.ConcurrentHashMap<Int, okhttp3.Call.Factory>()
+
+    private fun chunkSessionCallFactory(connections: Int, url: String): okhttp3.Call.Factory {
+        // Plain http:// never negotiates HTTP/2, so lanes would only split the idle sockets.
+        if (url.startsWith("http://", ignoreCase = true)) return playbackHttpClient
+        val factory = chunkSessionLanes.getOrPut(connections) {
+            HttpLanes.callFactory(
+                playbackHttpClient,
+                connections,
+                NuvioExoPlayerPerformanceHelper::lanePool
+            ).also { factory ->
+                if (factory is LaneCallFactory) {
+                    Log.i("PlayerMediaSourceFactory", "HTTP2_LANES lanes=${factory.lanes.size}")
+                }
+            }
+        }
+        (factory as? LaneCallFactory)?.restart()
+        return factory
+    }
+
     private fun computePrefetchDepthChunks(
         connections: Int,
         chunkBytes: Long
@@ -184,19 +204,17 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         )
         val isHls = resolvedMimeType == MimeTypes.APPLICATION_M3U8
         val isDash = resolvedMimeType == MimeTypes.APPLICATION_MPD
-        val httpDataSourceFactory = PlaybackThroughput.countingNetworkBytes(
-            if (isHls || isDash) {
-                DefaultDataSource.Factory(
-                    context,
-                    PlayerPlaybackNetworking.createHttpDataSourceFactory(
-                        sanitizedHeaders,
-                        useLongReadTimeout = isLoopbackUrl(url),
-                    ),
-                )
-            } else {
-                PlayerPlaybackNetworking.createDataSourceFactory(context, sanitizedHeaders)
-            }
-        )
+        val httpDataSourceFactory = PlaybackThroughput.countingNetworkBytes(if (isHls || isDash) {
+            DefaultDataSource.Factory(
+                context,
+                PlayerPlaybackNetworking.createHttpDataSourceFactory(
+                    sanitizedHeaders,
+                    useLongReadTimeout = isLoopbackUrl(url),
+                ),
+            )
+        } else {
+            PlayerPlaybackNetworking.createDataSourceFactory(context, sanitizedHeaders)
+        })
 
         val mediaItemBuilder = MediaItem.Builder().setUri(url)
         resolvedMimeType?.let(mediaItemBuilder::setMimeType)
@@ -228,7 +246,7 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         parallelStartupPrefetchUnlocked.set(!useChunkSessionSource)
         val networkProgressiveFactory: DataSource.Factory = if (useChunkSessionSource) {
             val sessionConnections = parallelConnectionCount
-            val okHttpFactory = OkHttpDataSource.Factory(playbackHttpClient).apply {
+            val okHttpFactory = OkHttpDataSource.Factory(chunkSessionCallFactory(sessionConnections, url)).apply {
                 setDefaultRequestProperties(sanitizedHeaders)
                 if (sanitizedHeaders.none { it.key.equals("User-Agent", ignoreCase = true) }) {
                     setUserAgent(DEFAULT_USER_AGENT)

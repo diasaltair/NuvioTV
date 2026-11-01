@@ -481,13 +481,6 @@ private suspend fun PlayerRuntimeController.streamHasTextTracks(): Boolean? =
         tracks.groups.any { it.type == C.TRACK_TYPE_TEXT }
     }
 
-private fun Subtitle.toAutoSyncCandidate(): AutoSyncSubtitleCandidate =
-    AutoSyncSubtitleCandidate(
-        url = url,
-        language = lang,
-        name = addonName.ifBlank { id },
-    )
-
 /**
  * mpv path. mpv exposes no embedded subtitle timing while it plays, so only the container's own
  * subtitle index can serve as the reference. The result is applied by loading a copy of the
@@ -497,7 +490,8 @@ private fun PlayerRuntimeController.runMpvAutomaticSubtitleSync(
     selectedSubtitle: Subtitle,
     candidateScope: AutoSyncCandidateScope,
 ) {
-    automaticSubtitleSyncJob?.cancel()
+    stopAutomaticSubtitleSync()
+    showAutoSyncToast(AutoSyncBubbleKind.Working, context.getString(R.string.autosync_toast_analyzing))
 
     val sourceUrlAtStart = currentStreamUrl
     val sourceHeadersAtStart = currentHeaders.toMap()
@@ -577,7 +571,7 @@ private fun PlayerRuntimeController.runMpvAutomaticSubtitleSync(
                     language = PlayerSubtitleUtils.normalizeLanguageCode(chosenSubtitle.lang),
                 ) == true
                 if (!added) {
-                    showAutoSyncToast(AutoSyncBubbleKind.Failure, context.getString(R.string.autosync_toast_failed))
+                    showAutoSyncToast(AutoSyncBubbleKind.Failure, context.getString(R.string.reshaped_autosync_toast_failed))
                     return@launch
                 }
                 keepMpvPlayingIfNeeded(wasPlaying)
@@ -593,8 +587,18 @@ private fun PlayerRuntimeController.runMpvAutomaticSubtitleSync(
                 rememberAddonSubtitleSelection(chosenSubtitle)
             }
             if (!withinTolerance) updateMpvAvailableTracks()
-            setSubtitleDelayMs(targetMs = 0, showOverlay = false)
+            resetSubtitleDelayForAutoSync()
             AutoSyncSyncedSubtitle.mark(chosenSubtitle.url)
+            showAutoSyncToast(
+                AutoSyncBubbleKind.Success,
+                context.getString(
+                    when {
+                        chosenSubtitle.url != selectedUrl -> R.string.autosync_toast_synced_replaced
+                        withinTolerance -> R.string.autosync_toast_in_sync
+                        else -> R.string.autosync_toast_synced
+                    },
+                ),
+            )
             Log.d(
                 PlayerRuntimeController.TAG,
                 "AUTO_SYNC_V2 mpv applied id=${chosenSubtitle.id} " +
@@ -608,7 +612,7 @@ private fun PlayerRuntimeController.runMpvAutomaticSubtitleSync(
         } catch (error: Throwable) {
             Log.w(PlayerRuntimeController.TAG, "AUTO_SYNC_V2 mpv failed", error)
             if (streamUnchanged() && _uiState.value.selectedAddonSubtitle?.url == selectedUrl) {
-                showAutoSyncToast(AutoSyncBubbleKind.Failure, context.getString(R.string.autosync_toast_failed))
+                showAutoSyncToast(AutoSyncBubbleKind.Failure, context.getString(R.string.reshaped_autosync_toast_failed))
             }
         }
     }
@@ -646,6 +650,12 @@ private suspend fun PlayerRuntimeController.writeMpvAutoSyncedSubtitle(
         file.absolutePath
     }
 }
+
+private fun Subtitle.toAutoSyncCandidate() = AutoSyncSubtitleCandidate(
+    url = url,
+    language = lang,
+    name = addonName.ifBlank { id },
+)
 
 /** Why AutoSync kept the original timing, in the fewest words that still help the viewer. */
 private fun Context.buildAutoSyncFailureToast(analysisOutcome: AutoSyncAnalysisOutcome?): String =

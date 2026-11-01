@@ -203,7 +203,7 @@
     <string name="episodes_open_comments">Abrir comentários do episódio</string>
     <string name="play_manually">Assistir manualmente</string>
     <string name="episodes_season_actions">Opções da temporada</string>
-        
+
     <string name="detail_added_to_library">Adicionado à biblioteca</string>
     <string name="detail_removed_from_library">Removido da biblioteca</string>
     <string name="detail_episode_marked_watched">Episódio marcado como assistido</string>
@@ -220,7 +220,7 @@
     <string name="detail_marked_previous_watched">Episódios anteriores marcados como assistidos: %1$d</string>
     <string name="playback_unavailable">Reprodução indisponível</string>
     <string name="playback_unavailable_message">A reprodução deste título não está disponível com a sua configuração atual.</string>
-    
+
     <string name="detail_btn_play">Assistir</string>
     <string name="detail_btn_resume">Continuar</string>
     <string name="detail_btn_play_episode">Assistir T%1$d:E%2$d</string>
@@ -322,7 +322,7 @@
     <string name="appearance_font">Fonte do App</string>
     <string name="appearance_font_subtitle">Escolha sua fonte preferida</string>
     <string name="appearance_font_dialog_title">Escolha Fonte</string>
-    
+
     <string name="appearance_title">Aparência</string>
     <string name="appearance_subtitle">Escolha seu tema de cores, fonte e idioma</string>
     <string name="appearance_color_theme">Tema de Cores</string>
@@ -740,7 +740,7 @@
     <string name="sub_languages_label">Idiomas</string>
     <string name="sub_style_label">Estilo</string>
     <string name="autoplay_selected_count">%1$d selecionados</string>
-    
+
     <string name="playback_loading_overlay">Tela de carregamento</string>
     <string name="playback_loading_overlay_sub">Exibir até o vídeo iniciar</string>
     <string name="playback_pause_overlay">Informações ao pausar</string>
@@ -883,7 +883,7 @@
     <string name="audio_decoder_prefer_device_desc">Usa hardware, FFmpeg como fallback</string>
     <string name="audio_decoder_prefer_app_desc">Usa FFmpeg quando disponível. Mais formatos, mais CPU.</string>
     <string name="audio_decoder_controls">Define uso de hardware ou software</string>
-    
+
     <string name="sub_section">Legendas</string>
     <string name="sub_not_set">Não definido</string>
     <string name="sub_forced_lang">Forçadas</string>
@@ -909,15 +909,6 @@
     <string name="sub_libass">Usar libass para ASS/SSA</string>
     <string name="sub_libass_sub">Experimental: estilos e animações ASS/SSA</string>
     <string name="sub_libass_mode">Modo de renderização Libass</string>
-    <string name="sub_mode_overlay_gl">Sobreposição OpenGL (Recomendado)</string>
-    <string name="sub_mode_overlay_gl_sub">Melhor com HDR, renderiza em segundo plano</string>
-    <string name="sub_mode_overlay_canvas">Sobreposição Canvas</string>
-    <string name="sub_mode_effects_gl">Efeitos OpenGL</string>
-    <string name="sub_mode_effects_gl_sub">Animações Media3, mais rápido que Canvas</string>
-    <string name="sub_mode_effects_canvas">Efeitos Canvas</string>
-    <string name="sub_mode_effects_canvas_sub">Animações Media3 com Canvas</string>
-    <string name="sub_mode_standard">Padrão (Cues)</string>
-    <string name="sub_mode_standard_sub">Renderização básica sem animações</string>
     <string name="sub_org_none">Nenhuma (ordem padrão)</string>
     <string name="sub_org_by_lang">Por idioma</string>
     <string name="sub_org_by_addon">Por addon</string>
@@ -1215,7 +1206,7 @@
     <string name="mdblist_rate_limited">O limite de solicitações do MDBList foi atingido. A sincronização continuará após o limite zerar.</string>
     <string name="mdblist_revoke_failed">Desconectado neste aparelho. Remova este app nas configurações da sua conta do MDBList para revogar o acesso.</string>
 
-    
+
     <string name="mdblist_title">Avaliações do MDBList</string>
     <string name="mdblist_subtitle">Configure avaliações externas no destaque.</string>
     <string name="mdblist_enable_title">Ativar avaliações do MDBList</string>
@@ -1379,7 +1370,7 @@
     <string name="debrid_stream_release_groups_required">Grupos de release obrigatórios</string>
     <string name="debrid_stream_release_groups_excluded">Grupos de release excluídos</string>
     <string name="debrid_stream_release_groups_input_subtitle">Insira o nome de um grupo por linha.</string>
-    
+
     <string name="debrid_formatter_title">Editor web</string>
     <string name="debrid_formatter_subtitle">Configure exibição, filtros e ordenação das fontes através de outro dispositivo.</string>
     <string name="debrid_formatter_configure">Abrir editor web</string>
@@ -1418,7 +1409,7 @@
     <string name="streams_size">TAMANHO %1$s</string>
     <string name="action_import">Importar</string>
     <string name="action_delete">Excluir</string>
-    
+
     <!-- Anime-Skip -->
     <string name="animeskip_title">Anime Skip</string>
     <string name="animeskip_subtitle">Pule aberturas e créditoss automaticamente.</string>
@@ -1431,7 +1422,7 @@
     <string name="animeskip_dialog_placeholder">Digite o ID de Cliente</string>
     <string name="animeskip_invalid_client_id">ID de Cliente inválido</string>
     <string name="action_clear">Limpar</string>
-    
+
     <string name="tmdb_title">Enriquecimento TMDB</string>
     <string name="tmdb_subtitle">Escolha quais metadados virão do TMDB</string>
     <string name="tmdb_enable_title">Ativar enriquecimento TMDB</string>
@@ -1462,9 +1453,9 @@
     <string name="tmdb_more_like_this_subtitle">Recomendação do TMDB nas telas de detalhes e após a assistir.</string>
     <string name="tmdb_collections_title">Coleções</string>
     <string name="tmdb_collections_subtitle">Coleções de filmes do TMDB por ordem de lançamento</string>
-   
+
     <string name="tmdb_language_dialog_title">Idioma do TMDB</string>
-    
+
     <string name="trakt_description">Sincronize sua Biblioteca, progresso, histórico de assistidos e listas pessoais com o Trakt.</string>
     <string name="trakt_connected_as">Conectado como %1$s</string>
     <string name="trakt_account_login">Login da Conta</string>
@@ -1582,7 +1573,7 @@
     <string name="debug_generate_library_placeholder">Número de itens</string>
     <string name="debug_generate_library_button">Gerar</string>
     <string name="debug_generating_library">Gerando…</string>
-    
+
     <string name="profile_title">Perfis</string>
     <string name="profile_subtitle">Gerencie os perfis desta conta</string>
     <string name="profile_manage_button">Gerenciar Perfis</string>
@@ -1682,7 +1673,7 @@
     <string name="profile_pin_overlay_forgot_hint">Esqueceu o PIN? Redefina-o pelo site do Nuvio na sua conta.</string>
     <string name="profile_pin_overlay_back_hint">Pressione "Voltar" para cancelar.</string>
 
-   
+
      <!-- Essential addon setup wizard -->
     <string name="essential_addon_setup_title">Configurar addon</string>
     <string name="essential_addon_setup_subtitle">Instale um addon para começar a assistir. Você pode adicionar mais depois em Addons.</string>
@@ -1797,7 +1788,7 @@
     <string name="stream_player_external">Player Externo</string>
     <string name="stream_filter_all">Tudo</string>
     <string name="stream_episode_label">T%1$d:E%2$d</string>
-    
+
     <string name="player_no_external_player">Nenhum player externo encontrado</string>
     <string name="player_loading_preparing">Preparando fonte…</string>
     <string name="player_loading_detecting_format">Detectando formato do vídeo…</string>
@@ -1827,7 +1818,7 @@
     <string name="subtitle_timing_press_back_cancel">Pressione Voltar para cancelar</string>
     <string name="subtitle_timing_captured_at">Capturado em %1$s</string>
     <string name="subtitle_timing_capturing">Capturando…</string>
-    
+
     <!-- ParentalGuideOverlay -->
     <string name="parental_nudity">Nudez</string>
     <string name="parental_violence">Violência</string>
@@ -1839,7 +1830,6 @@
     <string name="parental_severity_mild">Leve</string>
     <string name="player_ends_at">Termina às %1$s</string>
     <string name="player_live_watched">AO VIVO • %1$s</string>
-    <string name="player_via">via %1$s</string>
     <!-- Código de temporada/episódio mostrado na interface do player (ex.: T01E02). %1$d = temporada, %2$d = episódio. -->
     <string name="season_episode_format">T%1$d:E%2$d</string>
     <string name="player_subtitle_delay">Atraso da legenda</string>
@@ -1861,10 +1851,10 @@
     <string name="player_more_actions_title">Mais opções</string>
     <string name="player_more_speed">Velocidade de reprodução</string>
     <string name="player_more_aspect_ratio">Proporção</string>
-    <string name="player_more_open_external">Abrir em Player Externo</string>    
+    <string name="player_more_open_external">Abrir em Player Externo</string>
     <string name="player_error_no_stream_url">Nenhum link de vídeo fornecido</string>
-    
- 
+
+
     <string name="stream_info_section_source">FONTE</string>
     <string name="stream_info_section_file">ARQUIVO</string>
     <string name="stream_info_section_video">VÍDEO</string>
@@ -1974,7 +1964,7 @@
     <string name="pause_cast_label">Elenco</string>
     <string name="pause_back_to_details">Voltar para detalhes</string>
     <string name="pause_as_character">como %1$s</string>
-   
+
     <!-- PostPlayOverlay -->
     <string name="next_episode_label">Próximo Episódio</string>
     <string name="next_episode_finding_source">Buscando fonte…</string>
@@ -2163,11 +2153,11 @@
     <string name="cloud_library_type_usenet">Usenet</string>
     <string name="cloud_library_type_web">Web</string>
     <string name="cloud_library_type_files">Arquivos</string>
-   
+
     <!-- Cloud library repository errors -->
     <string name="cloud_library_error_provider_unavailable">A biblioteca na nuvem não está disponível para o %1$s.</string>
     <string name="cloud_library_error_disabled">A biblioteca na nuvem está desativada.</string>
-   
+
     <!-- AccountSettingsContent -->
     <string name="account_loading">Carregando\u2026</string>
     <string name="account_sync_description">Sincronize sua biblioteca, progresso e addons entre seus aparelhos.</string>
@@ -2190,7 +2180,7 @@
     <string name="account_signed_in_as">Conectado como</string>
     <string name="account_generate_sync_signed_in_desc">Gere um código para sincronizar outros dispositivos com esta conta.</string>
     <string name="account_unknown_device">Dispositivo desconhecido</string>
-    
+
     <string name="auth_signin_title">Fazer Login</string>
     <string name="auth_signin_tv_disabled">Login por e-mail/senha na TV está desativado. Continue com o login pelo QR Code.</string>
     <string name="auth_signin_qr_btn">Continuar com QR Code</string>
@@ -2279,7 +2269,7 @@
     <string name="sync_claim_code_placeholder">XXXX-XXXX-XXXX-XXXX-XXXX</string>
     <string name="sync_claim_pin_label">PIN</string>
     <string name="sync_claim_pin_placeholder">Digite o PIN</string>
-   <string name="sync_claim_linking">Vinculando\u2026</string> 
+   <string name="sync_claim_linking">Vinculando\u2026</string>
 
     <string name="plugin_readonly_notice">Usando plugins do perfil principal (somente leitura)</string>
     <string name="plugin_repositories_section">Repositórios (%1$d)</string>
@@ -2394,9 +2384,9 @@
     <string name="discover_empty_no_content_subtitle">Tente mudar o gênero ou o catálogo</string>
 
     <!-- AddonManagerScreen -->
-   
+
     <!-- PluginScreen -->
-    
+
     <!-- ProfileSettingsContent -->
     <string name="profile_edit_title_id">Editar Perfil %1$d</string>
 
@@ -2404,7 +2394,7 @@
     <string name="audio_passthrough_info">A passagem direta de áudio (passthrough) para TrueHD, DTS e AC-3 é automática. Se a sua Soundbar/Receiver for compatível, o áudio será enviado sem perdas e sem decodificação prévia.</string>
     <string name="audio_dv_title">DV7 - Compatibilidade HEVC</string>
     <string name="audio_dv_sub">Converte o formato Dolby Vision (Perfil 7) para vídeo padrão (HEVC) em aparelhos sem suporte nativo.</string>
-    
+
     <!-- SidebarNavigation / MainActivity -->
     <string name="nav_home">Início</string>
     <string name="nav_discover">Descobrir</string>
@@ -2441,15 +2431,15 @@
     <string name="profile_pin_current_required">Este perfil já possui um PIN. Digite o PIN atual para alterá-lo.</string>
 
     <!-- Account Screen -->
-    
+
     <!-- Sync screens -->
-    
+
     <!-- Search -->
     <string name="discover_disabled_title">Descobrir desativado</string>
     <string name="discover_disabled_subtitle">Ative o Descobrir nas configurações de Layout</string>
 
     <!-- Library -->
- 
+
     <!-- Error messages (shared) -->
     <string name="error_network_required">Conecte-se à internet para usar este recurso</string>
     <string name="error_server_ports_unavailable">Não foi possível iniciar o servidor. Todas as portas estão em uso.</string>
@@ -2460,7 +2450,7 @@
     <string name="plugin_repo_refreshed">Repositório atualizado</string>
 
     <!-- Trakt errors -->
-    
+
     <string name="trakt_error_code_expired">Código do dispositivo expirado. Inicie novamente.</string>
     <string name="trakt_error_code_used">Código do dispositivo já utilizado. Inicie novamente.</string>
     <string name="trakt_error_denied">Autorização negada no Trakt.</string>
@@ -2487,9 +2477,9 @@
     <!-- General errors -->
     <string name="error_unknown">Erro desconhecido</string>
     <string name="addon_error_not_found">Addon não encontrado</string>
-    
+
     <!-- Account errors -->
-    
+
     <!-- Search errors -->
 
     <!-- Home errors -->
@@ -2498,10 +2488,9 @@
 
     <!-- Player errors -->
     <string name="player_error_failed_start_torrent">Falha ao iniciar torrent: %1$s</string>
-    
+
     <!-- Playback subtitle settings -->
-    <string name="sub_mode_overlay_canvas_sub">Suporte HDR com renderização em canvas. Pode bloquear a interface.</string>
-   
+
     <string name="ratings_season_label">T%1$d</string>
     <string name="ratings_episode_label">E%1$d</string>
 
@@ -2564,7 +2553,7 @@
     <string name="collections_header">Coleções</string>
     <string name="collections_delete_confirm_title">Excluir coleção?</string>
     <string name="collections_delete_confirm">Excluir</string>
-    <string name="collections_delete_confirm_subtitle">Isso excluirá permanentemente \"%1$s\". Esta ação não pode ser desfeita.</string>  
+    <string name="collections_delete_confirm_subtitle">Isso excluirá permanentemente \"%1$s\". Esta ação não pode ser desfeita.</string>
     <string name="collections_empty">Nenhuma coleção ainda. Crie uma para organizar seus catálogos.</string>
     <string name="collections_new">Nova coleção</string>
     <string name="collections_import">Importar</string>
@@ -2818,7 +2807,7 @@
     <string name="collection_editor_folder_count_one">%1$d item</string>
     <string name="collection_editor_folder_count_other">%1$d itens</string>
     <string name="collections_editor_delete_folder_title">Excluir pasta?</string>
-    <string name="collections_editor_delete_folder_subtitle">Isso excluirá permanentemente \"%1$s\" e todo o seu conteúdo.</string>  
+    <string name="collections_editor_delete_folder_subtitle">Isso excluirá permanentemente \"%1$s\" e todo o seu conteúdo.</string>
     <string name="collections_editor_tmdb_movie_title_placeholder">Filmes da Marvel, Originais Netflix, Pixar</string>
     <string name="collections_editor_tmdb_tv_title_placeholder">Melhores Filmes de Ação, Doramas Coreanos, Animações de 2024</string>
     <string name="collections_editor_tmdb_person_title_placeholder">Filmes de Tom Hanks, Atores favoritos</string>
@@ -3105,7 +3094,7 @@
 
     <string name="watchlist_removed">Removido da Minha Lista</string>
     <string name="watchlist_added">Adicionado à Minha Lista</string>
-    
+
     <!-- Debrid: filter rule rows (title + subtitle pairs) -->
     <string name="debrid_picker_preferred_resolutions_title">Resoluções preferidas</string>
     <string name="debrid_picker_preferred_resolutions_subtitle">Prioriza as resoluções selecionadas no topo da lista.</string>
@@ -3366,16 +3355,10 @@
     <string name="shuffle_save_failed">Não foi possível atualizar o aleatório. Tente novamente.</string>
     <string name="shuffle_change_selection">Escolher episódios</string>
     <string name="shuffle_badge">Embaralhamento de episódios ativado</string>
-    <string name="autosync_setting_title">Sincronizar legendas automaticamente</string>
-    <string name="autosync_setting_description">Ajuste a legenda do addon ao tempo das legendas do vídeo.</string>
-    <string name="autosync_tolerance_title">Tolerância da sincronização</string>
-    <string name="autosync_tolerance_description">Mantenha o tempo original quando a correção for igual ou menor que isso.</string>
-    <string name="autosync_tolerance_off">Desativado</string>
     <string name="autosync_tolerance_value">%1$d ms</string>
-    <string name="autosync_thorough_title">Busca detalhada</string>
-    <string name="autosync_thorough_description">Continue comparando outras legendas e faixas do vídeo para um ajuste mais preciso. Quando desativado, a primeira correspondência forte é usada mais rápido. Só ajustes confiáveis são aplicados.</string>
     <string name="autosync_toast_failed">Falha na sincronização: não foi possível ajustar esta legenda ao vídeo.</string>
     <string name="autosync_toast_failed_no_reference">Falha na sincronização: este vídeo não tem legendas internas para comparar.</string>
     <string name="autosync_toast_failed_unsupported">Falha na sincronização: este formato de legenda não é aceito.</string>
-    <string name="autosync_label_synced">Sincronizado automaticamente</string>
+    <string name="playback_net_http2">Ativar HTTP/2</string>
+    <string name="playback_net_http2_sub">Ativa o protocolo HTTP/2 para conexões de rede, permitindo multiplexação de requisições e conexões mais rápidas.</string>
 </resources>

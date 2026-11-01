@@ -69,7 +69,8 @@ object StreamAutoPlaySelector {
         preferredBingeGroup: String? = null,
         preferBingeGroupInSelection: Boolean = false,
         bingeGroupOnly: Boolean = false,
-        rankedRegexPatterns: List<String> = emptyList()
+        rankedRegexPatterns: List<String> = emptyList(),
+        bingeKeepsFilters: Boolean = false // Nuvio RS: source recovery retries stay inside the user's filters
     ): Stream? {
         return com.nuvio.tv.core.streams.ranking.RankedRegexWork.run(
             enabled = mode == StreamAutoPlayMode.REGEX_MATCH && rankedRegexPatterns.isNotEmpty() && !bingeGroupOnly
@@ -86,7 +87,8 @@ object StreamAutoPlaySelector {
                 preferBingeGroupInSelection = preferBingeGroupInSelection,
                 bingeGroupOnly = bingeGroupOnly,
                 rankedRegexPatterns = rankedRegexPatterns,
-                rankedRegexCheckCancelled = checkpoint
+                rankedRegexCheckCancelled = checkpoint,
+                bingeKeepsFilters = bingeKeepsFilters
             )
         }
     }
@@ -103,7 +105,8 @@ object StreamAutoPlaySelector {
         preferBingeGroupInSelection: Boolean = false,
         bingeGroupOnly: Boolean = false,
         rankedRegexPatterns: List<String> = emptyList(),
-        rankedRegexCheckCancelled: () -> Unit = {}
+        rankedRegexCheckCancelled: () -> Unit = {},
+        bingeKeepsFilters: Boolean = false // Nuvio RS: source recovery retries stay inside the user's filters
     ): Stream? {
         if (streams.isEmpty()) return null
 
@@ -130,11 +133,13 @@ object StreamAutoPlaySelector {
         }
         if (candidateStreams.isEmpty()) return null
 
-        // Binge continuity takes priority over mode/ranking, including MANUAL mode,
-        // but stays within the user's source and addon/plugin selections.
+        // Binge group matching takes priority over mode and source filters — even in MANUAL mode,
+        // a persisted binge group should auto-play without showing the picker.
+        // Search ALL streams, not just candidateStreams, since binge group reuse should
+        // not be limited by autoplay source/addon selection filters.
         val targetBingeGroup = preferredBingeGroup?.trim().orEmpty()
         if (preferBingeGroupInSelection && targetBingeGroup.isNotEmpty()) {
-            val bingeGroupMatch = candidateStreams.firstOrNull { stream ->
+            val bingeGroupMatch = (if (bingeKeepsFilters) candidateStreams else streams).firstOrNull { stream ->
                 !stream.isExternal() &&
                     stream.behaviorHints?.bingeGroup == targetBingeGroup &&
                     isPlayable(stream)

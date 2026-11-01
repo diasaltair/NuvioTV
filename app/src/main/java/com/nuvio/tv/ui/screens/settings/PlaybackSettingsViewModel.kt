@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.media3.common.util.UnstableApi
 import com.nuvio.tv.core.plugin.PluginManager
 import com.nuvio.tv.data.local.DeviceLocalPlayerPreferences
+import com.nuvio.tv.data.local.LibassRenderScale
 import com.nuvio.tv.data.local.LibassRenderType
 import com.nuvio.tv.data.local.InternalPlayerEngine
 import com.nuvio.tv.data.local.Dv7HandlingMode
@@ -250,6 +251,10 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setLibassRenderType(renderType)
     }
 
+    suspend fun setLibassRenderScale(scale: LibassRenderScale) {
+        playerSettingsDataStore.setLibassRenderScale(scale)
+    }
+
     suspend fun setSubtitlePreferredLanguage(language: String) {
         playerSettingsDataStore.setSubtitlePreferredLanguage(language)
     }
@@ -406,6 +411,10 @@ class PlaybackSettingsViewModel @Inject constructor(
 
     suspend fun setParallelNetworkEnabled(enabled: Boolean) {
         playerSettingsDataStore.setParallelNetworkEnabled(enabled)
+    }
+
+    suspend fun setEnableHttp2(enabled: Boolean) {
+        playerSettingsDataStore.setEnableHttp2(enabled)
     }
 
     suspend fun setAllowLargeTargetBuffer(enabled: Boolean) {

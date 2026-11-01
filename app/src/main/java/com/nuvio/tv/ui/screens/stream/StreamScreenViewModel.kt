@@ -242,6 +242,12 @@ class StreamScreenViewModel @Inject constructor(
         if (streamBadgePresentationJob?.isActive == true) return
 
         streamBadgePresentationJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            // Nothing can match without active filters, so skip rebuilding the
+            // stream lists for every chunk.
+            if (!streamBadgePresentation.hasActiveFilters()) {
+                badgedAddonNames = badgedAddonNames + newGroups.map { it.addonName }.toSet()
+                return@launch
+            }
             var pending = newGroups
             while (pending.isNotEmpty()) {
                 val allNewStreams = pending.flatMap { it.streams }
@@ -503,7 +509,8 @@ class StreamScreenViewModel @Inject constructor(
                                 fileIdx = cached.fileIdx,
                                 sources = cached.sources,
                                 contentLanguage = cached.contentLanguage ?: contentLanguage,
-                                audioDelayMs = cached.audioDelayMs
+                                audioDelayMs = cached.audioDelayMs,
+                                audioDelayLanguage = cached.audioDelayLanguage
                             ),
                             showDirectAutoPlayOverlay = showOverlay || it.showDirectAutoPlayOverlay,
                             isDirectAutoPlayFlow = showOverlay || it.isDirectAutoPlayFlow
@@ -554,11 +561,7 @@ class StreamScreenViewModel @Inject constructor(
                         connectionFitCaptured = true
                     }
                 }
-                val addonOrderedStreams = StreamAutoPlaySelector.orderAddonStreams(
-                    addonStreamGroups,
-                    installedAddonOrder,
-                    preferredServerNames
-                )
+                val addonOrderedStreams = StreamAutoPlaySelector.orderAddonStreams(addonStreamGroups, installedAddonOrder, preferredServerNames)
                 val orderedAddonStreams = connectionFit?.applyToGroups(addonOrderedStreams) ?: addonOrderedStreams
 
                 // Preserve badges already computed by prior badge jobs so they
@@ -1313,8 +1316,8 @@ class StreamScreenViewModel @Inject constructor(
 
     suspend fun resolveStreamForPlayback(
         stream: Stream,
-        reportErrors: Boolean = true,
-        saveLastLink: Boolean = true
+        saveLastLink: Boolean = true,
+        reportErrors: Boolean = true
     ): StreamPlaybackInfo? {
         stream.serverTarget?.let { target -> return prepareServerStream(stream, target) }
         if (stream.youTubeIdToResolve() != null) {
@@ -1600,7 +1603,8 @@ class StreamScreenViewModel @Inject constructor(
             fileIdx = stream.getEffectiveFileIdx(),
             sources = stream.sources,
             contentLanguage = contentLanguage,
-            audioDelayMs = stream.behaviorHints?.audioDelayMs
+            audioDelayMs = stream.behaviorHints?.audioDelayMs,
+            audioDelayLanguage = stream.behaviorHints?.audioDelayLanguage
         )
         StreamSidecarSubtitles.set(playbackUrlFor(playbackInfo), stream.subtitles)
 
@@ -1618,7 +1622,8 @@ class StreamScreenViewModel @Inject constructor(
                     bingeGroup = playbackInfo.bingeGroup,
                     contentLanguage = contentLanguage,
                     year = year,
-                    audioDelayMs = playbackInfo.audioDelayMs
+                    audioDelayMs = playbackInfo.audioDelayMs,
+                    audioDelayLanguage = playbackInfo.audioDelayLanguage
                 )
             }
         }
@@ -2176,9 +2181,10 @@ data class StreamPlaybackInfo(
     val fileIdx: Int? = null,
     val sources: List<String>? = null,
     val contentLanguage: String? = null,
+    val autoSourceRecoveryToken: String? = null,
     val audioDelayMs: Int? = null,
-    val isServerStream: Boolean = false,
-    val autoSourceRecoveryToken: String? = null
+    val audioDelayLanguage: String? = null,
+    val isServerStream: Boolean = false
 )
 
 private fun playbackUrlFor(playbackInfo: StreamPlaybackInfo): String? =

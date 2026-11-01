@@ -1,2 +1,3 @@
-- **Nuvio 1.1.0-beta.5.** Includes everything in the official NuvioTV 1.1.0-beta.5 release: faster parallel streaming with HTTP/2 on, MDBList lists in the library sorted by release date, landscape poster and collection fixes, screen-reader labels, a fix for SIGSEGV crashes in the ExoPlayer buffer, and more translations.
-- **Lighter AutoSync.** AutoSync now uses at most two background threads, so it competes less with playback on low-end TVs, decodes add-on subtitles in any character set, and does no work at all when it is turned off.
+- Updated to upstream Nuvio TV 1.1.0-beta.8, including chapter controls, HDR subtitle styles, the new libass subtitle renderer, stream audio-delay hints, and Nuvio engine 0.1.6.
+- Kept Reshaped settings, AutoSync/AudioSync, seek previews, source recovery, Arc sound and picture controls, and pill navigation. Chapter controls work alongside seek previews.
+- Background update downloads and optional automatic installs follow Reshaped's Beta and Tester channels, including safe moves between them.

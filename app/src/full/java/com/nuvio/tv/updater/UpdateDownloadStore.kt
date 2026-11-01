@@ -43,10 +43,10 @@ class UpdateDownloadStore @Inject constructor(
 
     /** Returns the downloaded APK when it is for a version newer than the installed one. */
     suspend fun pendingInstall(): Pair<String, File>? {
-        val (tag, path) = updatePreferences.downloadedUpdate.first() ?: return null
-        val file = File(path)
-        if (!file.exists() || !VersionUtils.isRemoteNewer(tag, BuildConfig.VERSION_NAME)) return null
-        return tag to file
+        val downloaded = updatePreferences.downloadedUpdate.first() ?: return null
+        val file = File(downloaded.path)
+        if (!file.exists() || !downloaded.isNewerThan(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong())) return null
+        return downloaded.tag to file
     }
 
     suspend fun download(
@@ -58,7 +58,7 @@ class UpdateDownloadStore @Inject constructor(
         apkDownloader.download(update.assetUrl, destination, onProgress)
             .onSuccess { file ->
                 updatesDir.listFiles()?.filter { it != file }?.forEach { it.delete() }
-                updatePreferences.setDownloadedUpdate(update.tag, file.absolutePath)
+                updatePreferences.setDownloadedUpdate(update.tag, file.absolutePath, update.publishedAt, update.prerelease)
             }
     }
 
@@ -69,7 +69,7 @@ class UpdateDownloadStore @Inject constructor(
     }
 
     suspend fun clearIfInstalled() {
-        val (tag, _) = updatePreferences.downloadedUpdate.first() ?: return
-        if (!VersionUtils.isRemoteNewer(tag, BuildConfig.VERSION_NAME)) clear()
+        val downloaded = updatePreferences.downloadedUpdate.first() ?: return
+        if (!downloaded.isNewerThan(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE.toLong())) clear()
     }
 }

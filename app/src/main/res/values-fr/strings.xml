@@ -909,15 +909,6 @@
     <string name="sub_libass">Utiliser libass pour les sous-titres ASS/SSA</string>
     <string name="sub_libass_sub">Expérimental&#160;: rendu ASS/SSA avancé (styles, positionnement, animations)</string>
     <string name="sub_libass_mode">Mode de rendu libass</string>
-    <string name="sub_mode_overlay_gl">Superposition OpenGL (recommandé)</string>
-    <string name="sub_mode_overlay_gl_sub">Meilleure qualité avec prise en charge du HDR. Affiche les sous-titres sur un thread distinct.</string>
-    <string name="sub_mode_overlay_canvas">Superposition Canvas</string>
-    <string name="sub_mode_effects_gl">Effets OpenGL</string>
-    <string name="sub_mode_effects_gl_sub">Prise en charge des animations via les effets Media3. Plus rapide que Canvas.</string>
-    <string name="sub_mode_effects_canvas">Effets Canvas</string>
-    <string name="sub_mode_effects_canvas_sub">Prise en charge des animations via les effets Media3 avec rendu Canvas.</string>
-    <string name="sub_mode_standard">Sous-titres standard</string>
-    <string name="sub_mode_standard_sub">Rendu de base sans prise en charge des animations. Le plus compatible.</string>
     <string name="sub_org_none">Aucune (ordre par défaut)</string>
     <string name="sub_org_by_lang">Par langue</string>
     <string name="sub_org_by_addon">Par addon</string>
@@ -1846,7 +1837,6 @@
     <string name="parental_severity_mild">Léger</string>
     <string name="player_ends_at">Fin à %1$s</string>
     <string name="player_live_watched">EN DIRECT  %1$s</string>
-    <string name="player_via">via %1$s</string>
     <!-- Season/episode code shown in player UI (e.g. S01E02). %1$d = season, %2$d = episode. -->
     <string name="season_episode_format">S%1$d E%2$d</string>
     <string name="player_subtitle_delay">Délai des sous-titres</string>
@@ -2507,7 +2497,6 @@
     <string name="player_error_failed_start_torrent">Impossible de démarrer le torrent&#160;: %1$s</string>
 
     <!-- Playback subtitle settings -->
-    <string name="sub_mode_overlay_canvas_sub">Prise en charge du HDR avec rendu Canvas. Peut bloquer le thread de l’interface.</string>
 
     <string name="ratings_season_label">S%1$d</string>
     <string name="ratings_episode_label">E%1$d</string>
@@ -3370,16 +3359,10 @@
     <string name="shuffle_badge">Lecture aléatoire des épisodes activée</string>
 
     <!-- Subtitle AutoSync -->
-    <string name="autosync_setting_title">Synchronisation automatique des sous-titres</string>
-    <string name="autosync_setting_description">Aligner le sous-titre d’addon sélectionné sur le minutage des sous-titres intégrés à la vidéo.</string>
-    <string name="autosync_tolerance_title">Tolérance de la synchronisation automatique</string>
-    <string name="autosync_tolerance_description">Conserver le minutage d’origine lorsque la correction nécessaire est inférieure ou égale à cette valeur.</string>
-    <string name="autosync_tolerance_off">Désactivée</string>
     <string name="autosync_tolerance_value">%1$d ms</string>
-    <string name="autosync_thorough_title">Recherche approfondie de la synchronisation automatique</string>
-    <string name="autosync_thorough_description">Continuer à comparer d’autres sous-titres et pistes intégrées pour trouver une correspondance plus précise avant de synchroniser. Lorsque cette option est désactivée, la première correspondance fiable est utilisée plus tôt. Seules les correspondances fiables sont appliquées.</string>
     <string name="autosync_toast_failed">Échec de la synchronisation&#160;: la synchronisation automatique n’a pas pu faire correspondre ce sous-titre à la vidéo.</string>
     <string name="autosync_toast_failed_no_reference">Échec de la synchronisation&#160;: cette vidéo ne contient aucun sous-titre intégré à comparer.</string>
     <string name="autosync_toast_failed_unsupported">Échec de la synchronisation&#160;: la synchronisation automatique ne prend pas en charge ce format de sous-titres.</string>
-    <string name="autosync_label_synced">Synchronisé automatiquement</string>
+    <string name="playback_net_http2">Activer HTTP/2</string>
+    <string name="playback_net_http2_sub">Active le protocole HTTP/2 pour les connexions réseau, permettant le multiplexage des requêtes et des établissements de connexion plus rapides.</string>
 </resources>

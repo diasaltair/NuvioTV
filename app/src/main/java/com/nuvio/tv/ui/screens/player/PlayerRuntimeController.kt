@@ -418,6 +418,37 @@ class PlayerRuntimeController(
     @Volatile var exoPlayerView: androidx.media3.ui.PlayerView? = null
     internal var _loadControl: DefaultLoadControl? = null
     internal var playbackSpeedAwareAudioSink: PlaybackSpeedAwareAudioSink? = null
+    // Nuvio RS hook: Arc sound/picture format handling state (see PlayerFormatsHooks.kt).
+    internal var formatsActiveForCurrentPlayback: Boolean = false
+    internal val playbackRecoveryGate = PlaybackRecoveryGate()
+    internal var playbackRecoveryJob: Job? = null
+    internal var formatsRecoveryBudgetUrl: String = ""
+    internal var formatsRecoveryCountForCurrentStream: Int = 0
+    internal var currentAudioPassthroughPolicy: com.nuvio.tv.core.player.AudioPassthroughPolicy? = null
+    internal var surroundResolveInputs: SurroundResolveInputs? = null
+    internal var lastAppliedSurroundResolve: SurroundResolveResult? = null
+    internal var lastAppliedSurroundHdmi: AudioChainProbe.HdmiPlugSnapshot? = null
+    internal val preferFfmpegAudioStreamUrls: MutableSet<String> = mutableSetOf()
+    internal val iecFailureStrikes: MutableMap<String, Int> = mutableMapOf()
+    internal val iecOffStreamUrls: MutableSet<String> = mutableSetOf()
+    internal var lastBitstreamOutputReading: Pair<androidx.media3.common.PlaybackException, BitstreamOutputReading?>? = null
+    internal var knownAudioOutputDeviceIds: Set<Int> = emptySet()
+    internal var passthroughReturnCheckJob: Job? = null
+    internal val passthroughReturnRebuilds: MutableMap<String, Int> = mutableMapOf()
+    internal var busyOutputCheckJob: Job? = null
+    internal var busyOutputCheckStreamUrl: String? = null
+    internal val busyOutputReturnRebuilds: MutableMap<String, Int> = mutableMapOf()
+    internal var tunnelDeadClockSignature: String? = null
+    internal val tunnelingDisabledStreamUrls: MutableSet<String> = mutableSetOf()
+    internal var tunnelStallStrike: PlayerTunnelAvSyncPolicy.StallStrike? = null
+    internal var isTunnelingActiveForCurrentPlayback: Boolean = false
+    internal var tunnelAvSyncWatchdogJob: Job? = null
+    internal var lastOutputChangeForTunnelMs: Long = 0L
+    internal var formatsVideoDecoderName: String? = null
+    internal var currentAudioPathDescription: String? = null
+    internal var isAudioOutputBypassing: Boolean = false
+    internal var losslessAudioDefaultAppliedForStream: Boolean = false
+    internal var persistedAudioPreferenceSeenForStream: Boolean = false
 
     internal var progressJob: Job? = null
     internal var vodTelemetryJob: Job? = null
@@ -598,7 +629,7 @@ class PlayerRuntimeController(
     internal var mpvPreferredAudioLanguages: List<String> = emptyList()
     internal var currentStreamBingeGroup: String? = navigationArgs.bingeGroup
     // Per-device delay + current stream's behaviorHints.audioDelayMs + the user's tweak on that stream.
-    internal var audioDelayParts: AudioDelayParts = AudioDelayParts().withStream(navigationArgs.audioDelayMs ?: 0)
+    internal var audioDelayParts: AudioDelayParts = AudioDelayParts().withStream(navigationArgs.audioDelayMs ?: 0, navigationArgs.audioDelayLanguage)
     internal var hasAppliedRememberedAudioSelection: Boolean = false
     internal var hasInitializedAudioAmplificationForSession: Boolean = false
     internal var hasInitializedCenterMixForSession: Boolean = false
@@ -658,6 +689,8 @@ class PlayerRuntimeController(
     internal val seekProgressSyncDebounceMs = 700L
     internal val audioDelayUs = AtomicLong(0L)
     internal val subtitleDelayUs = AtomicLong(0L)
+    // Offset for embedded subtitles from the stream's audio source; never persisted.
+    internal val streamSubtitleDelayUs = AtomicLong(0L)
     internal var pendingPreviewSeekPosition: Long?
         get() = _uiState.value.pendingPreviewSeekPosition
         set(value) {
@@ -786,6 +819,25 @@ class PlayerRuntimeController(
         observeDeviceLocalTransparentLetterbox()
         observeDeviceLocalTunneledSurfaceFill()
         observePlayerStatsHud()
+        observeStreamDelayTrackSelection()
+    }
+
+    // The stream delay hint can be scoped to a language: re-apply it whenever the selected tracks change.
+    private fun observeStreamDelayTrackSelection() {
+        scope.launch {
+            _uiState
+                .map { state ->
+                    val audio = state.audioTracks.getOrNull(state.selectedAudioTrackIndex)
+                    val subtitle = state.subtitleTracks.getOrNull(state.selectedSubtitleTrackIndex)
+                    listOf(
+                        audio != null, audio?.language,
+                        subtitle != null, subtitle?.language,
+                        state.selectedAddonSubtitle != null
+                    )
+                }
+                .distinctUntilChanged()
+                .collect { syncStreamDelayWithSelectedTracks() }
+        }
     }
 
     private fun observeTorrentSettings() {
@@ -816,10 +868,10 @@ class PlayerRuntimeController(
     }
 
     fun onCleared() {
-        playerSession.close()
-        stopServerPlayback()
         autoSourceRecovery?.cancel()
         playerInitializationJob?.cancel()
+        playerSession.close()
+        stopServerPlayback()
         releasePlayer()
         stopTorrentStream()
         torrentService.shutdown()

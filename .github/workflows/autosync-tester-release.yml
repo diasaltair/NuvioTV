@@ -1,8 +1,9 @@
 name: AutoSync TV Tester Release
 
-# Builds the Tester channel (TesterChannel.kt) from subtitle-autosync-tester. Runs only when started
-# by hand (Actions > AutoSync TV Tester Release > Run workflow), or by the exact release-trigger
-# commit below when this workflow file changes. Ordinary code pushes never publish a release.
+# Builds the Tester channel (TesterChannel.kt) from subtitle-autosync-tester. Runs when
+# this workflow file changes on the tester branch, or via manual dispatch when the workflow
+# is available on the default branch. Ordinary code pushes never publish a release.
+# Release request: TorBox filmstrip stays complete while seek is held.
 # It never touches the beta or stable releases.
 #
 # Tags are <nuvio version>-tester.N, always pre-releases and never "latest". Stable and Beta apps
@@ -28,8 +29,10 @@ concurrency:
 
 jobs:
   release:
-    if: github.event_name != 'push' || github.event.head_commit.message == 'Release tester with preoptimized ORT speech model'
     runs-on: ubuntu-latest
+    env:
+      # Apply to unit-test native builds as well as release APK assembly.
+      ORG_GRADLE_PROJECT_testerArm32Only: "true"
 
     steps:
       - name: Checkout tester branch
@@ -168,6 +171,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: false
 
       - name: Configure Nuvio services
         env:
@@ -311,21 +316,8 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/test_seek_preview_native.py
-          ./gradlew :app:testFullReleaseUnitTest \
-            --tests 'com.nuvio.tv.updater.*' \
-            --tests '*seekpreview*' \
-            --tests 'com.nuvio.tv.core.streams.ranking.*' \
-            --tests 'com.nuvio.tv.core.player.recovery.*' \
-            --tests 'com.nuvio.tv.core.player.StreamAutoPlaySelectorTest' \
-            --tests 'com.nuvio.tv.ui.screens.player.autosync.bubble.*' \
-            --tests 'com.nuvio.tv.ui.screens.player.audiosync.AudioSyncDiagnosticsTest' \
-            --tests 'com.nuvio.tv.ui.screens.player.audiosync.SpotSamplingTest' \
-            --tests 'com.nuvio.tv.ui.screens.player.audiosync.PcmTimestampTrackerTest' \
-            --tests 'com.nuvio.tv.ui.screens.player.audiosync.SubtitleCandidatePoolTest' \
-            --tests 'com.nuvio.tv.ui.screens.player.audiosync.SharedResourceTest' \
-            --tests 'com.nuvio.tv.ui.screens.player.audiosync.AsrMatchingTest' \
-            --tests 'com.nuvio.tv.ui.screens.player.audiosync.AsrModelFilesTest' \
-            --build-cache --stacktrace
+          # Includes cancellation and Reshaped networking regressions.
+          ./gradlew :app:testFullReleaseUnitTest --build-cache --stacktrace
           .github/scripts/reshaped-tv-apks.sh build "$TESTER_TAG"
 
       - name: Verify in-place update compatibility
