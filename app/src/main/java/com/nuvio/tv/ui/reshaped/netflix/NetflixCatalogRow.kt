@@ -290,7 +290,7 @@ internal fun NetflixCatalogRow(
             if (focus == null) return@collectLatest
             kotlinx.coroutines.delay(NetflixTokens.PRELOAD_DWELL_MS)
             val list = latestItems
-            val neighbors = intArrayOf(focus + 1, focus - 1, focus + 2, focus + 3).mapNotNull { index ->
+            val neighbors = listOf(focus + 1, focus - 1, focus + 2, focus + 3).mapNotNull { index ->
                 list.getOrNull(index)?.takeUnless { it.id.startsWith("__placeholder_") }
             }
             if (neighbors.isNotEmpty()) latestOnPrefetchNeighbors(neighbors)
