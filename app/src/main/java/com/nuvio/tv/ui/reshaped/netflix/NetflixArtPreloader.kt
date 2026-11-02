@@ -26,9 +26,9 @@ internal suspend fun netflixPreloadRowArt(
     density: Density,
     items: () -> List<MetaPreview>,
     center: () -> Int?,
+    loader: ImageLoader = context.imageLoader,
     offsets: IntArray = PRELOAD_OFFSETS,
     dwellMs: Long = NetflixTokens.PRELOAD_DWELL_MS,
-    loader: ImageLoader = context.imageLoader,
 ) {
     val artSize = netflixArtworkSizePx(density)
     // Cache key -> the title index it belongs to and its request (null: it was already in memory).
