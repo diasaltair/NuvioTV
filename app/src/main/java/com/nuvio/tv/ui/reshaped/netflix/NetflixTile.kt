@@ -199,6 +199,19 @@ internal fun NetflixTile(
                 )
                 return@Box
             }
+            if (showArtwork && !item.poster.isNullOrBlank() && item.netflixHasWideArtwork()) {
+                // While the wide art loads, the opened part shows the poster's colours: a tiny
+                // decode stretched over the tile reads as a soft blur and costs almost nothing.
+                val ambientModel = remember(item.poster) { netflixAmbientRequest(context, item.poster!!) }
+                AsyncImage(
+                    model = ambientModel,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = (expansion() / 0.6f).coerceIn(0f, 1f) * 0.75f }
+                )
+            }
             if (!item.poster.isNullOrBlank()) {
                 // Kept at the closed tile's width: while the wide art loads, the widening tile shows
                 // the poster as it was plus the dark tile, not a zoomed, blurred crop of it.
@@ -360,3 +373,13 @@ internal fun netflixArtworkRequest(context: Context, url: String, sizePx: Pair<I
 
 internal fun netflixArtworkCacheKey(url: String, sizePx: Pair<Int, Int>): String =
     "netflix_art_${url}_${sizePx.first}x${sizePx.second}"
+
+/** The poster decoded a few pixels wide, drawn stretched behind a tile that is opening. */
+internal fun netflixAmbientRequest(context: Context, posterUrl: String): ImageRequest =
+    ImageRequest.Builder(context)
+        .data(posterUrl)
+        .memoryCacheKey("netflix_ambient_$posterUrl")
+        .crossfade(false)
+        .size(12, 18)
+        .scale(Scale.FILL)
+        .build()
