@@ -26,6 +26,8 @@ internal suspend fun netflixPreloadRowArt(
     density: Density,
     items: () -> List<MetaPreview>,
     center: () -> Int?,
+    offsets: IntArray = PRELOAD_OFFSETS,
+    dwellMs: Long = NetflixTokens.PRELOAD_DWELL_MS,
     loader: ImageLoader = context.imageLoader,
 ) {
     val artSize = netflixArtworkSizePx(density)
@@ -42,7 +44,7 @@ internal suspend fun netflixPreloadRowArt(
         snapshotFlow {
             center()?.let { focus ->
                 val list = items()
-                focus to PRELOAD_OFFSETS.map { list.getOrNull(focus + it)?.netflixArtworkUrl() }
+                focus to offsets.map { list.getOrNull(focus + it)?.netflixArtworkUrl() }
             }
         }.collectLatest { snapshot ->
             val focus = snapshot?.first
@@ -54,9 +56,9 @@ internal suspend fun netflixPreloadRowArt(
                 val index = held[key]?.first ?: return@forEach
                 if (abs(index - focus) >= NetflixTokens.PRELOAD_KEEP) drop(key)
             }
-            delay(NetflixTokens.PRELOAD_DWELL_MS)
+            delay(dwellMs)
             val list = items()
-            for (index in PRELOAD_OFFSETS.map { focus + it }) {
+            for (index in offsets.map { focus + it }) {
                 val item = list.getOrNull(index) ?: continue
                 if (item.id.startsWith("__placeholder_")) continue
                 val url = item.netflixArtworkUrl() ?: continue

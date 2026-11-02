@@ -109,6 +109,7 @@ internal fun NetflixCatalogRow(
     onItemFocused: (itemIndex: Int) -> Unit,
     forceFocusRequest: Boolean = false,
     onPrefetchNeighbors: (List<MetaPreview>) -> Unit = {},
+    onPrefetchLanding: (List<MetaPreview>) -> Unit = {},
     modifier: Modifier = Modifier,
     seeAllLabel: String? = null,
     showSeeAll: Boolean = catalogRow.hasMore || catalogRow.items.size >= 15,
@@ -295,6 +296,42 @@ internal fun NetflixCatalogRow(
             }
             if (neighbors.isNotEmpty()) latestOnPrefetchNeighbors(neighbors)
         }
+    }
+
+    // Nuvio RS: moving up or down lands focus on this row's restored title, not a neighbour of
+    // the current focus. While the row is on screen, that title and the next are enriched and
+    // their wide art kept warm, so the row opens on its final art too.
+    val latestRestorerIndex by rememberUpdatedState(restorerFocusedIndex)
+    val latestOnPrefetchLanding by rememberUpdatedState(onPrefetchLanding)
+    val landingIndex: () -> Int? = remember(listState) {
+        {
+            val visible = listState.layoutInfo.visibleItemsInfo.map { it.index }
+                .filter { it in latestItems.indices }
+            val preferred = if (lastFocusedItemIndex.intValue >= 0) lastFocusedItemIndex.intValue else latestRestorerIndex
+            preferred.takeIf { it in visible } ?: visible.firstOrNull()
+        }
+    }
+    LaunchedEffect(motion) {
+        snapshotFlow { if (rowHasFocus) null else landingIndex() }.collectLatest { landing ->
+            if (landing == null) return@collectLatest
+            // Rows scrolled straight past are not worth a fetch.
+            kotlinx.coroutines.delay(NetflixTokens.LANDING_DWELL_MS)
+            val list = latestItems
+            val items = listOf(landing, landing + 1).mapNotNull { index ->
+                list.getOrNull(index)?.takeUnless { it.id.startsWith("__placeholder_") }
+            }
+            if (items.isNotEmpty()) latestOnPrefetchLanding(items)
+        }
+    }
+    LaunchedEffect(motion, preloadContext, motionDensity) {
+        netflixPreloadRowArt(
+            context = preloadContext,
+            density = motionDensity,
+            items = { latestItems.map { netflixEnrichedPreview(it, enrichedPreviews.value) } },
+            center = landingIndex,
+            offsets = intArrayOf(0, 1),
+            dwellMs = NetflixTokens.LANDING_DWELL_MS
+        )
     }
 
     Column(

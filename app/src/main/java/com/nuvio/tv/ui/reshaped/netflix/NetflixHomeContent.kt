@@ -135,6 +135,7 @@ internal fun NetflixHomeRoute(
         onRequestTrailerPreview = remember(viewModel) { { item: MetaPreview -> viewModel.requestTrailerPreview(item) } },
         onItemFocus = remember(viewModel) { { item: MetaPreview -> viewModel.onItemFocus(item) } },
         onPrefetchNeighbors = remember(viewModel) { { items: List<MetaPreview> -> viewModel.preloadNeighborItems(items) } },
+        onPrefetchLanding = remember(viewModel) { { items: List<MetaPreview> -> viewModel.preloadLandingItems(items) } },
         onSaveFocusState = remember(viewModel) {
             { vi: Int, vo: Int, rk: String?, ikm: Map<String, String>, m: Map<String, Int>, ma: Map<String, String>, ri: Int, ii: Int ->
                 viewModel.saveFocusState(vi, vo, rk, ikm, m, ma, ri, ii)
@@ -171,6 +172,7 @@ private fun NetflixHomeContent(
     onRequestTrailerPreview: (MetaPreview) -> Unit,
     onItemFocus: (MetaPreview) -> Unit,
     onPrefetchNeighbors: (List<MetaPreview>) -> Unit,
+    onPrefetchLanding: (List<MetaPreview>) -> Unit,
     onSaveFocusState: (Int, Int, String?, Map<String, String>, Map<String, Int>, Map<String, String>, Int, Int) -> Unit,
     onFocusedRowKeyChanged: (String?) -> Unit,
     onRequestLazyCatalogLoad: (String) -> Unit,
@@ -676,6 +678,7 @@ private fun NetflixHomeContent(
                             trailerPreviewAudioUrls = stableTrailerPreviewAudioUrls.value,
                             onItemFocus = handleMetaFocus,
                             onPrefetchNeighbors = onPrefetchNeighbors,
+                            onPrefetchLanding = onPrefetchLanding,
                             isItemWatched = isCatalogItemWatched,
                             onItemLongPress = onCatalogItemLongPress,
                             onItemClick = onNavigateToDetail,

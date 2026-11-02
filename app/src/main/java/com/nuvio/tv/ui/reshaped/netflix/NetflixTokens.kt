@@ -79,6 +79,8 @@ internal object NetflixTokens {
     const val PRELOAD_DWELL_MS = 150L
     // Wide art arriving from disk or network fades in over this, instead of popping in.
     const val ART_FADE_MS = 120
+    // Rows that are only on screen (not focused) warm their landing title after this long.
+    const val LANDING_DWELL_MS = 300L
     const val PRELOAD_KEEP = 3
 }
 

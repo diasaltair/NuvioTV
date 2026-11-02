@@ -306,7 +306,9 @@ class HomeViewModel @Inject constructor(
     /** Item that was focused during startup grace period — will be enriched once grace ends. */
     internal var deferredEnrichItem: MetaPreview? = null
     internal var adjacentItemPrefetchJob: Job? = null
-    internal var neighborItemsPrefetchJob: Job? = null // Nuvio RS: Netflix rows
+    // Nuvio RS: Netflix rows. Items waiting for enrichment, with true for focus neighbours.
+    internal val netflixEnrichQueue = ArrayDeque<Pair<MetaPreview, Boolean>>()
+    internal var netflixEnrichJob: Job? = null
     internal var pendingAdjacentPrefetchItemId: String? = null
     internal val movieWatchedObserverJobs = mutableMapOf<String, Job>()
     internal var movieWatchedBatchJob: Job? = null
@@ -602,7 +604,8 @@ class HomeViewModel @Inject constructor(
     fun onItemFocus(item: MetaPreview) = onItemFocusPipeline(item)
 
     fun preloadAdjacentItem(item: MetaPreview) = preloadAdjacentItemPipeline(item)
-    fun preloadNeighborItems(items: List<MetaPreview>) = preloadNeighborItemsPipeline(items) // Nuvio RS: Netflix rows
+    fun preloadNeighborItems(items: List<MetaPreview>) = queueNetflixEnrichment(items, neighbors = true) // Nuvio RS: Netflix rows
+    fun preloadLandingItems(items: List<MetaPreview>) = queueNetflixEnrichment(items, neighbors = false) // Nuvio RS: Netflix rows
 
     private fun loadHomeCatalogOrderPreference() = loadHomeCatalogOrderPreferencePipeline()
 
