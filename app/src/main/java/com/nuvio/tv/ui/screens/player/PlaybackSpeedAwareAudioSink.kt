@@ -135,6 +135,8 @@ internal class PlaybackSpeedAwareAudioSink(
 
     fun nativeAudioTrackUnderrunCount(): Int? = monitor.nativeAudioTrackUnderrunCount()
 
+    fun iecFillerWhilePlaying(): Long? = monitor.iecFillerWhilePlaying()
+
     fun sampleAudioRoute(): AudioRouteSnapshot? = monitor.sampleAudioRoute()
 
     fun platformOutputTimestamp(): AudioOutputTimestamp? = monitor.platformOutputTimestamp()
