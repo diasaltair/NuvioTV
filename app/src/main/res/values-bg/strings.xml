@@ -1,10 +1,10 @@
-<resources> 
-    <string name="app_name">Nuvio</string> 
-    <string name="tv_channel_continue_watching">Продължи гледането</string> 
+<resources>
+    <string name="app_name">Nuvio</string>
+    <string name="tv_channel_continue_watching">Продължи гледането</string>
     <string name="type_movie">Филм</string>
     <string name="type_movies">Филми</string>
-    <string name="type_series">Сериали</string> 
-    <string name="type_series_plural">Сериали</string> 
+    <string name="type_series">Сериали</string>
+    <string name="type_series_plural">Сериали</string>
     <string name="type_unknown">Неизвестен</string>
     <string name="web_manage_addons_title">Управление на добавки</string>
     <string name="web_manage_addons_subtitle">Управление на добавки, каталози и колекции</string>
@@ -100,7 +100,7 @@
     <string name="auth_notice_nuvio_logged_out">Излезли сте от Nuvio. Моля, влезте отново.</string>
     <string name="auth_notice_trakt_logged_out">Излезли сте от Trakt. Моля, свържете се отново.</string>
     <string name="error_generic">Възникна грешка</string>
-    
+
     <string name="action_retry">Повторен опит</string>
     <string name="error_state_generic_issue">Възникна проблем.</string>
     <string name="error_state_possible_fix">Възможно решение: %1$s</string>
@@ -134,7 +134,7 @@
     <string name="error_stream_tried_none">Опитах добавки за стрийминг: %1$s. Нито един от тях не върна стрийминг за id=%2$s (type=%3$s).</string>
     <string name="error_stream_tried_generic">Изпробвах добавки за потоци: %1$s. Източниците не можаха да бъдат заредени за id=%2$s (type=%3$s).</string>
     <string name="error_stream_tried_issues">Опитани са добавки за потоци: %1$s. Източниците не можаха да бъдат заредени за id=%2$s (type=%3$s). Проблеми: %4$s.</string>
-    
+
     <string name="continue_watching">Продължи гледането</string>
     <string name="cw_upcoming">Предстоящи</string>
     <string name="cw_next_up">Следващо</string>
@@ -147,7 +147,7 @@
     <string name="cw_hours_min_left">Остават %1$dh %2$dm</string>
     <string name="cw_min_left">Остава %1$dm</string>
     <string name="cw_almost_done">Почти готово</string>
-    <string name="cw_airs_date">Излъчва се %1$s</string>
+    <string name="cw_airs_date">Ще се излъчи на %1$s</string>
     <string name="cw_airs_today">Излъчва се днес</string>
     <string name="cw_airs_tomorrow">Излъчва се утре</string>
         <plurals name="cw_airs_in_days">
@@ -167,7 +167,7 @@
     <string name="cw_action_remove">Премахване</string>
     <string name="cw_dialog_subtitle">Изберете какво искате да направите с този елемент.</string>
     <string name="home_poster_dialog_subtitle">Действия със заглавието</string>
-    
+
     <string name="catalog_from_addon">от %1$s</string>
     <string name="action_see_all">Вижте всички</string>
     <string name="action_load_more">Зареди още</string>
@@ -176,7 +176,7 @@
     <string name="hero_director">Режисьор: %1$s</string>
     <string name="hero_writer">Автор: %1$s</string>
     <string name="hero_play">Учаватват</string>
-    <string name="hero_play_episode">Пусни Сезон %1$d Епизод %2$d</string>
+    <string name="hero_play_episode">Пусни Сезон %1$d еп. %2$d</string>
     <string name="hero_add_to_library">Добавяне към библиотеката</string>
     <string name="hero_remove_from_library">Премахване от библиотеката</string>
     <string name="hero_mark_watched">Маркирай като гледано</string>
@@ -188,7 +188,7 @@
     <string name="cd_rating">Рейтинг</string>
     
     <string name="episodes_season">Сезон %1$d</string>
-    <string name="episodes_specials">Специални издания</string>
+    <string name="episodes_specials">Специални епизоди</string>
     <string name="episodes_episode">Епизод</string>
     <string name="episodes_cd_watched">Гледано</string>
     <string name="episodes_dialog_subtitle">Действия с епизода</string>
@@ -202,7 +202,7 @@
     <string name="episodes_open_comments">Отваряне на коментарите за епизода</string>
     <string name="play_manually">Ръчно възпроизвеждане</string>
     <string name="episodes_season_actions">Действия за сезона</string>
-    
+
     <string name="detail_added_to_library">Добавено към библиотеката</string>
     <string name="detail_removed_from_library">Премахнато от библиотеката</string>
     <string name="detail_episode_marked_watched">Епизодът е маркиран като гледан</string>
@@ -217,14 +217,14 @@
     <string name="detail_marked_episodes_watched">Епизоди, маркирани като гледани: %1$d</string>
     <string name="detail_marked_episodes_unwatched">Епизоди, маркирани като негледани: %1$d</string>
     <string name="detail_marked_previous_watched">Предишни епизоди, маркирани като гледани: %1$d</string>
-    
+
     <string name="playback_unavailable">Възпроизвеждането не е налично</string>
-    <string name="playback_unavailable_message">Възпроизвеждането не е възможно за това заглавие с текущата ви настройка.</string>
+    <string name="playback_unavailable_message">Възпроизвеждането не е възможно за това заглавие с текущата настройка.</string>
     <string name="detail_btn_play">Пускане</string>
-    <string name="detail_btn_resume">Автобиография</string>
-    <string name="detail_btn_play_episode">Пусни Сезон %1$d Епизод %2$d</string>
-    <string name="detail_btn_resume_episode">Възобновяване на Сезон %1$d Епизод %2$d</string>
-    <string name="detail_btn_next_episode">Следва Сезон %1$d Епизод %2$d</string>
+    <string name="detail_btn_resume">Продължи</string>
+    <string name="detail_btn_play_episode">Пусни Сезон %1$d еп. %2$d</string>
+    <string name="detail_btn_resume_episode">Възобновяване на Сезон %1$d еп. %2$d</string>
+    <string name="detail_btn_next_episode">Следва Сезон %1$d еп. %2$d</string>
     <string name="detail_tab_cast">Създател и актьорски състав</string>
     <string name="cast_role_creator">Създател</string>
     <string name="cast_role_director">Режисьор</string>
@@ -237,14 +237,14 @@
     <string name="detail_more_like_this_powered_by_simkl">Задвижвано от Simkl</string>
     <string name="detail_comments_title">Коментари</string>
     <string name="detail_comments_subtitle">Отзиви от Trakt</string>
-    <string name="detail_comments_subtitle_episode">Отзиви от Trakt за S%1$dE%2$d</string>
+    <string name="detail_comments_subtitle_episode">Отзиви от Trakt за Сезон %1$d еп. %2$d</string>
     <string name="detail_comments_mode_show">Показване</string>
-    <string name="detail_comments_mode_episode">Епизод</string>
+    <string name="detail_comments_mode_episode">еп.</string>
     <string name="detail_comments_mode_episode_change">Промяна на епизода (%1$s)</string>
     <string name="detail_comments_episode_picker_title">Избор на епизод</string>
     <string name="detail_comments_episode_picker_subtitle">Изберете епизод, за да видите рецензиите му в Trakt</string>
     <string name="detail_section_network">Мрежа</string>
-    <string name="detail_section_production">Производство</string>
+    <string name="detail_section_production">Продукция</string>
     <string name="detail_comments_empty">Все още няма налични отзиви за Trakt.</string>
     <string name="detail_comments_error">Не можах да заредя отзивите за Trakt в момента.</string>
     <string name="detail_trailer_loading">Зареждане на трейлъра...</string>
@@ -262,7 +262,7 @@
     <string name="tmdb_entity_rail_popular">Популярни</string>
     <string name="tmdb_entity_rail_top_rated">Най-високо оценени</string>
     <string name="tmdb_entity_rail_recent">Последни</string>
-    <string name="tmdb_entity_rail_most_voted">Най-гласуван</string>
+    <string name="tmdb_entity_rail_most_voted">Най-оценен</string>
     <string name="collections_editor_tmdb_watch_region">Регион за наблюдение</string>
     <string name="collections_editor_tmdb_watch_region_helper">Код на държавата по ISO 3166-1, където е налично заглавието. Пример: САЩ, Великобритания.</string>
     <string name="collections_editor_tmdb_quick_watch_regions">Региони за бързо наблюдение</string>
@@ -289,23 +289,23 @@
     <string name="episodes_unavailable">Не е налично</string>
 <!-- Status labels for series (some languages need gendered forms) -->
     <string name="series_status_ended">Приключи</string>
-    <string name="series_status_continuing">В процес</string>
-    <string name="series_status_current">Текущ</string>
-    <string name="series_status_cancelled">Отменено</string>
-    <string name="series_status_released">Издадена</string>
-    <string name="series_status_planned">Планирано</string>
-    <string name="series_status_rumored">Слухове</string>
-    <string name="series_status_in_production">В процес на производство</string>
+    <string name="series_status_continuing">Продължава</string>
+    <string name="series_status_current">Излъчва се</string>
+    <string name="series_status_cancelled">Отменен</string>
+    <string name="series_status_released">Излязъл</string>
+    <string name="series_status_planned">Планиран</string>
+    <string name="series_status_rumored">Слух</string>
+    <string name="series_status_in_production">В процес на продукция</string>
     <string name="series_status_post_production">Постпродукция</string>
 <!-- Status labels for movies (allows gendered translations in languages that need it) -->
     <string name="movie_status_ended">Приключи</string>
-    <string name="movie_status_continuing">В процес</string>
+    <string name="movie_status_continuing">Продължава</string>
     <string name="movie_status_current">Текущ</string>
-    <string name="movie_status_cancelled">Отменено</string>
-    <string name="movie_status_released">Издаден</string>
+    <string name="movie_status_cancelled">Отменен</string>
+    <string name="movie_status_released">Излязъл</string>
     <string name="movie_status_planned">Планиран</string>
-    <string name="movie_status_rumored">Носят се слухове</string>
-    <string name="movie_status_in_production">В процес на производство</string>
+    <string name="movie_status_rumored">Слух</string>
+    <string name="movie_status_in_production">В процес на продукция</string>
     <string name="movie_status_post_production">Постпродукция</string>
     <string name="detail_lists_fallback">Списъци</string>
     <string name="detail_lists_subtitle">Изберете кои списъци да включват това заглавие.</string>
@@ -317,11 +317,11 @@
     <string name="appearance_language_system">Системна настройка по подразбиране</string>
     <string name="appearance_language_dialog_title">Избор на език</string>
     <string name="appearance_language_restart_hint">Рестартирайте приложението, за да приложите промяната на езика.</string>
-    
+
     <string name="appearance_font">Шрифт на приложението</string>
     <string name="appearance_font_subtitle">Изберете предпочитания от вас шрифт</string>
     <string name="appearance_font_dialog_title">Избор на шрифт</string>
-    
+
     <string name="appearance_title">Външен вид</string>
     <string name="appearance_subtitle">Изберете цветова тема, шрифт и език</string>
     <string name="appearance_color_theme">Цветна тема</string>
@@ -650,7 +650,7 @@
     <string name="settings_mdblist_subtitle">Доставчици на външни оценки</string>
     <string name="settings_animeskip_subtitle">Времеви маркери за пропускане на интро/аутро на аниме</string>
     <string name="settings_debrid_subtitle">Експериментални източници за облачни акаунти</string>
-    
+
     <string name="playback_title">Настройки за възпроизвеждане</string>
     <string name="playback_subtitle">Конфигуриране на опциите за възпроизвеждане на видео и субтитри</string>
     <string name="cd_decrease">Намаление</string>
@@ -662,7 +662,7 @@
     <string name="action_none">Няма</string>
     <string name="action_back">Назад</string>
     <string name="action_close">Затвори</string>
-    
+
     <string name="supporters_contributors_title">Подкрепете Nuvio</string>
     <string name="supporters_contributors_subtitle">Хората, които подкрепят Nuvio, и сътрудниците, които го изграждат в телевизионни и мобилни устройства.</string>
     <string name="supporters_contributors_supporters_copy">Поддръжниците и дарителите помагат за развитието на проекта, финансират инфраструктурата и осигуряват място за амбициозни функции.</string>
@@ -722,7 +722,7 @@
     <string name="contributors_show_kofi_qr">Показване на Ko-fi QR код</string>
     <string name="contributors_hide_kofi_qr">Скриване на Ko-fi QR кода</string>
     <string name="contributors_profile_unavailable">Връзката към профила в GitHub не е налична.</string>
-    
+
     <string name="playback_section_player_title">Играч</string>
     <string name="playback_section_player_title_desc">Плейър по подразбиране, вътрешен енджин и резервно копие при грешка.</string>
     <string name="playback_section_stream_selection">Избор на източник</string>
@@ -889,7 +889,7 @@
     <string name="audio_decoder_prefer_device_desc">Използвайте хардуерни декодери, когато са налични, като използвате FFmpeg. Препоръчва се за повечето устройства.</string>
     <string name="audio_decoder_prefer_app_desc">Използвайте FFmpeg декодери, когато са налични. По-добра поддръжка на формати, но по-високо натоварване на процесора.</string>
     <string name="audio_decoder_controls">Контролира дали за аудио и видео се използват хардуерни или софтуерни (FFmpeg) декодери</string>
-    
+
     <string name="sub_section">Субтитри</string>
     <string name="sub_not_set">Не е зададено</string>
     <string name="sub_forced_lang">Принудително</string>
@@ -927,10 +927,10 @@
     <string name="sub_org_none_desc">Показване на субтитрите в реда на резултатите от добавките по подразбиране.</string>
     <string name="sub_org_by_lang_desc">Групиране на субтитри по език.</string>
     <string name="sub_org_by_addon_desc">Групиране на субтитрите по източник на добавката.</string>
-    
+
     <string name="autoplay_preload_next_episode">Предварително зареждане на източници за следващия епизод</string>
     <string name="autoplay_preload_next_episode_sub">Започнете търсене на източници във фонов режим, преди да се появи бутонът за следващ епизод.</string>
-    
+
     <string name="autoplay_reuse_last_link">Използване на последна връзка</string>
     <string name="autoplay_reuse_last_link_sub">Автоматично възпроизвеждане на последния работещ източник за същия филм/епизод, когато кешът е все още валиден</string>
     <string name="autoplay_last_link_cache">Продължителност на кеша на последната връзка</string>
@@ -988,7 +988,7 @@
     <string name="autoplay_regex_matches">Съвпадения с името/заглавието/описанието/добавката/url адреса на източника. Пример: 4K|2160p|Remux</string>
     <string name="autoplay_regex_presets">Предварителни настройки</string>
     <string name="autoplay_invalid_regex">Невалиден шаблон за регулярни изрази</string>
-    
+
     <string name="layout_title">Настройки на оформлението</string>
     <string name="layout_subtitle">Настройка на оформлението на началната страница, видимостта на съдържанието и поведението на плаката</string>
     <string name="layout_classic">Класически изглед</string>
@@ -1204,8 +1204,9 @@
     <string name="web_custom_poster_none">Няма зададен шаблон</string>
     <string name="web_custom_poster_loading">Зареждане…</string>
     <string name="web_custom_poster_placeholders_info">Заместители: {id} предава всички идентификатори на съдържание. {imdb_id}, {tmdb_id}, {tvdb_id}, {kitsu_id} са насочени към един тип идентификатор - ако не е наличен, се запазва оригиналният постер. {imdb_id|tmdb_id|kitsu_id} декларира поддържани типове идентификатори - използва се съответстващият или се запазва оригиналният постер. Добавете ?, за да направите заместителя по избор, като го разрешите да бъде празен, вместо да го пропуснете: {imdb_id?}. Други заместители: {id_type}, {typed_id}, {type}, {shape}.</string>
-    
-    
+
+<!-- Custom Poster URL -->
+
     <string name="mdblist_name">MDBList</string>
     <string name="mdblist_tracking_description">Синхронизиране на историята на гледанията и напредъка на възпроизвеждането на всички устройства</string>
     <string name="mdblist_connected_as">Свързан като %1$s</string>
@@ -1266,7 +1267,7 @@
     <string name="mdblist_library_lists_summary">Показани са %1$d от %2$d</string>
     <string name="tracking_mdblist_features_title">Функции на MDBList</string>
     <string name="tracking_mdblist_features_subtitle">Настройки, специфични за MDBList</string>
-    
+
     <string name="debrid_title">Свързани услуги</string>
     <string name="debrid_subtitle">Свързване на акаунти за достъп до връзки и библиотеки</string>
     <string name="debrid_experimental_notice">Тези интеграции са експериментални и могат да бъдат запазени, променени или премахнати по-късно.</string>
@@ -1389,7 +1390,7 @@
     <string name="debrid_stream_release_groups_required">Задължителни групи за издания</string>
     <string name="debrid_stream_release_groups_excluded">Изключени групи за издание</string>
     <string name="debrid_stream_release_groups_input_subtitle">Въвеждайте по една група на ред.</string>
-    
+
     <string name="debrid_formatter_title">Уеб редактор</string>
     <string name="debrid_formatter_subtitle">Конфигуриране на показването на източника, филтрите и сортирането от друго устройство.</string>
     <string name="debrid_formatter_configure">Отваряне на уеб редактора</string>
@@ -1446,7 +1447,7 @@
     <string name="animeskip_dialog_placeholder">Въведете клиентски идентификатор</string>
     <string name="animeskip_invalid_client_id">Невалиден клиентски идентификатор</string>
     <string name="action_clear">Изчистване</string>
-    
+
     <string name="tmdb_title">Обогатяване на TMDB</string>
     <string name="tmdb_subtitle">Изберете кои полета за метаданни да идват от TMDB</string>
     <string name="tmdb_enable_title">Активиране на обогатяване на TMDB</string>
@@ -1477,9 +1478,9 @@
     <string name="tmdb_more_like_this_subtitle">Фонове с препоръки от TMDB на екраните с подробности и след игра</string>
     <string name="tmdb_collections_title">Колекции</string>
     <string name="tmdb_collections_subtitle">Колекции от филми на TMDB по ред на издаване</string>
-    
+
     <string name="tmdb_language_dialog_title">Език на TMDB</string>
-    
+
     <string name="trakt_description">Синхронизирайте списъка си за наблюдение, напредъка на гледането, продължаването на гледането, Scrobble-ите и личните списъци с Trakt.</string>
     <string name="trakt_connected_as">Свързан като %1$s</string>
     <string name="trakt_account_login">Вход в акаунта</string>
@@ -1557,7 +1558,7 @@
     <string name="trakt_hide_unaired">Скриване на неизлъчени епизоди</string>
     <string name="trakt_all_history">Цялата история</string>
     <string name="trakt_days_format">%1$d дни</string>
-    
+
     <string name="debug_title">Отстраняване на грешки</string>
     <string name="debug_subtitle">Инструменти за разработчици и флагове на функции (само за компилации за отстраняване на грешки)</string>
     <string name="debug_section_popup">Тестване на изскачащи прозорци / диалогови прозорци</string>
@@ -1597,7 +1598,7 @@
     <string name="debug_generate_library_placeholder">Брой елементи</string>
     <string name="debug_generate_library_button">Генериране</string>
     <string name="debug_generating_library">Генериране\u2026</string>
-    
+
     <string name="profile_title">Профили</string>
     <string name="profile_subtitle">Управление на потребителски профили за този акаунт</string>
     <string name="profile_manage_button">Управление на профили</string>
@@ -1752,7 +1753,7 @@
     <string name="addon_confirm_total_addons">Общо добавки: %1$d</string>
     <string name="addon_confirm_total_catalogs">Общо каталози: %1$d</string>
     <string name="addon_catalogs_types">Каталози: %1$d - Типове: %2$s</string>
-    
+
     <string name="catalog_order_title">Пренареждане на начални каталози</string>
     <string name="catalog_order_subtitle">Това контролира реда на редовете в каталога на началната страница (Класически + Модерни + Мрежа).</string>
     <string name="catalog_order_follow_addons">Следвайте реда на добавките</string>
@@ -1761,8 +1762,8 @@
     <string name="catalog_order_disabled_on_home">Деактивирано на началната страница</string>
     <string name="catalog_order_enable">Активиране</string>
     <string name="catalog_order_disable">Деактивиране</string>
-    
-    
+
+
     <string name="stream_retry">Повторен опит</string>
     <string name="stream_no_streams">Няма намерени потоци</string>
     <string name="stream_no_streams_hint">Опитайте да инсталирате още добавки, за да намерите потоци</string>
@@ -1812,7 +1813,7 @@
     <string name="stream_player_external">Външен</string>
     <string name="stream_filter_all">Всички</string>
     <string name="stream_episode_label">Сезон %1$d Епизод %2$d</string>
-    
+
     <string name="player_no_external_player">Не е намерен външен играч</string>
     <string name="player_loading_preparing">Подготовка на източника…</string>
     <string name="player_loading_detecting_format">Откриване на формат на източника…</string>
@@ -1845,7 +1846,7 @@
     <string name="subtitle_timing_captured_at">Заснето в %1$s</string>
     <string name="subtitle_timing_capturing">Заснемане…</string>
 
-<!-- ParentalGuideOverlay --> 
+<!-- ParentalGuideOverlay -->
     <string name="parental_nudity">Голота</string>
     <string name="parental_violence">Насилие</string>
     <string name="parental_profanity">Нецензурни думи</string>
@@ -1856,8 +1857,8 @@
     <string name="parental_severity_mild">Лека степен</string>
     <string name="player_ends_at">Край на %1$s</string>
     <string name="player_live_watched">НА ЖИВО %1$s</string>
-<!-- Season/episode code shown in player UI (e.g. S01E02). %1$d = season, %2$d = episode. --> 
-    <string name="season_episode_format">Сезон %1$d Епизод %2$d</string>
+<!-- Season/episode code shown in player UI (e.g. S01E02). %1$d = season, %2$d = episode. -->
+    <string name="season_episode_format">Сезон %1$d еп. %2$d</string>
     <string name="player_subtitle_delay">Забавяне на субтитрите</string>
     <string name="player_error_title">Грешка при възпроизвеждане</string>
     <string name="player_go_back">Връщане назад</string>
@@ -1879,8 +1880,8 @@
     <string name="player_more_aspect_ratio">Съотношение на страните</string>
     <string name="player_more_open_external">Отваряне във външен плейър</string>
     <string name="player_error_no_stream_url">Не е предоставен URL адрес на източника</string>
-    
-    
+
+
     <string name="stream_info_section_source">ИЗТОЧНИК</string>
     <string name="stream_info_section_file">ФАЙЛ</string>
     <string name="stream_info_section_video">ВИДЕО</string>
@@ -1902,13 +1903,13 @@
     <string name="stream_info_subtitle_source_addon">Добавка</string>
     <string name="stream_info_subtitle_source_embedded">Вграден</string>
     <string name="stream_info_player_engine">Плейър енджин</string>
-    
+
     <string name="sources_title">Източници</string>
     <string name="sources_reload">Презареждане</string>
     <string name="sources_close">Затвори</string>
     <string name="sources_playing">Възпроизвежда се</string>
     <string name="sources_no_streams">Няма намерени източници</string>
-    
+
     <string name="episodes_panel_close">Затвори</string>
     <string name="episodes_panel_back">Назад</string>
     <string name="episodes_panel_reload">Презареждане</string>
@@ -1925,7 +1926,7 @@
     <string name="player_aspect_tunneling_unavailable">Не е налично по време на тунелирано възпроизвеждане</string>
     <string name="player_aspect_mode_slight_zoom">Леко увеличение</string>
     <string name="player_aspect_mode_cinema_zoom">Увеличение в кино режим</string>
-    
+
     <string name="audio_dialog_title">Аудио</string>
     <string name="audio_dialog_tab_tracks">Аудио</string>
     <string name="audio_dialog_tab_mix">Микс</string>
@@ -1944,7 +1945,7 @@
     <string name="audio_center_mix_unavailable">Централният микс е наличен само когато е активно FFmpeg downmixing.</string>
     <string name="audio_maintain_original_audio_on_downmix_title">Запазване на оригиналния звук при миксиране</string>
     <string name="audio_maintain_original_audio_on_downmix_subtitle">Когато е деактивирано, нормализирането на понижаването на звука може да намали общата сила на звука.</string>
-    
+
     <string name="subtitle_dialog_title">Субтитри</string>
     <string name="subtitle_no_builtin">Няма вградени субтитри</string>
     <string name="subtitle_loading_addon">Зареждане на субтитри от добавки\u2026</string>
@@ -1988,13 +1989,13 @@
     <string name="subtitle_style_weight">Тегло</string>
     <string name="panel_failed_load_streams">Зареждането на потоци не бе успешно</string>
     <string name="panel_failed_load_episodes">Зареждането на епизодите не бе успешно</string>
-    
+
     <string name="pause_you_are_watching">Вие гледате</string>
     <string name="pause_cast_label">Предаване</string>
     <string name="pause_back_to_details">Обратно към подробностите</string>
     <string name="pause_as_character">като %1$s</string>
 
-<!-- PostPlayOverlay --> 
+<!-- PostPlayOverlay -->
     <string name="next_episode_label">Следващ епизод</string>
     <string name="next_episode_finding_source">Търсене на източник…</string>
     <string name="next_episode_playing_via">Възпроизвежда се чрез %1$s след %2$ds</string>
@@ -2028,8 +2029,8 @@
     <string name="skip_generic">Пропускане</string>
     <string name="display_mode_refresh">Обновяване</string>
     <string name="display_mode_resolution">Разделителна способност</string>
-    
-    
+
+
     <string name="search_keyboard_hint">Натиснете „Готово“ на клавиатурата, за да търсите</string>
     <string name="search_placeholder">Търсене на филми и сериали</string>
     <string name="search_start_title">Започнете търсенето</string>
@@ -2045,7 +2046,7 @@
     <string name="search_no_results_title">Няма резултати</string>
     <string name="search_no_results_subtitle">Опитайте да търсите с други ключови думи</string>
     <string name="search_error_no_catalogs">Няма намерени каталози за търсене в инсталираните добавки</string>
-    
+
     <string name="library_syncing">Синхронизиране на библиотеката Trakt\u2026</string>
     <string name="library_title">Библиотека</string>
     <string name="library_filter_list">Списък</string>
@@ -2183,11 +2184,11 @@
     <string name="cloud_library_type_web">Уеб</string>
     <string name="cloud_library_type_files">Файлове</string>
 
-<!-- Cloud library repository errors --> 
+<!-- Cloud library repository errors -->
     <string name="cloud_library_error_provider_unavailable">Облачната библиотека не е налична за %1$s.</string>
     <string name="cloud_library_error_disabled">Облачната библиотека е деактивирана.</string>
 
-<!-- AccountSettingsContent --> 
+<!-- AccountSettingsContent -->
     <string name="account_loading">Зареждане\u2026</string>
     <string name="account_sync_description">Синхронизирайте библиотеката си, гледайте напредъка, добавките и плъгините на различни устройства.</string>
     <string name="account_sync_restart_note">Синхронизирането не е в реално време между активните устройства. Рестартирайте това устройство след влизане или за да се включат промените, направени другаде.</string>
@@ -2209,7 +2210,7 @@
     <string name="account_signed_in_as">Влезли сте като</string>
     <string name="account_generate_sync_signed_in_desc">Създайте код, за да могат други устройства да се синхронизират с този акаунт.</string>
     <string name="account_unknown_device">Неизвестно устройство</string>
-    
+
     <string name="auth_signin_title">Вход</string>
     <string name="auth_signin_tv_disabled">Въвеждането на имейл/парола на телевизора е деактивирано. Продължете с влизане с QR код.</string>
     <string name="auth_signin_qr_btn">Продължете с QR</string>
@@ -2259,7 +2260,7 @@
     <string name="custom_server_save_failed">Не можа да се запази конфигурацията на сървъра.</string>
     <string name="custom_server_session_clear_failed">Не можах безопасно да изчистя текущата сесия. Сървърът не беше променен.</string>
     <string name="custom_server_restart_failed">Сървърът беше запазен, но приложението не можа да се рестартира автоматично. Рестартирайте го ръчно.</string>
-    
+
     <string name="auth_qr_title">Вход с QR код</string>
     <string name="auth_qr_tagline">Гледайте библиотеката си, където и да е</string>
     <string name="auth_qr_finishing">Влизането се завършва\u2026</string>
@@ -2279,7 +2280,7 @@
     <string name="auth_qr_back">Назад</string>
     <string name="auth_qr_terms_prefix">С регистрацията / влизането си, приемам</string>
     <string name="auth_qr_terms_link">Условия</string>
-    
+
     <string name="sync_generate_title">Генериране на код за синхронизация</string>
     <string name="sync_generate_subtitle">Създайте ПИН код, за да защитите кода си за синхронизация. Споделете кода с другите си устройства.</string>
     <string name="sync_generate_code_label">Вашият код за синхронизация</string>
@@ -2289,7 +2290,7 @@
     <string name="sync_generate_pin_placeholder">Въведете ПИН код</string>
     <string name="sync_generate_generating">Генериране\u2026</string>
     <string name="sync_generate_code_btn">Генериране на код</string>
-    
+
     <string name="sync_claim_title">Свързване на устройство</string>
     <string name="sync_claim_subtitle">Въведете кода за синхронизация и ПИН кода от другото си устройство, за да свържете това устройство.</string>
     <string name="sync_claim_success">Устройството е свързано успешно! Вашите добавки и плъгини вече ще се синхронизират.</string>
@@ -2299,7 +2300,7 @@
     <string name="sync_claim_pin_label">ПИН</string>
     <string name="sync_claim_pin_placeholder">Въведете ПИН код</string>
     <string name="sync_claim_linking">Свързване\u2026</string>
-    
+
     <string name="plugin_readonly_notice">Използват се плъгините на основния профил и не могат да бъдат променяни</string>
     <string name="plugin_repositories_section">Хранилища (%1$d)</string>
     <string name="plugin_providers_section">Доставчици (%1$d)</string>
@@ -2356,18 +2357,18 @@
     <string name="profile_delete_confirm_subtitle">Това ще изтрие завинаги този профил и всички негови данни, включително библиотека, история на гледане и настройки на добавките. Това действие не може да бъде отменено.</string>
     <string name="profile_delete_btn">Изтриване на профил</string>
     <string name="profile_saving">Запазване\u2026</string>
-    
+
     <string name="cast_detail_error">Нещо се обърка</string>
     <string name="cast_detail_retry">Повторен опит</string>
     <string name="cast_detail_filmography">Филмография</string>
     <string name="cast_detail_born">Роден: %1$s</string>
     <string name="cast_detail_born_died">Роден: %1$s — †%2$s</string>
     <string name="cast_detail_age">възраст %1$d</string>
-    
+
     <string name="catalog_see_all_from">от %1$s</string>
     <string name="catalog_see_all_empty_title">Няма налични артикули</string>
     <string name="catalog_see_all_empty_subtitle">Опитайте друг каталог или проверете отново по-късно</string>
-    
+
     <string name="layout_selection_welcome">Добре дошли в Nuvio</string>
     <string name="layout_selection_subtitle">Изберете оформлението на началния си екран</string>
     <string name="layout_selection_continue">Продължи</string>
@@ -2383,7 +2384,7 @@
     <string name="update_no_release_notes">Не бяха предоставени бележки за изданието.</string>
     <string name="update_latest_version">Използвате най-новата версия.</string>
     <string name="update_unknown_sources">Разрешаване на инсталиранията от неизвестни източници.</string>
-<!-- AccountScreen --> 
+<!-- AccountScreen -->
     <string name="account_title">Акаунт</string>
     <string name="account_sign_in_description">Влезте, за да синхронизирате библиотеката си, напредъка си в гледането, добавките и плъгините на различни устройства. Синхронизирането на библиотеката използва Nuvio Sync, когато Trakt не е свързан, а напредъкът в гледането може да използва Trakt или Nuvio Sync.</string>
     <string name="account_sync_code_title">Код за синхронизация</string>
@@ -2392,13 +2393,13 @@
     <string name="account_no_linked_devices">Няма свързани устройства</string>
     <string name="account_unlink">Прекратяване на връзката</string>
 
-<!-- EpisodeRatingsSection --> 
+<!-- EpisodeRatingsSection -->
     <string name="ratings_loading">Зареждане на оценките на епизодите...</string>
     <string name="ratings_unavailable">Рейтингите на епизодите не са налични.</string>
     <string name="ratings_load_error">Не може да се заредят оценките на епизодите.</string>
     <string name="ratings_season_summary">Сезон %1$d - %2$d епизода</string>
 
-<!-- SearchDiscoverSection --> 
+<!-- SearchDiscoverSection -->
     <string name="discover_title">Открийте</string>
     <string name="discover_load_more">Зареди още</string>
     <string name="discover_loading">Зареждане...</string>
@@ -2416,15 +2417,15 @@
 
     <!-- PluginScreen -->
 
-    <!-- ProfileSettingsContent --> 
+    <!-- ProfileSettingsContent -->
     <string name="profile_edit_title_id">Редактиране на профил %1$d</string>
 
-<!-- PlaybackAudioSettings --> 
+<!-- PlaybackAudioSettings -->
     <string name="audio_passthrough_info">Преминаването на аудио (TrueHD, DTS, AC-3 и др.) е автоматично. Когато е свързан към съвместим AV приемник или саундбар чрез HDMI, звукът без загуби се изпраща такъв, какъвто е, без декодиране.</string>
     <string name="audio_dv_title">DV7 - резервен HEVC</string>
     <string name="audio_dv_sub">Съпоставяне на Dolby Vision Profile 7 със стандартен HEVC за устройства без хардуерна DV поддръжка</string>
 
-<!-- SidebarNavigation / MainActivity --> 
+<!-- SidebarNavigation / MainActivity -->
     <string name="nav_home">Начало</string>
     <string name="nav_discover">Открийте</string>
     <string name="nav_search">Търсене</string>
@@ -2436,7 +2437,7 @@
     <string name="action_select">Избери</string>
     <string name="settings_rounded_ui">Заоблен потребителски интерфейс</string>
     <string name="cd_expand_sidebar">Разгъване на страничната лента</string>
-    
+
     <string name="update_checking">Проверка за актуализации…</string>
     <string name="update_waiting_for_stable">Ще получите следващата стабилна версия, когато стане достъпна</string>
     <string name="update_download_complete">Изтеглянето е завършено. Готово за инсталиране.</string>
@@ -2447,12 +2448,12 @@
     <string name="update_install">Инсталиране</string>
     <string name="update_ignore">Игнориране</string>
 
-<!-- Update flow errors --> 
+<!-- Update flow errors -->
     <string name="update_error_check_failed">Проверката за актуализации е неуспешна</string>
     <string name="update_error_download_failed">Изтеглянето не бе успешно</string>
     <string name="update_error_apk_missing">Липсва изтеглен файл</string>
 
-<!-- Profile PIN errors --> 
+<!-- Profile PIN errors -->
     <string name="profile_pin_save_error">ПИН кодът не можа да бъде запазен. Опитайте отново.</string>
     <string name="profile_pin_locked">Профилът е заключен. Опитайте отново след %1$ds.</string>
     <string name="profile_pin_invalid">Невалиден ПИН код. Опитайте отново.</string>
@@ -2470,17 +2471,17 @@
 
     <!-- Library -->
 
-    <!-- Error messages (shared) --> 
+    <!-- Error messages (shared) -->
     <string name="error_network_required">Свържете се с Wi-Fi или Ethernet, за да използвате тази функция</string>
     <string name="error_server_ports_unavailable">Сървърът не можа да се стартира. Всички портове са заети.</string>
 
-<!-- Plugin errors --> 
+<!-- Plugin errors -->
     <string name="plugin_repo_added_with_providers">Добавен е %1$s с %2$d доставчици</string>
     <string name="plugin_repo_removed">Хранилището е премахнато</string>
     <string name="plugin_repo_refreshed">Хранилището е обновено</string>
 
 <!-- Trakt errors -->
-    
+
     <string name="trakt_error_code_expired">Кодът на устройството е изтекъл. Започнете отново.</string>
     <string name="trakt_error_code_used">Кодът на устройството вече е използван. Започнете отново.</string>
     <string name="trakt_error_denied">Авторизацията е отказана в Trakt.</string>
@@ -2504,7 +2505,7 @@
     <string name="trakt_user_fallback">Потребител на Trakt</string>
     <string name="trakt_error_failed_start">Неуспешно стартиране на Trakt authentication</string>
 
-<!-- General errors --> 
+<!-- General errors -->
     <string name="error_unknown">Неизвестна грешка</string>
     <string name="addon_error_not_found">Добавката не е намерена</string>
 
@@ -2516,14 +2517,14 @@
     <string name="home_error_no_addons">Няма инсталирани добавки</string>
     <string name="home_error_no_catalog_addons">Няма инсталирани добавки за каталог</string>
 
-<!-- Player errors --> 
+<!-- Player errors -->
     <string name="player_error_failed_start_torrent">Неуспешно стартиране на торент: %1$s</string>
 
 <!-- Playback subtitle settings -->
 
     <string name="ratings_season_label">S%1$d</string>
     <string name="ratings_episode_label">E%1$d</string>
-    
+
     <string name="cd_play">Възпроизвеждане</string>
     <string name="cd_pause">Пауза</string>
     <string name="cd_subtitles">Субтитри</string>
@@ -2576,13 +2577,13 @@
     <string name="cd_collapse">Свиване на %1$s</string>
     <string name="cd_qr_login">QR код за вход</string>
     <string name="cd_nuvio">Nuvio</string>
-    
+
     <string name="debug_signin_success">Влизането е осъществено успешно</string>
     <string name="debug_generate_description">Генериран от грешки %1$s елемент #%2$d</string>
     <string name="debug_generate_result_failed">Неуспешно: %1$s</string>
     <string name="debug_generate_library_result_added">Добавени са %1$d елемента към библиотеката</string>
 
-<!-- Collection Management --> 
+<!-- Collection Management -->
     <string name="collections_header">Колекции</string>
     <string name="collections_delete_confirm_title">Да се изтрие ли колекцията?</string>
     <string name="collections_delete_confirm">Изтриване</string>
@@ -2620,7 +2621,7 @@
     <string name="collections_confirm_import">Потвърждаване на импортирането</string>
     <string name="collections_folder_count">%1$d папка(и)</string>
 
-<!-- Collection Editor --> 
+<!-- Collection Editor -->
     <string name="collections_editor_row_title">Заглавие на ред</string>
     <string name="collections_editor_save">Запазване</string>
     <string name="collections_editor_backdrop">Фоново изображение</string>
@@ -2855,10 +2856,10 @@
     <string name="tmdb_entity_error_load_named">Не можа да се зареди %1$s</string>
     <string name="tmdb_entity_error_load">Не можа да се зареди TMDB обектът</string>
 
-<!-- Catalog see-all fallback --> 
+<!-- Catalog see-all fallback -->
     <string name="catalog_see_all_title_fallback">Каталог</string>
 
-<!-- Collection editor: emoji categories --> 
+<!-- Collection editor: emoji categories -->
     <string name="collections_editor_emoji_category_streaming">Стрийминг</string>
     <string name="collections_editor_emoji_category_genres">Жанрове</string>
     <string name="collections_editor_emoji_category_sports">Спорт</string>
@@ -2871,7 +2872,7 @@
     <string name="collections_editor_emoji_category_objects">Обекти</string>
     <string name="collections_editor_emoji_category_flags">Флагове</string>
     <string name="collections_editor_emoji_category_symbols">Символи</string>
-<!-- Collection editor: TMDB picker placeholders + genres --> 
+<!-- Collection editor: TMDB picker placeholders + genres -->
     <string name="collections_editor_tmdb_network_placeholder_example">213 за Netflix, 49 за HBO, 2739 за Disney+</string>
     <string name="collections_editor_tmdb_collection_placeholder_example">10 за колекцията „Междузвездни войни“</string>
     <string name="collections_editor_tmdb_company_placeholder_example">Marvel Studios, 420 или URL адрес на компанията</string>
@@ -2884,7 +2885,7 @@
     <string name="collections_editor_tmdb_genre_drama">Драма</string>
     <string name="collections_editor_tmdb_genre_crime">Криминале</string>
     <string name="collections_editor_tmdb_genre_reality">Реалност</string>
-<!-- Auto-play regex presets --> 
+<!-- Auto-play regex presets -->
     <string name="autoplay_regex_preset_any_1080p_plus">Всяка 1080p+</string>
     <string name="autoplay_regex_preset_4k_remux">4K / Ремултиплексиране</string>
     <string name="autoplay_regex_preset_1080p_standard">1080p Стандарт</string>
@@ -2899,10 +2900,10 @@
     <string name="autoplay_regex_preset_no_cam_ts">Без CAM/TS</string>
     <string name="autoplay_regex_preset_no_remux_hdr">Без REMUX/HDR</string>
 
-<!-- Playback settings sections --> 
+<!-- Playback settings sections -->
     <string name="playback_player_internal_desc">Използване на вградения плейър на NuvioTV</string>
 
-<!-- Player runtime: torrent overlay + tracks --> 
+<!-- Player runtime: torrent overlay + tracks -->
     <string name="player_torrent_peer_info">%1$d начални точки · %2$d пиъри</string>
     <string name="player_torrent_buffered_status">%1$s буфериран · %2$s · %3$s</string>
     <string name="player_torrent_status">%1$s · %2$s</string>
@@ -2915,7 +2916,7 @@
     <string name="player_track_audio_fallback">Аудио %1$d</string>
     <string name="player_track_subtitle_fallback">Субтитри %1$d</string>
 
-<!-- Player runtime: error recovery --> 
+<!-- Player runtime: error recovery -->
     <string name="player_error_stream_blocked">\n\nИзточникът на източника е блокиран или ограничен. Опитайте с друг източник.</string>
     <string name="player_error_stream_removed">\n\nВръзката към стрийма е изтекла или е премахната. Опитайте с друг източник.</string>
     <string name="player_error_stream_expired">\n\nВръзката към стрийма е изтекла. Опитайте с друг източник.</string>
@@ -2929,13 +2930,13 @@
     <string name="player_error_mpv_playback_failed">Неуспешно инициализиране на възпроизвеждането на libmpv</string>
     <string name="player_error_torrent">Торентна грешка: %1$s</string>
     <string name="player_error_playback_fallback">Грешка при възпроизвеждане</string>
-<!-- Subtitle timing recovery --> 
+<!-- Subtitle timing recovery -->
     <string name="subtitle_timing_file_no_lines">В този файл не бяха намерени редове за субтитри.</string>
     <string name="subtitle_timing_load_lines_failed">Зареждането на редовете със субтитри не бе успешно.</string>
     <string name="subtitle_download_failed_http">Изтеглянето на субтитрите не бе успешно (HTTP %1$d)</string>
     <string name="subtitle_download_empty_content">Изтеглянето на субтитри върна празно съдържание.</string>
 
-<!-- Collection import errors --> 
+<!-- Collection import errors -->
     <string name="collections_import_error_empty_input">Празно поле за въвеждане</string>
     <string name="collections_import_error_expected_array">Невалиден формат: очаква се масив</string>
     <string name="collections_import_error_empty_array">Празен масив: не са намерени колекции</string>
@@ -2953,7 +2954,7 @@
     <string name="collections_import_error_missing_trakt_list_id">Колекция \"%1$s\", папка \"%2$s\", източник %3$d: липсва идентификатор на списъка с тракти</string>
     <string name="collections_import_error_json_parse">Грешка при синтактичен анализ на JSON: %1$s</string>
 
-<!-- Library messages --> 
+<!-- Library messages -->
     <string name="library_synced">Библиотеката е синхронизирана</string>
     <string name="library_error_refresh_failed">Неуспешно обновяване на библиотеката</string>
     <string name="library_list_created">Списъкът е създаден</string>
@@ -2965,13 +2966,13 @@
     <string name="library_list_order_updated">Редът на списъка е актуализиран</string>
     <string name="library_error_reorder_lists_failed">Пренареждането на списъците не бе успешно</string>
     <string name="library_list_fallback_title">Списък</string>
-<!-- Library privacy display labels (mapped from API value, not used as a key) --> 
+<!-- Library privacy display labels (mapped from API value, not used as a key) -->
     <string name="library_privacy_private">Лично</string>
     <string name="library_privacy_link">Връзка</string>
     <string name="library_privacy_friends">Приятели</string>
     <string name="library_privacy_public">Публичен</string>
 
-<!-- Trakt errors --> 
+<!-- Trakt errors -->
     <string name="trakt_error_auth_required">Изисква се удостоверяване чрез Trakt</string>
     <string name="trakt_library_error_request_failed">Заявката за Trakt е неуспешна</string>
     <string name="trakt_library_error_create_list_failed">Създаването на списък не бе успешно</string>
@@ -2989,7 +2990,7 @@
     <string name="trakt_library_error_auth_expired">Удостоверяването на Trakt е изтекло</string>
     <string name="trakt_library_error_list_not_found">Списъкът с трактати не е намерен</string>
     <string name="trakt_library_error_list_limit_reached">Достигнат е лимитът на списъка с трактати. Необходимо е надграждане.</string>
-    
+
     <string name="trakt_error_request_failed">Заявката в Trakt е неуспешна</string>
     <string name="simkl_account_title">Simkl акаунт</string>
     <string name="simkl_description">Свържете Simkl за синхронизиране на списъци, история на гледане, напредък на възпроизвеждане и Scrobbles.</string>
@@ -3033,7 +3034,7 @@
     <string name="cd_simkl_logo">Лого на Simkl</string>
     <string name="trakt_error_mark_watched_failed">Неуспешно маркиране като гледано в Trakt (%1$d)</string>
 
-<!-- Detail / poster options errors --> 
+<!-- Detail / poster options errors -->
     <string name="detail_error_update_library_failed">Актуализирането на библиотеката не бе успешно</string>
     <string name="detail_error_load_lists_failed">Зареждането на списъци не бе успешно</string>
     <string name="detail_error_update_lists_failed">Актуализирането на списъците не бе успешно</string>
@@ -3042,11 +3043,11 @@
     <string name="poster_options_error_load_lists_failed">Зареждането на списъци не бе успешно</string>
     <string name="poster_options_error_update_lists_failed">Неуспешно актуализиране на списъците</string>
 
-<!-- Search errors --> 
+<!-- Search errors -->
     <string name="search_error_load_addons_failed">Зареждането на добавките не бе успешно</string>
     <string name="search_error_failed">Търсенето е неуспешно</string>
 
-<!-- Stream / TMDB / addons fallbacks --> 
+<!-- Stream / TMDB / addons fallbacks -->
     <string name="stream_unknown">Неизвестен източник</string>
     <string name="stream_embedded_group">Вградени потоци</string>
     <string name="stream_embedded_fallback_name">Вграждане на източник</string>
@@ -3057,10 +3058,10 @@
     <string name="web_tmdb_collection_fallback">TMDB колекция %1$d</string>
     <string name="web_error_invalid_request_body">Невалидно тяло на заявката</string>
 
-<!-- Subtitle preferred language fallback --> 
+<!-- Subtitle preferred language fallback -->
     <string name="language_english">Английски</string>
 
-<!-- Supporters / contributors / sponsors errors --> 
+<!-- Supporters / contributors / sponsors errors -->
     <string name="supporters_error_load">Не може да се заредят поддръжниците.</string>
     <string name="contributors_error_load">Не може да се заредят сътрудниците.</string>
     <string name="sponsors_error_load">Не може да се заредят спонсорите.</string>
@@ -3069,22 +3070,22 @@
     <string name="supporters_error_api_http">Грешка в API за дарения: %1$d</string>
     <string name="sponsors_error_api_http">Грешка в API на спонсорите: %1$d</string>
 
-<!-- Contributor role badges --> 
+<!-- Contributor role badges -->
     <string name="contributor_role_translator">Преводач</string>
     <string name="contributor_role_maintainer">Поддържащ</string>
 
-<!-- Network / safe API errors --> 
+<!-- Network / safe API errors -->
     <string name="network_error_empty_response_body">Празно тяло на отговора</string>
     <string name="network_error_unknown">Възникна неизвестна грешка</string>
 
-<!-- Network settings: fast.com errors --> 
+<!-- Network settings: fast.com errors -->
     <string name="network_fast_error_script_path_missing">fast.com: пътят до скрипта не е намерен</string>
     <string name="network_fast_error_token_missing">fast.com: токенът не е намерен в пакета</string>
 
-<!-- Torrent service errors --> 
+<!-- Torrent service errors -->
     <string name="torrent_error_start_timeout">Торент източникът не стартира в рамките на %1$ds</string>
 
-<!-- Player runtime: stream / external link errors --> 
+<!-- Player runtime: stream / external link errors -->
     <string name="player_torrent_starting_engine">Стартиране на P2P двигателя…</string>
     <string name="player_torrent_rebuffer_status">%1$s буфериран</string>
     <string name="player_stream_error_invalid_external_url">Невалиден външен URL адрес</string>
@@ -3092,7 +3093,7 @@
     <string name="player_stream_error_invalid_url">Невалиден URL адрес на източника</string>
     <string name="player_stream_error_missing_content_type">Липсващ тип съдържание</string>
 
-<!-- Meta repository: addon detail error fragments --> 
+<!-- Meta repository: addon detail error fragments -->
     <string name="meta_error_detail_no_metadata_for_id">не върна метаданни за този идентификатор</string>
     <string name="meta_error_detail_addon_unreachable">не можа да се свърже със сървъра на добавката</string>
     <string name="meta_error_detail_addon_connection_failed">връзката с добавката е неуспешна</string>
@@ -3100,7 +3101,7 @@
     <string name="meta_error_detail_addon_cleartext_blocked">добавката използва несигурна HTTP връзка, блокирана от Android</string>
     <string name="meta_error_detail_addon_request_failed">заявката за добавката е неуспешна</string>
 
-<!-- Stream repository: addon detail error fragments + fetch --> 
+<!-- Stream repository: addon detail error fragments + fetch -->
     <string name="stream_error_detail_no_streams_for_id">не върна потоци за този идентификатор</string>
     <string name="stream_error_detail_addon_unreachable">не можа да се свърже със сървъра на добавката</string>
     <string name="stream_error_detail_addon_connection_failed">връзката с добавката е неуспешна</string>
@@ -3109,18 +3110,18 @@
     <string name="stream_error_detail_addon_request_failed">заявката за добавката е неуспешна</string>
     <string name="stream_error_fetch_failed">Неуспешно извличане на потоци</string>
 
-<!-- Trakt: paginated fetch + comments --> 
+<!-- Trakt: paginated fetch + comments -->
     <string name="trakt_library_error_paginated_fetch_failed">Извличането на страниците на Trakt не бе успешно (%1$d)</string>
 
-<!-- Home: poster long-press list picker errors --> 
+<!-- Home: poster long-press list picker errors -->
     <string name="home_poster_lists_error_load_failed">Зареждането на списъците не бе успешно</string>
     <string name="home_poster_lists_error_update_failed">Актуализирането на списъците не бе успешно</string>
 
-<!-- Profile selection: PIN overlay messages --> 
+<!-- Profile selection: PIN overlay messages -->
     <string name="profile_pin_saved_for_profile">ПИН кодът е запазен за %1$s.</string>
     <string name="profile_pin_lock_removed_for_profile">Заключването с ПИН е премахнато за %1$s.</string>
 
-<!-- Trakt: Related / comments / list items error fallbacks --> 
+<!-- Trakt: Related / comments / list items error fallbacks -->
     <string name="trakt_related_error_request_failed">Заявката, свързана с Trakt, е неуспешна</string>
     <string name="trakt_comments_error_request_failed">Заявката за коментари в Trakt е неуспешна</string>
     <string name="trakt_library_error_fetch_list_items">Неуспешно извличане на елементи от списъка</string>
@@ -3128,7 +3129,8 @@
     <string name="watchlist_removed">Премахнато от списъка за наблюдение</string>
     <string name="watchlist_added">Добавено към списъка за наблюдение</string>
 
-<!-- Debrid: filter rule rows (title + subtitle pairs) --> 
+
+<!-- Debrid: filter rule rows (title + subtitle pairs) -->
     <string name="debrid_picker_preferred_resolutions_title">Предпочитани резолюции</string>
     <string name="debrid_picker_preferred_resolutions_subtitle">Сортиране на избраните резолюции първо, по подразбиращ се ред.</string>
     <string name="debrid_picker_required_resolutions_title">Необходими резолюции</string>
@@ -3176,7 +3178,7 @@
     <string name="debrid_picker_excluded_release_groups_title">Изключени групи за издание</string>
     <string name="debrid_picker_excluded_release_groups_subtitle">Скриване на избраните групи издания.</string>
 
-<!-- Debrid: selection count + size range labels --> 
+<!-- Debrid: selection count + size range labels -->
     <string name="debrid_selection_count_any">Всеки</string>
         <plurals name="debrid_selection_count_value">
             <item quantity="one">%d избрани</item>
@@ -3368,7 +3370,7 @@
     <string name="stream_test_error_prefix">Грешка: %1$s</string>
     <string name="stream_test_video_bitrate">Среден видео битрейт: %1$s</string>
     <string name="stream_test_error_connection">Връзката не бе успешна. Последната възпроизведена връзка за стрийминг може да е изтекла или е недостъпна. Моля, пуснете видеото отново и опитайте отново.</string>
-    
+
     <string name="random_episode_title">Разбъркване</string>
     <string name="layout_random_episode_sub">Разбъркване на епизоди от всеки сериал. Изключването на това действие паузира разбъркването.</string>
     <string name="random_episode_unwatched">Негледани епизоди</string>
@@ -3391,20 +3393,28 @@
     <string name="shuffle_change_selection">Избор на епизоди</string>
     <string name="shuffle_badge">Разбърканото възпроизвеждане на епизоди е активирано</string>
 
-<!-- Subtitle AutoSync --> 
+<!-- Subtitle AutoSync -->
+
+
+
+
+
+    <string name="autosync_tolerance_value">%1$d мс</string>
+
+
+
+    <string name="stream_resume_from_time">Възобновяване от %1$s</string>
+    <string name="stream_resume_from_percent">Възобновяване от %1$d%%</string>
     <string name="autosync_setting_title">Автоматично синхронизиране на субтитри</string>
     <string name="autosync_setting_description">Съпоставяне на избраните допълнителни субтитри с времето на вградените във видеото субтитри.</string>
     <string name="autosync_tolerance_title">Толеранс на автоматична синхронизация</string>
     <string name="autosync_tolerance_description">Запазете оригиналното време, когато необходимата корекция е толкова малка или по-малка.</string>
     <string name="autosync_tolerance_off">Изключено</string>
-    <string name="autosync_tolerance_value">%1$d мс</string>
     <string name="autosync_thorough_title">Пълно търсене с автоматична синхронизация</string>
     <string name="autosync_thorough_description">Продължете да сравнявате други субтитри и вградени записи за по-точно съвпадение преди синхронизиране. Когато е изключено, първото силно съвпадение се използва по-рано. Прилагат се само уверени съвпадения.</string>
     <string name="autosync_toast_failed">Синхронизирането не бе успешно: Автоматичното синхронизиране не можа да съпостави тези субтитри с видеото.</string>
     <string name="autosync_toast_failed_no_reference">Синхронизирането не бе успешно: това видео няма вградени субтитри за сравнение.</string>
     <string name="autosync_toast_failed_unsupported">Синхронизирането не бе успешно: Автоматичното синхронизиране не поддържа този формат на субтитрите.</string>
     <string name="autosync_label_synced">Автоматично синхронизирано</string>
-    <string name="stream_resume_from_time">Възобновяване от %1$s</string>
-    <string name="stream_resume_from_percent">Възобновяване от %1$d%%</string>
     <string name="trakt_error_insufficient_ids_mark_watched">Недостатъчни Trakt ID за маркиране като гледано</string>
 </resources>

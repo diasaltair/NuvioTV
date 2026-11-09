@@ -964,10 +964,11 @@ internal fun PlayerRuntimeController.initializePlayer(
                     if (pv != null) pv.videoBoundsFraction(videoAspectRatio) else null
                 },
                 gainAudioProcessor = gainAudioProcessor,
+                nightModeAudioProcessor = nightModeAudioProcessor,
                 downmixEnabled = formatsPlan.downmixEnabled,
                 audioOutputChannels = formatsPlan.audioOutputChannels,
-                nightModeAudioProcessor = nightModeAudioProcessor,
                 downmixNormalizationEnabled = !playerSettings.maintainOriginalAudioOnDownmix,
+                downmixLfeLevel = playerSettings.downmixLfeLevel.level,
                 forceOpticalPassthrough = isForcePassthroughActive,
                 bluetoothForcePcm = isBluetoothAudioOutput,
                 playbackSpeedProvider = { _uiState.value.playbackSpeed },
@@ -981,6 +982,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                         downmixEnabled = formatsPlan.downmixEnabled,
                         audioOutputChannels = formatsPlan.audioOutputChannels,
                         downmixNormalizationEnabled = !playerSettings.maintainOriginalAudioOnDownmix,
+                        lfeMixLevel = playerSettings.downmixLfeLevel.level,
                         forceOpticalPassthrough = isForcePassthroughActive,
                         deniedTranscodeMimes = formatsPlan.deniedTranscodeMimes
                     )
@@ -1184,9 +1186,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     phase = "starting_stream",
                     message = context.getString(R.string.player_loading_starting)
                 )
-                // Nuvio RS hook: Arc formats can rebuild without the tunnel; use what the selector really asked for.
-                val isTunneledPlayback = if (formatsActiveForCurrentPlayback) isTunnelingActiveForCurrentPlayback
-                    else tunnelingActive
+                val isTunneledPlayback = isTunnelingActiveForCurrentPlayback
                 // Hold playWhenReady=false through prepare() so audio does not race ahead
                 // while the video decoder is still opening. The first STATE_READY primes the
                 // pipeline (ColdStartPrime); synchronized play() begins in onRenderedFirstFrame().
@@ -1863,6 +1863,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                             format = format,
                             reuseEvaluation = decoderReuseEvaluation
                         )
+                        onVideoInputFormatForHdr(format)
                     }
 
                     override fun onVideoSizeChanged(eventTime: AnalyticsListener.EventTime, videoSize: androidx.media3.common.VideoSize) {
@@ -2263,6 +2264,7 @@ private class SubtitleOffsetRenderersFactory(
     private val downmixEnabled: Boolean,
     private val audioOutputChannels: com.nuvio.tv.data.local.AudioOutputChannels,
     private val downmixNormalizationEnabled: Boolean,
+    private val downmixLfeLevel: Float,
     private val forceOpticalPassthrough: Boolean,
     private val bluetoothForcePcm: Boolean = false,
     private val playbackSpeedProvider: () -> Float,
@@ -2521,6 +2523,7 @@ private class SubtitleOffsetRenderersFactory(
                 downmixEnabled = downmixEnabled,
                 audioOutputChannels = audioOutputChannels,
                 downmixNormalizationEnabled = downmixNormalizationEnabled,
+                lfeMixLevel = downmixLfeLevel,
                 forceOpticalPassthrough = forceOpticalPassthrough,
                 deniedTranscodeMimes = formatsPlan.deniedTranscodeMimes
             )
@@ -2532,6 +2535,7 @@ internal fun FfmpegAudioRenderer.applyDownmixSettings(
     downmixEnabled: Boolean,
     audioOutputChannels: com.nuvio.tv.data.local.AudioOutputChannels,
     downmixNormalizationEnabled: Boolean,
+    lfeMixLevel: Float,
     forceOpticalPassthrough: Boolean,
     deniedTranscodeMimes: Set<String> = emptySet() // Nuvio RS hook: Arc formats (per-format AC-3 transcode)
 ) {
@@ -2543,9 +2547,11 @@ internal fun FfmpegAudioRenderer.applyDownmixSettings(
             audioOutputChannels.channelCount
         )
         setDownmixNormalizationEnabled(downmixNormalizationEnabled)
+        setLfeMixLevel(lfeMixLevel)
     } else {
         setAudioOutputChannels(null, 0)
         setDownmixNormalizationEnabled(false)
+        setLfeMixLevel(0f)
     }
 }
 
