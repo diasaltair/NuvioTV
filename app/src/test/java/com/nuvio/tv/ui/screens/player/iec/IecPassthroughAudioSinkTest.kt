@@ -303,6 +303,82 @@ class IecPassthroughAudioSinkTest {
     }
 
     @Test
+    fun speakerRoute_skipsTrueHdIec_withoutProbing() {
+        val inner = RecordingSink()
+        val factory = ReadyFactory(FakeIecAudioTrack(192_000, 16), readyAt = { false })
+        val sink = IecPassthroughAudioSink(
+            sink = inner,
+            trackFactory = factory,
+            outputRouteKey = { "type:built_in_speaker|name:smart_tv_pro" }
+        )
+        assertEquals(0, factory.probeStartCount)
+        assertFalse(sink.claimsHbr(trueHdFormat()))
+        sink.configure(trueHdFormat(), 0, null)
+        assertFalse(sink.isIecActive)
+        assertEquals(0, factory.openCount)
+        assertEquals(0, factory.probeStartCount)
+        assertEquals(1, inner.configured)
+    }
+
+    @Test
+    fun speakerRoute_keepsIecOnceTheProbeOpenedIt() {
+        val factory = ReadyFactory(FakeIecAudioTrack(192_000, 16))
+        val sink = IecPassthroughAudioSink(
+            sink = RecordingSink(),
+            trackFactory = factory,
+            outputRouteKey = { "type:built_in_speaker|name:aftkrt" }
+        )
+        sink.configure(trueHdFormat(), 0, null)
+        assertTrue(sink.isIecActive)
+    }
+
+    @Test
+    fun bluetoothRoute_skipsIecEvenAfterAGoodProbe() {
+        val factory = ReadyFactory(FakeIecAudioTrack(192_000, 16))
+        val sink = IecPassthroughAudioSink(
+            sink = RecordingSink(),
+            trackFactory = factory,
+            outputRouteKey = { "type:bluetooth_a2dp|name:headphones" }
+        )
+        assertFalse(sink.claimsHbr(dtsHdFormat()))
+        sink.configure(dtsHdFormat(), 0, null)
+        assertFalse(sink.isIecActive)
+        assertEquals(0, factory.openCount)
+    }
+
+    @Test
+    fun routeIsReadAgainAtEachConfigure() {
+        var route = "type:built_in_speaker|name:am9_pro"
+        val factory = ReadyFactory(FakeIecAudioTrack(192_000, 16), readyAt = { false })
+        val sink = IecPassthroughAudioSink(
+            sink = RecordingSink(),
+            trackFactory = factory,
+            outputRouteKey = { route }
+        )
+        sink.configure(trueHdFormat(), 0, null)
+        assertFalse(sink.isIecActive)
+        assertEquals(0, factory.probeStartCount)
+
+        route = "type:hdmi|name:am9_pro"
+        sink.configure(trueHdFormat(), 0, null)
+        assertTrue(sink.isIecActive)
+        assertEquals(1, factory.probeStartCount)
+    }
+
+    @Test
+    fun hdmiRoute_triesTrueHdIecAsBefore() {
+        val factory = ReadyFactory(FakeIecAudioTrack(192_000, 16), readyAt = { false })
+        val sink = IecPassthroughAudioSink(
+            sink = RecordingSink(),
+            trackFactory = factory,
+            outputRouteKey = { "type:hdmi|name:aftkrt" }
+        )
+        assertEquals(1, factory.probeStartCount)
+        sink.configure(trueHdFormat(), 0, null)
+        assertTrue(sink.isIecActive)
+    }
+
+    @Test
     fun configure_rearmsTheIecProbe_andMarksLivePassthrough() {
         val factory = ReadyFactory(FakeIecAudioTrack(192_000, 16))
         val sink = IecPassthroughAudioSink(sink = RecordingSink(), trackFactory = factory)

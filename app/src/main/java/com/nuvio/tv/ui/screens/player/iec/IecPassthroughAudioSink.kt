@@ -24,6 +24,7 @@ internal class IecPassthroughAudioSink(
     private val keepAliveThreadEnabled: Boolean = true,
     private val audioOutputReady: () -> Boolean = { true },
     private val dtsHdIecEnabled: Boolean = true,
+    private val outputRouteKey: (() -> String?)? = null,
     private val onIecBecameReady: (() -> Unit)? = null
 ) : ForwardingAudioSink(sink) {
 
@@ -94,6 +95,10 @@ internal class IecPassthroughAudioSink(
     private var lastHealthUnderruns: Int = -1
     private var tunnelingRequested: Boolean = false
     private val iecReadyDelivered = AtomicBoolean(false)
+    @Volatile
+    private var routeAllowsIec: Boolean = true
+    @Volatile
+    private var routeCheckedAtNanos: Long = NEVER
 
     // Set when a selection was told an HBR format had no IEC route only because the probe had
     // not finished. Without it the ready notice would make the player reselect tracks and flush
@@ -104,7 +109,7 @@ internal class IecPassthroughAudioSink(
 
     init {
         attachReadyListener()
-        if (hbrIecEnabled) trackFactory.startProbe()
+        if (hbrIecAllowed(fresh = true)) trackFactory.startProbe()
     }
 
     val isIecActive: Boolean
@@ -135,7 +140,7 @@ internal class IecPassthroughAudioSink(
         get() = keepAliveEnabled && mode == Mode.TRUEHD && iecTrack != null && trackStarted
 
     fun claimsHbr(format: Format): Boolean {
-        return hbrIecEnabled && !iecFailedThisSession && iecCarries(format) && iecAvailable(format)
+        return hbrIecAllowed() && !iecFailedThisSession && iecCarries(format) && iecAvailable(format)
     }
 
     override fun getFormatSupport(format: Format): Int {
@@ -151,7 +156,7 @@ internal class IecPassthroughAudioSink(
     private fun hbrIecRoute(format: Format): Boolean {
         if (iecFailedThisSession || !iecCarries(format)) return false
         if (iecAvailable(format)) return true
-        if (hbrIecEnabled && !trackFactory.iec61937Ready()) hbrAnsweredBeforeProbe = true
+        if (hbrIecAllowed() && !trackFactory.iec61937Ready()) hbrAnsweredBeforeProbe = true
         return false
     }
 
@@ -168,9 +173,10 @@ internal class IecPassthroughAudioSink(
         reopenedAtNanos = NEVER
         reopensForFormat = 0
         LiveDirectAudioPlayback.setPassthroughLive(false)
-        if (hbrIecEnabled) trackFactory.startProbe()
+        val hbrAllowed = hbrIecAllowed(fresh = true)
+        if (hbrAllowed) trackFactory.startProbe()
         val tunnelReady = !tunnelingRequested
-        val tryCustomHbr = hbrIecEnabled && !iecFailedThisSession && tunnelReady &&
+        val tryCustomHbr = hbrAllowed && !iecFailedThisSession && tunnelReady &&
             (isTrueHd(inputFormat) || (iecCarries(inputFormat) && trackFactory.iec61937Ready()))
         if (tryCustomHbr) {
             val opened = openIec(inputFormat)
@@ -456,7 +462,7 @@ internal class IecPassthroughAudioSink(
         val format = configuredFormat
         val hbrWaitingOnIec = format != null &&
             iecCarries(format) &&
-            hbrIecEnabled &&
+            hbrIecAllowed() &&
             !isIecActive &&
             !iecFailedThisSession &&
             !trackFactory.iec61937Ready()
@@ -467,6 +473,22 @@ internal class IecPassthroughAudioSink(
                 !hbrWaitingOnIec
         )
         LiveDirectAudioPlayback.setPassthroughLive(live)
+    }
+
+    private fun hbrIecAllowed(fresh: Boolean = false): Boolean {
+        if (!hbrIecEnabled) return false
+        val readRoute = outputRouteKey ?: return true
+        val now = nanoTime()
+        if (fresh || routeCheckedAtNanos == NEVER || now - routeCheckedAtNanos >= ROUTE_RECHECK_NANOS) {
+            val routeKey = runCatching { readRoute() }.getOrNull()
+            val allowed = IecOutputRoutePolicy.allowsCustomIec(routeKey, trackFactory.iec61937Ready())
+            if (!allowed && routeAllowsIec) {
+                android.util.Log.i("IecPassthrough", "HBR skipped on route=$routeKey")
+            }
+            routeAllowsIec = allowed
+            routeCheckedAtNanos = now
+        }
+        return routeAllowsIec
     }
 
     private fun attachReadyListener() {
@@ -487,7 +509,7 @@ internal class IecPassthroughAudioSink(
         carriesOnIec(format.sampleMimeType, dtsHdIecEnabled)
 
     private fun iecAvailable(format: Format): Boolean {
-        if (!hbrIecEnabled) return false
+        if (!hbrIecAllowed()) return false
         return if (isTrueHd(format)) {
             val channels = hbrIecChannelCount(format)
             val preferred = iecSampleRateFor(format)
@@ -1180,6 +1202,7 @@ internal class IecPassthroughAudioSink(
         internal const val IEC_REOPEN_POLL_NANOS = 500_000_000L
         internal const val MAX_REOPENS_PER_FORMAT = 5
         private const val NEVER = Long.MIN_VALUE
+        private const val ROUTE_RECHECK_NANOS = 1_000_000_000L
         private const val HEALTH_INTERVAL_NANOS = 5_000_000_000L
         private const val FRAME_POOL_LIMIT = 8
         private const val NOT_HELD = Long.MIN_VALUE

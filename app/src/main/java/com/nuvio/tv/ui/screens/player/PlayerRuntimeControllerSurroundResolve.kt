@@ -2,6 +2,7 @@ package com.nuvio.tv.ui.screens.player
 
 import android.content.Context
 import android.util.Log
+import androidx.media3.common.Player
 import com.nuvio.tv.core.player.DeniedTranscodePlanner
 import com.nuvio.tv.core.player.SurroundFormatResolver
 import com.nuvio.tv.data.local.AudioOutputChannels
@@ -241,9 +242,9 @@ private fun PlayerRuntimeController.commitSurroundResolution(
     val wasPlaying = hasActivePlayIntent() && !userPausedManually
     playbackSpeedAwareAudioSink?.notifyAudioProcessingRequirementChanged()
     _exoPlayer?.let { player ->
-        // Before the first tracks the new policy simply applies to the first selection; a reselect then has no
-        // playing period and fails inside the player.
-        if (player.currentTracks.isEmpty) return
+        // Before the first tracks, or while the film is stopped for the thumbnails screen, the new policy simply
+        // applies to the next selection; a reselect then has no playing period and fails inside the player.
+        if (player.currentTracks.isEmpty || player.playbackState == Player.STATE_IDLE) return
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().build()
         if (!wasPlaying || userPausedManually) {
             player.playWhenReady = false
