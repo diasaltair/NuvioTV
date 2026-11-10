@@ -27,7 +27,8 @@ internal data class SurroundResolveResult(
     val targetChannels: Int?,
     val downmixEnabled: Boolean,
     val audioOutputChannels: AudioOutputChannels,
-    val deniedTranscodeMimes: Set<String>
+    val deniedTranscodeMimes: Set<String>,
+    val forceAc3: Boolean = false
 )
 
 internal fun resolveSurroundForRoute(
@@ -88,7 +89,8 @@ internal fun resolveSurroundForRoute(
         targetChannels = surroundTargetChannels,
         downmixEnabled = surroundDownmixEnabled,
         audioOutputChannels = surroundAudioOutputChannels,
-        deniedTranscodeMimes = deniedTranscodeMimes
+        deniedTranscodeMimes = deniedTranscodeMimes,
+        forceAc3 = inputs.forceOpticalActive
     )
 }
 
