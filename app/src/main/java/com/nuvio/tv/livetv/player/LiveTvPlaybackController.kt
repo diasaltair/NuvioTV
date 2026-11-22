@@ -1705,12 +1705,12 @@ class LiveTvPlaybackController @Inject constructor(
 
     /**
      * How much the player may download ahead, in bytes, from how much memory the app really gets.
-     * Uses the same figure as the image cache and the main player ([MemoryBudget.heapMb]): on a
+     * Uses the same figure as the image cache and the main player ([(Runtime.getRuntime().maxMemory() shr 20)]): on a
      * 1 GB box that reports a 512 MB "large" heap it can't back, that is half the reported heap,
      * so the download-ahead is about 75 MB there instead of about 150 MB.
      */
     private fun playerBufferBytes(): Int {
-        val heapMb = MemoryBudget.heapMb.takeIf { it > 0 } ?: 512L
+        val heapMb = (Runtime.getRuntime().maxMemory() shr 20).takeIf { it > 0 } ?: 512L
         return ((heapMb shl 20) * 3 / 10).coerceIn(32L shl 20, 160L shl 20).toInt()
     }
 

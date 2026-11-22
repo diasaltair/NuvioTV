@@ -1251,19 +1251,13 @@ fun ContinueWatchingOptionsDialog(
 
         // Live TV fork: a Calendar "new episode" card can be put off until tomorrow.
         if (item is ContinueWatchingItem.NextUp && item.info.fromCalendar && item.info.isReleaseAlert) {
-            Button(
+            PanelActionRow(
+                label = "Not today (back on Home tomorrow)",
                 onClick = {
                     com.nuvio.tv.livetv.calendar.CalendarHomeFeed.snooze(item.info.contentId, item.info.season, item.info.episode)
                     onDismiss()
-                },
-                colors = ButtonDefaults.colors(
-                    containerColor = NuvioTheme.colors.BackgroundCard,
-                    contentColor = NuvioTheme.colors.TextPrimary
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Not today (back on Home tomorrow)")
-            }
+                }
+            )
         }
 
         if (showPlayManually && isPlayEnabled) {

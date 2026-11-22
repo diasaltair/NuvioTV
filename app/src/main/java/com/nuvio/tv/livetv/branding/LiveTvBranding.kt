@@ -11,12 +11,5 @@ object LiveTvBranding {
     const val TAGLINE = "Live TV  ·  On Demand  ·  Streaming"
 
     /** The "Nuvio + IPTV" version of a theme's Nuvio wordmark. */
-    fun iptvWordmark(nuvioWordmark: Int): Int = when (nuvioWordmark) {
-        R.drawable.app_logo_wordmark_gold -> R.drawable.livetv_wordmark_iptv_gold
-        R.drawable.app_logo_wordmark_jade -> R.drawable.livetv_wordmark_iptv_jade
-        R.drawable.app_logo_wordmark_rose_gold -> R.drawable.livetv_wordmark_iptv_rose_gold
-        R.drawable.app_logo_wordmark_arctic_blue -> R.drawable.livetv_wordmark_iptv_arctic_blue
-        R.drawable.app_logo_wordmark_graphite -> R.drawable.livetv_wordmark_iptv_graphite
-        else -> R.drawable.livetv_wordmark_iptv
-    }
+    fun iptvWordmark(@Suppress("UNUSED_PARAMETER") nuvioWordmark: Int): Int = R.drawable.livetv_wordmark_iptv
 }

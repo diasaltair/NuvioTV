@@ -360,7 +360,6 @@ class PlayerRuntimeController(
         // 'Played' one.
         val audioPathAtTeardown = currentAudioPathDescription
         vpnSettingsSubscription.close()
-        leavePartyPlayback()
         // Cache counters only reach the card on a natural finish, so capture them when the user exits too.
         val diagnostics = lastPlaybackDiagnosticsForReport
         if (diagnostics.timestampMs > 0L) {

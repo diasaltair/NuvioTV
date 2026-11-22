@@ -100,7 +100,7 @@ class MultiviewPlaybackSession(
 
     private val core = MultiviewSessionCore(
         initialLayout = initialLayout,
-        totalBufferBytes = MultiviewBufferBudget.totalBytes(MemoryBudget.heapMb),
+        totalBufferBytes = MultiviewBufferBudget.totalBytes((Runtime.getRuntime().maxMemory() shr 20)),
         audioFocus = AndroidMultiviewAudioFocus(appContext),
         createPlayer = { _, bufferBytes, changed ->
             AndroidMultiviewPanePlayer(appContext, bufferBytes, changed, autoReconnect, ::switchToBackup)

@@ -110,6 +110,9 @@ internal fun SettingsCategory.searchTitle(): Int = when (this) {
     SettingsCategory.LAYOUT -> R.string.settings_layout
     SettingsCategory.CONTENT_DISCOVERY -> R.string.settings_content_discovery
     SettingsCategory.PLAYBACK -> R.string.settings_playback
+    SettingsCategory.LIVE_TV, SettingsCategory.SIDE_MENU, SettingsCategory.CALENDAR, SettingsCategory.VPN -> R.string.iptv_settings_live_tv // Live TV fork
+    SettingsCategory.ON_DEMAND -> R.string.iptv_settings_on_demand
+    SettingsCategory.SPORTS -> R.string.iptv_settings_live_tv
     SettingsCategory.SCOUT -> R.string.scout_title
     SettingsCategory.INTEGRATION -> R.string.settings_integration
     SettingsCategory.TRACKING -> R.string.settings_tracking_title

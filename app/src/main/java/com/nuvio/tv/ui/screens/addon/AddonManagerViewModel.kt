@@ -95,8 +95,7 @@ class AddonManagerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val healthStore: AddonHealthStore,
     private val homeLiveRows: HomeLiveRows,
-    private val homeRowChoices: HomeRowChoices,
-    @ApplicationContext private val context: Context
+    private val homeRowChoices: HomeRowChoices
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AddonManagerUiState())

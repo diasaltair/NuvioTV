@@ -116,7 +116,7 @@ fun OnDemandHomeScreen(
         com.nuvio.tv.core.player.TrailerPlayerPool(
             context.applicationContext,
             entry.playerSettingsDataStore(),
-            entry.trailerSettingsDataStore()
+            entry.trailerMediaCache()
         )
     }
     androidx.compose.runtime.DisposableEffect(ownPool) { onDispose { runCatching { ownPool.release() } } }
@@ -391,7 +391,7 @@ fun OnDemandHomeScreen(
                     onItemFocus = onItemFocus,
                     catalogSeeAllLabel = "See all",
                     stickyTitle = homeHeader,
-                    onSaveGridFocusState = { vi, vo, _ ->
+                    onSaveGridFocusState = { vi, vo, _, _ ->
                         gridFocusState = gridFocusState.copy(verticalScrollIndex = vi, verticalScrollOffset = vo, hasSavedFocus = true)
                     },
                     onFocusedRowKeyChanged = {},
@@ -402,9 +402,9 @@ fun OnDemandHomeScreen(
                     modernPresentation = modernPresentation,
                     focusState = focusState,
                     // On Demand has no hero enrichment: always empty, as before Nuvio made these State.
-                    enrichingItemId = remember { mutableStateOf<String?>(null) },
-                    enrichedPreviews = remember { mutableStateOf(emptyMap<String, MetaPreview>()) },
-                    failedEnrichmentIds = remember { mutableStateOf(emptySet<String>()) },
+                    enrichingItemId = { null },
+                    enrichedPreviews = { emptyMap<String, MetaPreview>() },
+                    failedEnrichmentIds = { emptySet<String>() },
                     trailerPreviewUrls = trailerUrls,
                     trailerPreviewAudioUrls = trailerAudioUrls,
                     onNavigateToDetail = onNavigateToDetail,
@@ -597,7 +597,7 @@ private fun KindTab(label: String, selected: Boolean, onClick: () -> Unit) {
 @dagger.hilt.InstallIn(dagger.hilt.components.SingletonComponent::class)
 interface OnDemandPlayerEntryPoint {
     fun playerSettingsDataStore(): com.nuvio.tv.data.local.PlayerSettingsDataStore
-    fun trailerSettingsDataStore(): com.nuvio.tv.data.local.TrailerSettingsDataStore
+    fun trailerMediaCache(): com.nuvio.tv.data.trailer.TrailerMediaCache
 }
 
 /**

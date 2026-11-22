@@ -720,10 +720,6 @@ class PlaybackSettingsViewModel @Inject constructor(
         playerSettingsDataStore.setStreamAutoPlayPreferBingeGroupForNextEpisode(enabled)
     }
 
-    suspend fun setStreamListSort(sort: com.nuvio.tv.data.local.StreamListSort) {
-        playerSettingsDataStore.setStreamListSort(sort)
-    }
-
     suspend fun setStreamAutoPlayReuseBingeGroup(enabled: Boolean) {
         playerSettingsDataStore.setStreamAutoPlayReuseBingeGroup(enabled)
     }

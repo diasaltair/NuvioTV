@@ -57,7 +57,7 @@ object QualityRules {
     )
 
     private val lowQualitySet: Set<String> by lazy {
-        TrashReleaseGroups.LOW_QUALITY_GROUPS.mapTo(HashSet()) { it.lowercase() }
+        TrashReleaseGroups.EXCLUDED_GROUPS.mapTo(HashSet()) { it.lowercase() }
     }
 
     fun isLowQualityGroup(group: String): Boolean = group.isNotEmpty() && group.lowercase() in lowQualitySet

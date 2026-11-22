@@ -58,7 +58,7 @@ interface TmdbApi {
 
     /** Live TV fork: On Demand titles looked up by name (their artwork and original language). */
     @GET("search/movie")
-    suspend fun searchMovies(
+    suspend fun searchMoviesForOnDemand(
         @Query("api_key") apiKey: String,
         @Query("query") query: String,
         @Query("year") year: Int? = null,
@@ -66,7 +66,7 @@ interface TmdbApi {
     ): Response<TmdbRecommendationsResponse>
 
     @GET("search/tv")
-    suspend fun searchTv(
+    suspend fun searchTvForOnDemand(
         @Query("api_key") apiKey: String,
         @Query("query") query: String,
         @Query("first_air_date_year") year: Int? = null,

@@ -2619,8 +2619,9 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     videoId = nextVideo.id,
                     season = nextVideo.season,
                     episode = nextVideo.episode,
-                    title = navigationArgs.contentName ?: navigationArgs.title,
-                    year = navigationArgs.year
+                    priorityBingeGroup = currentStreamBingeGroup,
+                    preferredPluginOnly = continuingPlugin,
+                    continuePluginOnly = continuingPlugin
                 ).collect { result ->
                     when (result) {
                         is NetworkResult.Success -> {

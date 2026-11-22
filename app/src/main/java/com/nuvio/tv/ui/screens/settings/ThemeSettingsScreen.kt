@@ -544,8 +544,7 @@ fun ThemeSettingsContent(
                 viewModel.onEvent(ThemeSettingsEvent.DismissAppIconFailure)
                 appIconLastPicked = null
                 showAppIconDialog = false
-            },
-            onToggleIptv = { viewModel.setIptvBranding(it) }
+            }
         )
     }
 

@@ -55,7 +55,6 @@ fun PosterOptionsDialog(
     scoutAliasId: String? = null,
     onMoreLike: (() -> Unit)? = null,
     mixItem: com.nuvio.tv.domain.model.MetaPreview? = null,
-    onToggleWatched: () -> Unit,
     /** Live TV fork: the Calendar's bell for a show ("Ring the bell…"), when offered. */
     bellLabel: String? = null,
     onBell: () -> Unit = {}
@@ -96,10 +95,10 @@ fun PosterOptionsDialog(
         }
 
         if (bellLabel != null) {
-            Button(
+            androidx.tv.material3.Button(
                 onClick = onBell,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.colors(
+                colors = androidx.tv.material3.ButtonDefaults.colors(
                     containerColor = NuvioTheme.colors.BackgroundCard,
                     contentColor = NuvioTheme.colors.TextPrimary
                 )

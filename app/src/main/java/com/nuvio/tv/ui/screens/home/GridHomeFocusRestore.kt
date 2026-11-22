@@ -48,6 +48,7 @@ internal fun gridItemsWithStableKeys(gridItems: List<GridItem>): List<Pair<GridI
                 "${base}_$count"
             }
             is GridItem.SeeAll -> "see_all_${item.addonBaseUrl.hashCode()}_${item.catalogId}_${item.addonId}_${item.type}"
+            is GridItem.LiveRow -> item.key // Live TV fork
             is GridItem.CollectionHeader -> "col_header_${item.collectionId}"
             is GridItem.CollectionFolder -> "col_folder_${item.collectionId}_${item.folder.id}"
         }

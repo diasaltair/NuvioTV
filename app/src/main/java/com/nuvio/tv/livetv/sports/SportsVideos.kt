@@ -1,7 +1,6 @@
 package com.nuvio.tv.livetv.sports
 
 import com.nuvio.tv.core.build.AppFeaturePolicy
-import com.nuvio.tv.core.player.TrailerVideoPolicy
 import com.nuvio.tv.data.trailer.InAppYouTubeExtractor
 import com.nuvio.tv.livetv.data.ForkHttp
 import com.nuvio.tv.livetv.model.LiveChannel
@@ -278,7 +277,7 @@ internal class SportsVideos(
                 url.startsWith(BRIGHTCOVE_SCHEME) -> brightcove(url.removePrefix(BRIGHTCOVE_SCHEME))
                 // The picture and the sound as two whole files, like trailers: skipping around
                 // works in them. YouTube's streamed (HLS) version got stuck loading after a skip.
-                youTubeId(url) != null -> youTube.extractPlaybackSource(url, TrailerVideoPolicy.MAX_TRAILER_HEIGHT_WITHOUT_4K)?.let { s ->
+                youTubeId(url) != null -> youTube.extractPlaybackSource(url)?.let { s ->
                     s.audioUrl?.takeIf { it.isNotBlank() }?.let { rememberSound(s.videoUrl, it) }
                     s.videoUrl
                 }

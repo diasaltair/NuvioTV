@@ -170,7 +170,7 @@ class OnDemandLanguages @Inject constructor(
             var best: com.nuvio.tv.data.remote.api.TmdbRecommendationResult? = null
             for (title in listOfNotNull(clean, OnDemandDatabase.withoutTrailingYear(clean)).distinct()) {
                 // No year in the search itself: the provider's year is often a year off TMDB's (checked below).
-                val res = if (series) tmdbApi.searchTv(KEY, title) else tmdbApi.searchMovies(KEY, title)
+                val res = if (series) tmdbApi.searchTvForOnDemand(KEY, title) else tmdbApi.searchMoviesForOnDemand(KEY, title)
                 if (!res.isSuccessful) {
                     if (res.code() in 400..499) continue
                     return@withPermit null

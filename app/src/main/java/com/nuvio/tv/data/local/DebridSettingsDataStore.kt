@@ -423,7 +423,6 @@ class DebridSettingsDataStore @Inject constructor(
         val excludedReleaseGroupsValue: List<String>? = excludedReleaseGroups
         val preferredReleaseGroupsValue: List<String>? = preferredReleaseGroups
         val sortCriteriaValue: List<DebridStreamSortCriterion>? = sortCriteria
-        val preferredReleaseGroupsValue: List<String>? = preferredReleaseGroups
         return copy(
             maxResults = normalizeDebridStreamMaxResults(maxResults),
             maxPerResolution = maxPerResolution.coerceIn(0, 100),

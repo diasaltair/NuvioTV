@@ -83,7 +83,6 @@ import com.nuvio.tv.ui.components.NuvioDialog
 import com.nuvio.tv.livetv.model.effectiveGuideSize
 import com.nuvio.tv.ui.screens.collection.NuvioTextField
 import com.nuvio.tv.ui.theme.NuvioTheme
-import com.nuvio.tv.ui.theme.brandWordmarkResource
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -2694,7 +2693,7 @@ private fun BackupPhoneDialog(
     val closeFocus = remember { FocusRequester() }
     var handle by remember { mutableStateOf<com.nuvio.tv.livetv.crash.BackupPhoneServer.Handle?>(null) }
     var noNetwork by remember { mutableStateOf(false) }
-    val logoRes = com.nuvio.tv.livetv.branding.LiveTvBranding.iptvWordmark(NuvioTheme.currentTheme.brandWordmarkResource)
+    val logoRes = com.nuvio.tv.R.drawable.livetv_wordmark_iptv
     val accentArgb = NuvioTheme.colors.Secondary.toArgb()
     val tvName = remember(context) {
         runCatching { android.provider.Settings.Global.getString(context.contentResolver, "device_name") }
@@ -2857,7 +2856,7 @@ private fun AddFromPhoneDialog(viewModel: LiveTvSettingsViewModel, onDismiss: ()
     var handle by remember { mutableStateOf<com.nuvio.tv.livetv.crash.AddFromPhoneServer.Handle?>(null) }
     var noNetwork by remember { mutableStateOf(false) }
     var added by remember { mutableStateOf(listOf<String>()) }
-    val logoRes = com.nuvio.tv.livetv.branding.LiveTvBranding.iptvWordmark(NuvioTheme.currentTheme.brandWordmarkResource)
+    val logoRes = com.nuvio.tv.R.drawable.livetv_wordmark_iptv
     val accentArgb = NuvioTheme.colors.Secondary.toArgb()
     val phoneLocale = context.settingsLocale
     val tvName = remember(context) {

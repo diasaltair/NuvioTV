@@ -20,8 +20,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.nuvio.tv.ui.theme.brandWordmarkResource
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
@@ -103,23 +101,12 @@ fun StartupSplashScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Live TV fork: "Nuvio + IPTV" logo (in the theme's colors) and what the app does.
             BrandWordmark(
                 modifier = Modifier.height(48.dp),
-                contentDescription = com.nuvio.tv.livetv.branding.LiveTvBranding.APP_NAME,
-                drawableOverride = com.nuvio.tv.livetv.branding.LiveTvBranding.iptvWordmark(
-                    brandWordmarkRes ?: NuvioTheme.currentTheme.brandWordmarkResource
-                )
+                contentDescription = stringResource(R.string.cd_nuvio_logo),
+                drawableOverride = brandWordmarkRes
             )
-            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(14.dp))
-            androidx.tv.material3.Text(
-                text = com.nuvio.tv.livetv.branding.LiveTvBranding.TAGLINE,
-                color = Color(0xFFC8CDD7).copy(alpha = 0.85f),
-                fontSize = 16.sp
-            )
-            // Clear room between the tagline and the loading circle (they never overlap: they're
-            // stacked, and this gap keeps them visually apart too).
-            Spacer(modifier = Modifier.height(56.dp))
+            Spacer(modifier = Modifier.height(NuvioTheme.spacing.xxl))
             LoadingIndicator(modifier = Modifier.size(NuvioTheme.spacing.xxxl))
         }
     }

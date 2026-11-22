@@ -253,6 +253,7 @@ object TvSetup {
             Dv7HandlingMode.DV81_LIBDOVI -> R.string.tv_setup_dv7_convert
             Dv7HandlingMode.STRIP_DV -> R.string.tv_setup_dv7_strip
             Dv7HandlingMode.OFF -> R.string.tv_setup_off
+            else -> R.string.tv_setup_auto
         }
     )
 }

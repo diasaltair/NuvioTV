@@ -136,7 +136,7 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     override fun onCreate() {
         // Before super.onCreate(): Hilt creates injected services there, and the budget is read once.
-        MemoryBudget.init(this)
+        // Arc sizes memory itself; NuvioPlusIPTV's MemoryBudget.init is not used here.
         com.nuvio.tv.core.player.PlaybackDeviceSupport.init(this)
         com.nuvio.tv.core.util.StartupLatencyTrace.coldOnce("app_create")
         com.nuvio.tv.core.image.PosterUpdates.started(System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
