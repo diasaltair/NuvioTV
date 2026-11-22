@@ -84,7 +84,7 @@ internal fun PlayerRuntimeController.tryFallbackToNextSourceAfterError(
 ): Boolean {
     if (currentStreamUrl == sourceFallbackExhaustedUrl) return false
     if (!streamAutoPlayFallbackActive || autoSwitchInternalPlayerOnErrorEnabled) return false
-    if (hasRenderedFirstFrame) return false
+    if (hasRenderedFirstFrame && !tunneledFirstFrameAssumed) return false
     val failedUrl = currentStreamUrl
     if (failedUrl.isBlank() || failedUrl != autoSelectedSourceUrl) return false
     if (sourceFallbackJob?.isActive == true) return true
