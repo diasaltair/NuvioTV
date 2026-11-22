@@ -228,11 +228,6 @@ internal class IecPassthroughAudioSink(
     override fun configure(inputFormat: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
         attachReadyListener()
         deliverIecReadyIfProbeAlreadySucceeded()
-        if (com.nuvio.tv.core.formatcheck.FormatCheckSession.active && mode != Mode.FORWARD &&
-            iecTrack != null && inputFormat == configuredFormat
-        ) {
-            return
-        }
         configuredFormat = inputFormat
         configuredBufferSize = specifiedBufferSize
         configuredOutputChannels = outputChannels
