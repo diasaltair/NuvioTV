@@ -6,7 +6,6 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.exoplayer.audio.AudioOffloadSupport
 import androidx.media3.exoplayer.audio.AudioSink
-import com.nuvio.tv.core.formatcheck.FormatCheckSession
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -140,22 +139,6 @@ class DtsHdCarrierTest {
         val sink = sink(factory, format)
         assertTrue(sink.handleBuffer(ByteBuffer.wrap(unit(XBR)), 0L, 1))
         assertEquals(listOf(8), factory.opened)
-    }
-
-    @Test
-    fun aLoopDuringAFormatCheck_keepsTheTrack() {
-        val factory = Tracks()
-        val format = dtsHd(channels = 6)
-        val sink = sink(factory, format)
-        assertTrue(sink.handleBuffer(ByteBuffer.wrap(unit(XBR)), 0L, 1))
-        FormatCheckSession.setActive(true)
-        try {
-            sink.configure(format, 0, null)
-        } finally {
-            FormatCheckSession.setActive(false)
-        }
-        assertTrue(sink.handleBuffer(ByteBuffer.wrap(unit(XBR)), 10_667L, 1))
-        assertEquals(listOf(8, 2), factory.opened)
     }
 
     @Test

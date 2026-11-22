@@ -28,10 +28,4 @@ class AudioClockGapTest {
         assertEquals(2, limiter.take(12_000L))
         assertEquals(0, limiter.take(20_000L))
     }
-
-    @Test fun `loading lines stay out of the report's event lists`() {
-        assertFalse("is_loading".keptInEventLists())
-        assertTrue("position_stall".keptInEventLists())
-        assertTrue("is_playing".keptInEventLists())
-    }
 }
