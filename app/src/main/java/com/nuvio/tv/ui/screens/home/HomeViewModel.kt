@@ -102,12 +102,7 @@ class HomeViewModel @Inject constructor(
     internal val calendarComingUp: CalendarComingUpSource? = null,
     internal val builtInCatalogs: com.nuvio.tv.core.catalog.BuiltInCatalogs = com.nuvio.tv.core.catalog.BuiltInCatalogs.None,
     // Live TV fork: Live TV and Sports rows added to Home.
-    internal val homeLiveRows: com.nuvio.tv.livetv.home.HomeLiveRows,
-    internal val metaPreviewEnricher: MetaPreviewEnricher = MetaPreviewEnricher(
-        tmdbService,
-        tmdbMetadataService,
-        mdbListRepository
-    )
+    internal val homeLiveRows: com.nuvio.tv.livetv.home.HomeLiveRows
 ) : ViewModel() {
     companion object {
         internal const val TAG = "HomeViewModel"
