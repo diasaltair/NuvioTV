@@ -2743,14 +2743,9 @@
     <string name="profile_default_name">Профіль %1$d</string>
     <string name="detail_tmdb_fallback_title">TMDB %1$d</string>
     <string name="collections_editor_tmdb_collection_fallback">Колекція TMDB %1$d</string>
-
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">Ряди головного екрана</string>
+    <string name="settings_home_screen_rows_subtitle">Виберіть порядок рядів на головному екрані</string>
     <plurals name="cw_episodes_left">
-        <item quantity="one">Ще %d</item>
-        <item quantity="few">Ще %d</item>
-        <item quantity="many">Ще %d</item>
-        <item quantity="other">Ще %d</item>
-    </plurals>
     <string name="cw_no_artwork">Немає зображення</string>
     <string name="detail_eyebrow_episodes">Епізоди</string>
     <string name="detail_section_parental_guide">Батьківський гід</string>
@@ -2764,11 +2759,6 @@
     <string name="ambient_mode_timeout">Запускати через</string>
     <string name="ambient_mode_timeout_subtitle">Скільки чекати перед запуском Ambient-режиму</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="one">%1$d хвилина</item>
-        <item quantity="few">%1$d хвилини</item>
-        <item quantity="many">%1$d хвилин</item>
-        <item quantity="other">%1$d хвилини</item>
-    </plurals>
     <string name="ambient_mode_catalogs">Каталоги</string>
     <string name="ambient_mode_catalogs_subtitle">Оберіть до 3 каталогів, з яких брати зображення</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Оберіть до 3 каталогів</string>
@@ -3852,17 +3842,7 @@
     <string name="report_sent_no_phone">Дякую за звіт. Arc - аматорський проєкт, тому не на кожен звіт надходить відповідь.</string>
     <string name="report_sent_back">Повернутися до перегляду</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Виберіть усе, що підходить. Arc зберіг останню хвилину.</item>
-        <item quantity="few">Виберіть усе, що підходить. Arc зберіг останні %1$d хвилини.</item>
-        <item quantity="many">Виберіть усе, що підходить. Arc зберіг останні %1$d хвилин.</item>
-        <item quantity="other">Виберіть усе, що підходить. Arc зберіг останні %1$d хвилини.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Налаштування плеєра та остання хвилина</item>
-        <item quantity="few">Налаштування плеєра та останні %1$d хвилини</item>
-        <item quantity="many">Налаштування плеєра та останні %1$d хвилин</item>
-        <item quantity="other">Налаштування плеєра та останні %1$d хвилини</item>
-    </plurals>
     <string name="report_settings_subtitle">Розкажіть, що пішло не так або що має вміти Arc</string>
     <string name="report_group_choose">Про що ви хочете повідомити?</string>
     <string name="report_group_options">Параметри</string>
@@ -3915,11 +3895,6 @@
     <string name="report_sent_kind_bug">Щось не працює</string>
     <string name="report_sent_kind_idea">Ідея або побажання</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d новий</item>
-        <item quantity="few">%1$d нові</item>
-        <item quantity="many">%1$d нових</item>
-        <item quantity="other">%1$d нового</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Перевіряється раз на день. Arc - аматорський проєкт, тому не на кожен звіт надходить відповідь.</string>
     <string name="report_my_reports_hint_off">Перевірку вимкнено. Увімкніть Перевіряти мої звіти, щоб бачити, що відбувається з вашими звітами.</string>
@@ -3942,11 +3917,6 @@
     <string name="report_ready_follow_off">Щоб стежити за цим звітом, відскануйте код на наступному екрані телефоном.</string>
     <string name="report_notice_title">Є новини щодо вашого звіту</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">Є новини щодо %1$d вашого звіту</item>
-        <item quantity="few">Є новини щодо %1$d ваших звітів</item>
-        <item quantity="many">Є новини щодо %1$d ваших звітів</item>
-        <item quantity="other">Є новини щодо %1$d ваших звітів</item>
-    </plurals>
     <string name="report_notice_one">%1$s, надіслано %2$s: %3$s.</string>
     <string name="report_notice_many">Відкрийте Мої звіти, щоб побачити зміни.</string>
     <string name="report_notice_open">Відкрити Мої звіти</string>
@@ -3957,19 +3927,9 @@
     <string name="report_stop_recording">Зупинити запис</string>
     <string name="report_recording_pill">Запис %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Запис %1$s · %2$d позначка</item>
-        <item quantity="few">Запис %1$s · %2$d позначки</item>
-        <item quantity="many">Запис %1$s · %2$d позначок</item>
-        <item quantity="other">Запис %1$s · %2$d позначки</item>
-    </plurals>
     <string name="report_recording_no_space">Недостатньо вільного місця для запису</string>
     <string name="report_item_recording">Запис, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d позначка. Лише дані, без звуку й картинки.</item>
-        <item quantity="few">%d позначки. Лише дані, без звуку й картинки.</item>
-        <item quantity="many">%d позначок. Лише дані, без звуку й картинки.</item>
-        <item quantity="other">%d позначки. Лише дані, без звуку й картинки.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Повідомити про проблему / позначити</string>
     <string name="remote_buttons_job_report_mark_desc">Відкриває панель повідомлення. Під час запису додає позначку.</string>
     <string name="display_mode_measured">Виміряно</string>

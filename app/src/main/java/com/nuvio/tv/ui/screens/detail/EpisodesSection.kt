@@ -456,6 +456,10 @@ fun EpisodesRow(
 ) {
     val dedupedEpisodes = remember(episodes) { episodes.distinctBy { it.id } }
     var optionsEpisode by remember { mutableStateOf<Video?>(null) }
+    // Live TV fork: Record and the Live TV options for the episode whose menu is open.
+    val liveTvLines = com.nuvio.tv.livetv.calendar.rememberEpisodeLiveTv(
+        optionsEpisode?.id, optionsEpisode?.season, optionsEpisode?.episode
+    )
     val isOverlayOpen = optionsEpisode != null
     val originalMetrics = rememberEpisodeCardMetrics(posterCardCornerRadiusDp)
     val compactEpisodes = com.nuvio.tv.ui.v2.appearance.LocalV2Appearance.current != null
@@ -670,6 +674,7 @@ fun EpisodesRow(
                 adjacentEpisode(dedupedEpisodes, selectedEpisode, step)?.let { optionsEpisode = it }
             },
             isPlayEnabled = canPlayEpisode(selectedEpisode),
+            extraActions = liveTvLines.map { (label, act) -> label to { optionsEpisode = null; act() } },
             onPlay = {
                 onEpisodeClick(selectedEpisode)
                 optionsEpisode = null
@@ -1378,6 +1383,8 @@ private fun formatEpisodeCardDate(isoDate: String): String {
     val bestPattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "dMMMMy")
     val formatter = java.time.format.DateTimeFormatter.ofPattern(bestPattern, locale)
     val localDate = parseEpisodeReleaseLocalDate(isoDate) ?: return ""
+    // Live TV fork: episodes not out yet say when they air (instead of looking like they're missing).
+    if (localDate.isAfter(java.time.LocalDate.now())) return "Airs " + formatter.format(localDate)
     return formatter.format(localDate)
 }
 

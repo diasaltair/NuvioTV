@@ -1655,11 +1655,9 @@
     <string name="collections_tab_all">Alla</string>
     <string name="collections_tab_combined">Kombinerat</string>
 
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">Rader på startskärmen</string>
+    <string name="settings_home_screen_rows_subtitle">Välj ordningen på raderna på startskärmen</string>
     <plurals name="cw_episodes_left">
-        <item quantity="one">%d kvar</item>
-        <item quantity="other">%d kvar</item>
-    </plurals>
     <string name="cw_no_artwork">Ingen bild</string>
     <string name="detail_eyebrow_episodes">Avsnitt</string>
     <string name="detail_section_parental_guide">Föräldraguide</string>
@@ -1674,9 +1672,6 @@
     <string name="ambient_mode_timeout">Starta efter</string>
     <string name="ambient_mode_timeout_subtitle">Hur länge det dröjer innan Ambient-läget startar</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="one">%1$d minut</item>
-        <item quantity="other">%1$d minuter</item>
-    </plurals>
     <string name="ambient_mode_catalogs">Kataloger</string>
     <string name="ambient_mode_catalogs_subtitle">Välj upp till 3 kataloger att hämta bilder från</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Välj upp till 3 kataloger</string>
@@ -2769,13 +2764,7 @@
     <string name="report_sent_no_phone">Tack för rapporten. Arc är ett hobbyprojekt, så inte alla rapporter får svar.</string>
     <string name="report_sent_back">Tillbaka till uppspelningen</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Välj allt som stämmer. Arc har sparat den senaste minuten.</item>
-        <item quantity="other">Välj allt som stämmer. Arc har sparat de senaste %1$d minuterna.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Spelarinställningar och den senaste minuten</item>
-        <item quantity="other">Spelarinställningar och de senaste %1$d minuterna</item>
-    </plurals>
     <string name="report_settings_subtitle">Berätta vad som gick fel eller vad du vill att Arc ska kunna</string>
     <string name="report_group_choose">Vad vill du rapportera?</string>
     <string name="report_group_options">Alternativ</string>
@@ -2828,9 +2817,6 @@
     <string name="report_sent_kind_bug">Något fungerar inte</string>
     <string name="report_sent_kind_idea">Idé eller önskemål</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d ny</item>
-        <item quantity="other">%1$d nya</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Kontrolleras en gång om dagen. Arc är ett hobbyprojekt, så inte alla rapporter får svar.</string>
     <string name="report_my_reports_hint_off">Kontrollen är av. Slå på Kontrollera mina rapporter för att se vad som händer med dina rapporter.</string>
@@ -2853,9 +2839,6 @@
     <string name="report_ready_follow_off">Skanna koden på nästa skärm med telefonen för att följa den här rapporten.</string>
     <string name="report_notice_title">Det finns nytt om din rapport</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">Det finns nytt om %1$d av dina rapporter</item>
-        <item quantity="other">Det finns nytt om %1$d av dina rapporter</item>
-    </plurals>
     <string name="report_notice_one">%1$s, skickad %2$s: %3$s.</string>
     <string name="report_notice_many">Öppna Mina rapporter för att se vad som har ändrats.</string>
     <string name="report_notice_open">Öppna Mina rapporter</string>
@@ -2866,15 +2849,9 @@
     <string name="report_stop_recording">Stoppa inspelningen</string>
     <string name="report_recording_pill">Inspelning %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Inspelning %1$s · %2$d markering</item>
-        <item quantity="other">Inspelning %1$s · %2$d markeringar</item>
-    </plurals>
     <string name="report_recording_no_space">Inte tillräckligt med ledigt utrymme för inspelning</string>
     <string name="report_item_recording">Inspelning, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d markering. Bara värden, aldrig ljud eller bild.</item>
-        <item quantity="other">%d markeringar. Bara värden, aldrig ljud eller bild.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Rapportera ett problem / markera</string>
     <string name="remote_buttons_job_report_mark_desc">Öppnar rapportpanelen. Under inspelning läggs en markering till.</string>
     <string name="display_mode_measured">Uppmätt</string>

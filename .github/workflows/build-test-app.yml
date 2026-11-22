@@ -1,0 +1,25 @@
+name: Build Test App
+
+# Run it by hand from the Actions tab. The steps live in test-app-steps.yml and always come from the
+# dev branch, so it works the same whichever branch "Use workflow from" is set to.
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What changed (shown in the test app's update prompt; blank = the last commit's title)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: homelessbrian/NuvioPlusIPTV/.github/workflows/test-app-steps.yml@dev
+    with:
+      notes: ${{ inputs.notes }}
+    secrets: inherit

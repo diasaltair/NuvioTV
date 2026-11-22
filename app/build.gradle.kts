@@ -197,7 +197,7 @@ android {
         buildConfigField("String", "GITHUB_OWNER", "\"ysosrs123\"")
         buildConfigField("String", "GITHUB_REPO", "\"NuvioTV-Fork\"")
         buildConfigField("String", "GITHUB_REPO_NEW_NAME", "\"Nuvio-Arc\"")
-        buildConfigField("boolean", "UPDATE_CHECK_ENABLED", "true")
+        buildConfigField("boolean", "UPDATE_CHECK_ENABLED", "false")
     }
 
     flavorDimensions += "distribution"
@@ -310,7 +310,10 @@ android {
 
     splits {
         abi {
-            isEnable = !buildingAppBundle
+            // Live TV fork: test builds are one APK for every device (no per-processor copies),
+            // which is all a test needs and builds quicker.
+            isEnable = !buildingAppBundle &&
+                (findProperty("livetvTestBuild") as String?)?.toBoolean() != true
             reset()
             include("armeabi-v7a", "arm64-v8a")
             isUniversalApk = false
@@ -327,13 +330,13 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
     }
     kotlin {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
     buildFeatures {
@@ -369,7 +372,66 @@ android {
     }
 }
 
+// Live TV fork versioning. Each build's versionCode is Nuvio's code x 100 plus a fork build
+// number, so fork updates released between Nuvio versions install as normal upgrades.
+// The release workflow passes -PlivetvBuildNumber and -PlivetvVersionName.
+// Live TV fork: Google Drive sync (OAuth client of type "TVs and Limited Input devices").
+android.defaultConfig.buildConfigField(
+    "String", "GOOGLE_DRIVE_CLIENT_ID", "\"${localProperties.getProperty("GOOGLE_DRIVE_CLIENT_ID", "")}\""
+)
+android.defaultConfig.buildConfigField(
+    "String", "GOOGLE_DRIVE_CLIENT_SECRET", "\"${localProperties.getProperty("GOOGLE_DRIVE_CLIENT_SECRET", "")}\""
+)
+
+// The Nuvio version this fork is built on ("1.1.0-beta.4"), before the fork's own build number is
+// added: addons and their proxies see exactly what official Nuvio sends ("Nuvio/1.1.0-beta.4").
+android.defaultConfig.buildConfigField(
+    "String", "NUVIO_BASE_VERSION", "\"${android.defaultConfig.versionName ?: ""}\""
+)
+
+val livetvBuildNumber = (findProperty("livetvBuildNumber") as String?)?.toIntOrNull() ?: 0
+android.defaultConfig.versionCode = (android.defaultConfig.versionCode ?: 1) * 100 + livetvBuildNumber
+(findProperty("livetvVersionName") as String?)?.takeIf { it.isNotBlank() }?.let {
+    android.defaultConfig.versionName = it
+}
+
+// Test builds (-PlivetvTestBuild=true) are their own app ("Nuvio + IPTV Test") on their own update track.
+// Version code: 200000000 + minutes since 2026, so every new test build is newer than the last.
+// Version name: "1.1.0-test.<minutes>+beta.9" (the Nuvio base after the "+"), which the updater compares
+// by the build number even when the Nuvio base changes.
+// They update from the tester-only service, using the key in the LIVETV_TESTER_KEY secret (never in the code),
+// and show a TEST band on their icon and banner (src/livetvTest/res).
+val livetvIsTestBuild = (findProperty("livetvTestBuild") as String?)?.toBoolean() == true
+val livetvTesterKey = if (livetvIsTestBuild) {
+    (System.getenv("LIVETV_TESTER_KEY") ?: localProperties.getProperty("LIVETV_TESTER_KEY", "")).trim()
+} else ""
+// Our own builds carry the app key (GitHub secret LIVETV_APP_KEY, never in the code), which our
+// livetv-cloud service asks for before it hands out cloud sync and the sports files. Builds
+// without it fall back to the old public addresses.
+val livetvAppKey = (System.getenv("LIVETV_APP_KEY") ?: localProperties.getProperty("LIVETV_APP_KEY", "")).trim()
+android.defaultConfig.buildConfigField("String", "LIVETV_APP_KEY", buildConfigString(livetvAppKey))
+android.defaultConfig.buildConfigField("String", "NUVIO_CHANNEL", "\"${if (livetvIsTestBuild) "test" else "stable"}\"")
+android.defaultConfig.buildConfigField("String", "TEST_UPDATES_URL", "\"https://livetv-cloud.nuvioplusiptv.workers.dev\"")
+android.defaultConfig.buildConfigField("String", "TESTER_KEY", buildConfigString(livetvTesterKey))
+if (livetvIsTestBuild) {
+    // 1767225600 = 2026-01-01 00:00 UTC, in seconds.
+    val minutesSince2026: Int = ((System.currentTimeMillis() / 1000L - 1767225600L) / 60L).toInt()
+    android.defaultConfig.versionCode = 200_000_000 + minutesSince2026
+    if ((findProperty("livetvVersionName") as String?).isNullOrBlank()) {
+        val base = android.defaultConfig.versionName ?: "0.0.0"
+        val core = base.substringBefore('-').substringBefore('+')
+        val nuvioPart = base.substringAfter('-', "").substringBefore('+')
+        android.defaultConfig.versionName = "$core-test.$minutesSince2026" + if (nuvioPart.isNotEmpty()) "+$nuvioPart" else ""
+    }
+    android.sourceSets.getByName("release").res.srcDir("src/livetvTest/res")
+}
+
 androidComponents {
+    // Our fork's test builds update the app already on the Mi Box (com.nuviodebug.com) in place.
+    onVariants(selector().withBuildType("debug")) { variant ->
+        val isPlaystore = variant.productFlavors.any { it.second == "playstore" }
+        variant.applicationId.set(if (isPlaystore) "com.nuvio.appdebug" else "com.nuviodebug.com")
+    }
     // Only the full flavor ships the in-app updater.
     onVariants(selector().withFlavor("distribution" to "full")) { variant ->
         // AGP makes no ART profile for debuggable variants, and ART ignores .dm files for them anyway.
@@ -434,6 +496,8 @@ baselineProfile {
 
 
 dependencies {
+    implementation(project(":vpn-android"))
+    implementation(project(":vpn-core"))
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     val composeBom = platform("androidx.compose:compose-bom:2026.05.01")
 
@@ -472,6 +536,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.okhttp.dnsoverhttps)
+    // Live TV: recording to a network folder (NAS / shared folder on a computer)
+    implementation(libs.smbj)
     implementation(libs.moshi)
     ksp(libs.moshi.codegen)
 
@@ -601,7 +667,9 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20250517")
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation(kotlin("test-junit"))
+        testImplementation("org.json:json:20250517")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     testImplementation("io.mockk:mockk:1.13.12")
     testImplementation("com.squareup.okhttp3:mockwebserver:5.3.2")

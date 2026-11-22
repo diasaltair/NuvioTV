@@ -3406,11 +3406,9 @@
     <string name="stream_resume_from_time">Hervatten vanaf %1$s</string>
     <string name="stream_resume_from_percent">Hervatten vanaf %1$d%%</string>
 
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">Rijen op startscherm</string>
+    <string name="settings_home_screen_rows_subtitle">Kies de volgorde van de rijen op je startscherm</string>
     <plurals name="cw_episodes_left">
-        <item quantity="one">Nog %d</item>
-        <item quantity="other">Nog %d</item>
-    </plurals>
     <string name="cw_no_artwork">Geen afbeelding</string>
     <string name="detail_eyebrow_episodes">Afleveringen</string>
     <string name="detail_section_parental_guide">Ouderlijk advies</string>
@@ -4410,13 +4408,7 @@
     <string name="report_sent_no_phone">Bedankt voor je melding. Arc is een hobbyproject, dus niet elke melding krijgt een antwoord.</string>
     <string name="report_sent_back">Terug naar de video</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Kies alles wat van toepassing is. Arc heeft de laatste minuut bewaard.</item>
-        <item quantity="other">Kies alles wat van toepassing is. Arc heeft de laatste %1$d minuten bewaard.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Spelerinstellingen en de laatste minuut</item>
-        <item quantity="other">Spelerinstellingen en de laatste %1$d minuten</item>
-    </plurals>
     <string name="report_settings_subtitle">Vertel wat er misging of wat je wilt dat Arc doet</string>
     <string name="report_group_choose">Wat wil je melden?</string>
     <string name="report_group_options">Opties</string>
@@ -4469,9 +4461,6 @@
     <string name="report_sent_kind_bug">Iets werkt niet</string>
     <string name="report_sent_kind_idea">Idee of verzoek</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d nieuw</item>
-        <item quantity="other">%1$d nieuw</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Eén keer per dag gecontroleerd. Arc is een hobbyproject, dus niet elke melding krijgt een antwoord.</string>
     <string name="report_my_reports_hint_off">Controleren staat uit. Zet Mijn meldingen controleren aan om te zien wat er met je meldingen gebeurt.</string>
@@ -4494,9 +4483,6 @@
     <string name="report_ready_follow_off">Scan de code op het volgende scherm met je telefoon om deze melding te volgen.</string>
     <string name="report_notice_title">Er is nieuws over je melding</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">Er is nieuws over %1$d van je meldingen</item>
-        <item quantity="other">Er is nieuws over %1$d van je meldingen</item>
-    </plurals>
     <string name="report_notice_one">%1$s, verzonden op %2$s: %3$s.</string>
     <string name="report_notice_many">Open Mijn meldingen om te zien wat er veranderd is.</string>
     <string name="report_notice_open">Mijn meldingen openen</string>
@@ -4507,15 +4493,9 @@
     <string name="report_stop_recording">Opname stoppen</string>
     <string name="report_recording_pill">Opname %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Opname %1$s · %2$d markering</item>
-        <item quantity="other">Opname %1$s · %2$d markeringen</item>
-    </plurals>
     <string name="report_recording_no_space">Niet genoeg vrije ruimte om op te nemen</string>
     <string name="report_item_recording">Opname, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d markering. Alleen waarden, nooit geluid of beeld.</item>
-        <item quantity="other">%d markeringen. Alleen waarden, nooit geluid of beeld.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Probleem melden / markeren</string>
     <string name="remote_buttons_job_report_mark_desc">Opent het meldpaneel. Tijdens de opname voegt het een markering toe.</string>
     <string name="display_mode_measured">Gemeten</string>

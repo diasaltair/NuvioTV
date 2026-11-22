@@ -628,6 +628,35 @@ private sealed interface ExternalMetaOutcome {
 private fun HomeViewModel.externalEnrichmentOutstanding(itemId: String): Boolean =
     externalMetaPrefetchEnabled && itemId !in prefetchedExternalMetaIds
 
+/**
+ * Live TV fork: holds the hero for an On Demand card until On Demand knows which title it is
+ * (usually a second or two), then runs the normal look-up. Nothing is remembered as "no
+ * details" meanwhile, so coming back to the card always ends with its full details.
+ */
+private fun HomeViewModel.waitForVodMatch(item: MetaPreview) {
+    setEnrichingItemId(item.id)
+    vodMatchWaitJob = viewModelScope.launch {
+        repeat(VOD_MATCH_WAIT_TRIES) {
+            delay(VOD_MATCH_WAIT_STEP_MS)
+            if (com.nuvio.tv.livetv.ondemand.VodHomeIds.tmdbLookupId(item.id) != null) {
+                onItemFocusPipeline(item)
+                return@launch
+            }
+        }
+        // Not matched (only your provider has it): the card's own details, tried again next time.
+        if (_enrichingItemId.value == item.id) setEnrichingItemId(null)
+    }
+}
+
+private const val VOD_MATCH_WAIT_TRIES = 20
+private const val VOD_MATCH_WAIT_STEP_MS = 400L
+
+/** Live TV fork: an On Demand card on Home (its rows aren't in the catalog index). */
+internal fun HomeViewModel.findVodCard(itemId: String): MetaPreview? {
+    if (com.nuvio.tv.livetv.ondemand.VodHomeIds.uidOf(itemId) == null) return null
+    return vodRowsCache.values.firstNotNullOfOrNull { row -> row.items.firstOrNull { it.id == itemId } }
+}
+
 /** The id to ask addons for, or null when none would know it and TMDB already fills the hero. */
 internal suspend fun addonLookupId(
     item: MetaPreview,
@@ -674,6 +703,17 @@ internal fun HomeViewModel.onItemFocusPipeline(item: MetaPreview) {
     if (startupGracePeriodActive) {
         deferredEnrichItem = item
         return
+    }
+    vodMatchWaitJob?.cancel()
+    // Live TV fork: an On Demand card. On Demand is asked to match it right away; until it knows
+    // which title the card is, a look-up here would find nothing and be remembered as nothing,
+    // so the hero waits (as it does while a movie's details load) and looks it up once known.
+    if (com.nuvio.tv.livetv.ondemand.VodHomeIds.uidOf(item.id) != null) {
+        com.nuvio.tv.livetv.ondemand.VodHomeIds.focused(item.id)
+        if (com.nuvio.tv.livetv.ondemand.VodHomeIds.tmdbLookupId(item.id) == null) {
+            waitForVodMatch(item)
+            return
+        }
     }
     val stepWaitMs = focusStepPace.onFocus(System.nanoTime() / 1_000_000L)
     val focusSettledAtMs = android.os.SystemClock.elapsedRealtime()
@@ -1112,7 +1152,8 @@ private fun HomeViewModel.updateCatalogItemWithTmdb(itemId: String, enrichment: 
 
     applyEnrichmentToDisplayedRows(itemId, ::mergeItem)
 
-    findCatalogItemById(itemId)?.let { enriched ->
+    // Live TV fork: an On Demand card isn't in the catalog index; its hero gets the merge too.
+    (findCatalogItemById(itemId) ?: findVodCard(itemId)?.let(::mergeItem))?.let { enriched ->
         _lastEnrichedPreview.value = enriched
         addEnrichedPreview(itemId, enriched)
     }
@@ -1228,7 +1269,8 @@ private fun HomeViewModel.updateCatalogItemWithMeta(itemId: String, meta: Meta) 
     clearEnrichmentFailure(itemId)
 
     applyEnrichmentToDisplayedRows(itemId, ::mergeItem)
-    findCatalogItemById(itemId)?.let { enriched ->
+    // Live TV fork: an On Demand card isn't in the catalog index; its hero gets the merge too.
+    (findCatalogItemById(itemId) ?: findVodCard(itemId)?.let(::mergeItem))?.let { enriched ->
         _lastEnrichedPreview.value = enriched
         addEnrichedPreview(itemId, enriched)
     }

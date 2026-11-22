@@ -3126,13 +3126,9 @@
     <string name="stream_test_video_bitrate">Средний битрейт видео: %1$s</string>
     <string name="stream_test_error_connection">Ошибка соединения. Возможно, ссылка на последний воспроизведённый поток устарела или недоступна. Воспроизведите видео заново и повторите попытку.</string>
 
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">Ряды главного экрана</string>
+    <string name="settings_home_screen_rows_subtitle">Выберите порядок рядов на главном экране</string>
     <plurals name="cw_episodes_left">
-        <item quantity="one">Ещё %d</item>
-        <item quantity="few">Ещё %d</item>
-        <item quantity="many">Ещё %d</item>
-        <item quantity="other">Ещё %d</item>
-    </plurals>
     <string name="cw_no_artwork">Нет изображения</string>
     <string name="detail_eyebrow_episodes">Эпизоды</string>
     <string name="detail_section_parental_guide">Родительский гид</string>
@@ -3146,11 +3142,6 @@
     <string name="ambient_mode_timeout">Запускать через</string>
     <string name="ambient_mode_timeout_subtitle">Сколько ждать перед запуском Ambient-режима</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="one">%1$d минута</item>
-        <item quantity="few">%1$d минуты</item>
-        <item quantity="many">%1$d минут</item>
-        <item quantity="other">%1$d минуты</item>
-    </plurals>
     <string name="ambient_mode_catalogs">Каталоги</string>
     <string name="ambient_mode_catalogs_subtitle">Выберите до 3 каталогов, из которых брать изображения</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Выберите до 3 каталогов</string>
@@ -4198,17 +4189,7 @@
     <string name="report_sent_no_phone">Спасибо за отчёт. Arc - любительский проект, поэтому ответ приходит не на каждый отчёт.</string>
     <string name="report_sent_back">Вернуться к просмотру</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Выберите всё подходящее. Arc сохранил последнюю минуту.</item>
-        <item quantity="few">Выберите всё подходящее. Arc сохранил последние %1$d минуты.</item>
-        <item quantity="many">Выберите всё подходящее. Arc сохранил последние %1$d минут.</item>
-        <item quantity="other">Выберите всё подходящее. Arc сохранил последние %1$d минуты.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Настройки плеера и последняя минута</item>
-        <item quantity="few">Настройки плеера и последние %1$d минуты</item>
-        <item quantity="many">Настройки плеера и последние %1$d минут</item>
-        <item quantity="other">Настройки плеера и последние %1$d минуты</item>
-    </plurals>
     <string name="report_settings_subtitle">Расскажите, что пошло не так или что должен уметь Arc</string>
     <string name="report_group_choose">О чём вы хотите сообщить?</string>
     <string name="report_group_options">Параметры</string>
@@ -4261,11 +4242,6 @@
     <string name="report_sent_kind_bug">Что-то не работает</string>
     <string name="report_sent_kind_idea">Идея или пожелание</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d новый</item>
-        <item quantity="few">%1$d новых</item>
-        <item quantity="many">%1$d новых</item>
-        <item quantity="other">%1$d нового</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Проверяется раз в день. Arc - любительский проект, поэтому ответ приходит не на каждый отчёт.</string>
     <string name="report_my_reports_hint_off">Проверка выключена. Включите Проверять мои отчёты, чтобы видеть, что происходит с вашими отчётами.</string>
@@ -4288,11 +4264,6 @@
     <string name="report_ready_follow_off">Чтобы следить за этим отчётом, отсканируйте код на следующем экране телефоном.</string>
     <string name="report_notice_title">По вашему отчёту есть новости</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">Есть новости по %1$d вашему отчёту</item>
-        <item quantity="few">Есть новости по %1$d вашим отчётам</item>
-        <item quantity="many">Есть новости по %1$d вашим отчётам</item>
-        <item quantity="other">Есть новости по %1$d вашим отчётам</item>
-    </plurals>
     <string name="report_notice_one">%1$s, отправлен %2$s: %3$s.</string>
     <string name="report_notice_many">Откройте Мои отчёты, чтобы увидеть изменения.</string>
     <string name="report_notice_open">Открыть Мои отчёты</string>
@@ -4303,19 +4274,9 @@
     <string name="report_stop_recording">Остановить запись</string>
     <string name="report_recording_pill">Запись %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Запись %1$s · %2$d метка</item>
-        <item quantity="few">Запись %1$s · %2$d метки</item>
-        <item quantity="many">Запись %1$s · %2$d меток</item>
-        <item quantity="other">Запись %1$s · %2$d метки</item>
-    </plurals>
     <string name="report_recording_no_space">Недостаточно свободного места для записи</string>
     <string name="report_item_recording">Запись, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d метка. Только данные, без звука и картинки.</item>
-        <item quantity="few">%d метки. Только данные, без звука и картинки.</item>
-        <item quantity="many">%d меток. Только данные, без звука и картинки.</item>
-        <item quantity="other">%d метки. Только данные, без звука и картинки.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Сообщить о проблеме / отметить</string>
     <string name="remote_buttons_job_report_mark_desc">Открывает панель сообщения. Во время записи добавляет метку.</string>
     <string name="display_mode_measured">Измерено</string>

@@ -359,7 +359,18 @@ internal fun PlayerRuntimeController.loadSourceStreams(forceRefresh: Boolean, ba
                 emit(if (r is NetworkResult.Success) NetworkResult.Success(StreamListHandOver.withHanded(partial.streams, r.data)) else r)
             }
         }
-        results.collect { result ->
+        com.nuvio.tv.livetv.ondemand.OnDemandStreams.withOnDemand(
+            // Live TV fork: your provider's copy (📡 On Demand) here too, for source switching
+            // and the next episode.
+            context = context,
+            source = results,
+            type = type,
+            videoId = vid,
+            season = seasonArg,
+            episode = episodeArg,
+            title = navigationArgs.contentName ?: navigationArgs.title,
+            year = navigationArgs.year
+        ).collect { result ->
             when (result) {
                 is NetworkResult.Success -> {
                     val addonStreams = StreamAutoPlaySelector.orderAddonStreams(result.data, installedAddonOrder, preferredServerNames)
@@ -762,8 +773,9 @@ private fun com.nuvio.tv.domain.model.Addon.supportsStreamResourceForChip(type: 
 // The launch stream's filename belongs to that stream only, so a newly selected stream without a
 // filename hint falls back to its own url rather than inheriting it.
 internal fun streamFilenameFromUrl(url: String): String? =
-    url.substringBefore('?').substringAfterLast('/', "")
-        .takeIf { it.isNotBlank() && it.contains('.') }
+    url.takeUnless { com.nuvio.tv.core.player.isStalkerPlaybackAddress(it) }
+        ?.substringBefore('?')?.substringAfterLast('/', "")
+        ?.takeIf { it.isNotBlank() && it.contains('.') }
 
 private fun PlayerRuntimeController.applySelectedStreamState(
     stream: Stream,
@@ -846,6 +858,9 @@ private fun PlayerRuntimeController.persistBingeGroup(bingeGroup: String?, filen
  * only among streams already in memory: a search started here would compete with playback.
  */
 internal fun PlayerRuntimeController.handleStreamRedirect(requestedUrl: String, resolvedUrl: String) {
+    // Redirects belong to this temporary request. Retain the original locator for renewal and privacy.
+    if (com.nuvio.tv.core.player.isStalkerPlaybackAddress(currentStreamUrl) ||
+        com.nuvio.tv.core.player.isStalkerPlaybackAddress(requestedUrl) || mediaSourceFactory.stalkerMediaPolicy != null) return
     scope.launch {
         if (requestedUrl != currentStreamUrl) return@launch
         val addonName = currentAddonName
@@ -967,6 +982,13 @@ private fun PlayerRuntimeController.openExternalStreamInBrowser(
     if (!stream.isExternal()) return false
 
     val externalUrl = stream.getStreamUrl()
+    if (com.nuvio.tv.core.player.isStalkerPlaybackAddress(externalUrl)) {
+        _uiState.update {
+            if (fromEpisodePanel) it.copy(episodeStreamsError = com.nuvio.tv.core.player.STALKER_EXTERNAL_PLAYBACK_UNAVAILABLE)
+            else it.copy(sourceStreamsError = com.nuvio.tv.core.player.STALKER_EXTERNAL_PLAYBACK_UNAVAILABLE)
+        }
+        return true
+    }
     if (externalUrl.isNullOrBlank()) {
         _uiState.update {
             if (fromEpisodePanel) {
@@ -1201,6 +1223,18 @@ internal fun PlayerRuntimeController.switchToSourceStream(
     recomputeMergedSkipIntervals()
     showStreamSourceIndicator(stream)
     resetPostPlayOverlayState(clearEpisode = false)
+
+    // Portal links need a fresh protected request context, and leaving one must clear that context.
+    // Reuse the initializer instead of giving an opaque locator to ExoPlayer or the AFR probes.
+    if (com.nuvio.tv.core.player.isStalkerPlaybackAddress(playbackUrl) || mediaSourceFactory.stalkerMediaPolicy != null) {
+        initializePlayer(playbackUrl, playbackHeaders)
+        recordDistinctPluginPlay(
+            bingeGroup = stream.behaviorHints?.bingeGroup,
+            playbackIdentity = stream.getEffectiveInfoHash() ?: playbackUrl
+        )
+        loadSavedProgressFor(currentSeason, currentEpisode)
+        return
+    }
 
     val carriedStartMs = SourceFailoverSelection.startPositionMs(automatic, _uiState.value.pendingSeekPosition)
     _exoPlayer?.let { player ->
@@ -1559,13 +1593,24 @@ internal fun PlayerRuntimeController.loadStreamsForEpisode(
             installedAddons
         )
 
-        streamRepository.getStreamsFromAllAddons(
+        com.nuvio.tv.livetv.ondemand.OnDemandStreams.withOnDemand(
+            // Live TV fork: your provider's copy (📡 On Demand) here too, for source switching
+            // and the next episode.
+            context = context,
+            source = streamRepository.getStreamsFromAllAddons(
             type = type,
             videoId = video.id,
             season = video.season,
             episode = video.episode,
             forceRefresh = forceRefresh,
             priorityBingeGroup = currentStreamBingeGroup
+            ),
+            type = type,
+            videoId = video.id,
+            season = video.season,
+            episode = video.episode,
+            title = navigationArgs.contentName ?: navigationArgs.title,
+            year = navigationArgs.year
         ).collect { result ->
             when (result) {
                 is NetworkResult.Success -> {
@@ -1653,7 +1698,9 @@ private suspend fun PlayerRuntimeController.selectEpisodeAutoPlayStream(
         source = settings.streamAutoPlaySource,
         installedAddonNames = installedAddonNames,
         selectedAddons = settings.streamAutoPlaySelectedAddons,
-        selectedPlugins = settings.streamAutoPlaySelectedPlugins
+        selectedPlugins = settings.streamAutoPlaySelectedPlugins,
+        qualityRules = settings.streamQualityRules,
+        lowQualityGroups = settings.streamLowQualityGroups
     )
 }
 
@@ -1944,7 +1991,7 @@ internal fun PlayerRuntimeController.switchToEpisodeStream(
     persistStreamRouteState(stream, isTorrent = false)
     // Until the new file loads, MPV keeps reporting the old one, which is often at its end.
     hasRenderedFirstFrame = false
-    mpvView?.markMediaRequested(playbackUrl)
+    if (!com.nuvio.tv.core.player.isStalkerPlaybackAddress(playbackUrl)) mpvView?.markMediaRequested(playbackUrl)
     endDetectionArmed = false
     mpvEofSeenClear = false
     exoEndOverrunHandled = false
@@ -2040,6 +2087,7 @@ private fun PlayerRuntimeController.carrySubtitleDelayTo(nextVideoId: String?) {
 }
 
 private fun String.safeStreamTraceHost(): String {
+    if (com.nuvio.tv.core.player.isStalkerPlaybackAddress(this)) return "stalker"
     return runCatching {
         Uri.parse(this).host ?: substringBefore("://").takeIf { it.isNotBlank() } ?: "unknown"
     }.getOrDefault("unknown")
@@ -2571,9 +2619,8 @@ internal fun PlayerRuntimeController.playNextEpisode(userInitiated: Boolean = fa
                     videoId = nextVideo.id,
                     season = nextVideo.season,
                     episode = nextVideo.episode,
-                    priorityBingeGroup = currentStreamBingeGroup,
-                    preferredPluginOnly = continuingPlugin,
-                    continuePluginOnly = continuingPlugin
+                    title = navigationArgs.contentName ?: navigationArgs.title,
+                    year = navigationArgs.year
                 ).collect { result ->
                     when (result) {
                         is NetworkResult.Success -> {

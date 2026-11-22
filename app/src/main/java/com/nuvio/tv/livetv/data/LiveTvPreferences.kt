@@ -1,0 +1,2095 @@
+package com.nuvio.tv.livetv.data
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import androidx.datastore.preferences.preferencesDataStoreFile
+import com.nuvio.tv.livetv.model.ChannelSort
+import com.nuvio.tv.livetv.model.matchFrameRate
+import com.nuvio.tv.livetv.model.CustomGroup
+import com.nuvio.tv.livetv.model.EpgSource
+import com.nuvio.tv.livetv.model.LiveTvSettings
+import com.nuvio.tv.livetv.model.LiveUserState
+import com.nuvio.tv.livetv.model.PlaylistSource
+import com.nuvio.tv.livetv.model.Reminder
+import com.nuvio.tv.livetv.model.ZapMode
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.json.JSONArray
+import org.json.JSONObject
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class LiveTvPreferences @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val profileManager: com.nuvio.tv.core.profile.ProfileManager
+) {
+    // A provider edit/restore and publication of its staged imports are ordered together.
+    // Unrelated playback/display preferences do not wait for a catalogue import.
+    private val sourceMutations = Mutex()
+
+    suspend fun <T> withCurrentPlaylist(source: PlaylistSource, publish: () -> T): T = sourceMutations.withLock {
+        val latest = currentPlaylists().firstOrNull { it.id == source.id }
+        if (latest == null || !latest.isStalker || latest.stalkerConfig != source.stalkerConfig ||
+            latest.enabled != source.enabled || latest.importLive != source.importLive ||
+            latest.importVod != source.importVod || latest.useEmbeddedEpg != source.useEmbeddedEpg ||
+            latest.guideShiftMinutes != source.guideShiftMinutes || latest.catchupShiftMinutes != source.catchupShiftMinutes
+        ) throw com.nuvio.stalker.StalkerException(com.nuvio.stalker.StalkerError.STALE_SESSION)
+        publish()
+    }
+
+    private val store: DataStore<Preferences> = PreferenceDataStoreFactory.create(
+        scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+        produceFile = { context.preferencesDataStoreFile("live_tv") }
+    )
+
+    /**
+     * Small, frequently written, this-TV-only data (quality badges, On Demand import times),
+     * kept apart so saving it doesn't rewrite and re-read the main settings every time.
+     */
+    private val deviceStore: DataStore<Preferences> = PreferenceDataStoreFactory.create(
+        scope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+        produceFile = { context.preferencesDataStoreFile("live_tv_device") }
+    )
+
+    private object Keys {
+        val playlists = stringPreferencesKey("playlists")
+        val epgs = stringPreferencesKey("epg_sources")
+
+        val showInSidebar = booleanPreferencesKey("show_in_sidebar")
+        val showImportProgress = booleanPreferencesKey("show_import_progress")
+        val showNames = booleanPreferencesKey("show_channel_names")
+        val twoLineNames = booleanPreferencesKey("two_line_channel_names")
+        val showNumbers = booleanPreferencesKey("show_channel_numbers")
+        val markPlaying = booleanPreferencesKey("mark_playing_channel")
+        val showLogos = booleanPreferencesKey("show_channel_logos")
+        val showPreview = booleanPreferencesKey("show_preview")
+        val showDetails = booleanPreferencesKey("show_program_details")
+        val showFavGroup = booleanPreferencesKey("show_favorites_group")
+        val showRecentGroup = booleanPreferencesKey("show_recent_group")
+        val compactRows = booleanPreferencesKey("compact_rows")
+        val showProgramTimes = booleanPreferencesKey("show_program_times")
+        val showEpisodeNumbers = booleanPreferencesKey("show_episode_numbers")
+        val guideSize = stringPreferencesKey("guide_size")
+        val epgOffset = intPreferencesKey("epg_offset_minutes")
+        val reverseZap = booleanPreferencesKey("reverse_zap")
+        val zapMode = stringPreferencesKey("zap_mode")
+        val autoPlayLast = booleanPreferencesKey("auto_play_last")
+        val rememberGroup = booleanPreferencesKey("remember_group")
+        val fullscreenOnSelect = booleanPreferencesKey("fullscreen_on_select")
+        val bannerSeconds = intPreferencesKey("banner_seconds")
+        val playlistRefresh = intPreferencesKey("playlist_refresh_hours")
+        val epgRefresh = intPreferencesKey("epg_refresh_hours")
+        val epgPast = intPreferencesKey("epg_past_hours")
+        val epgFuture = intPreferencesKey("epg_future_days")
+        val clock24 = booleanPreferencesKey("clock_24h")
+        val autoReconnect = booleanPreferencesKey("auto_reconnect")
+        val autoBackupChannel = booleanPreferencesKey("auto_backup_channel")
+        val hideStrayEntries = booleanPreferencesKey("hide_stray_entries")
+        val catchupCache = booleanPreferencesKey("catchup_cache")
+        val channelSort = stringPreferencesKey("channel_sort")
+        val solidHighlight = booleanPreferencesKey("solid_highlight")
+        val showInSearch = booleanPreferencesKey("show_in_search")
+        val guideSearchLive = booleanPreferencesKey("guide_search_live")
+        val guideSearchCatalog = booleanPreferencesKey("guide_search_catalog")
+        val guideSearchOnDemand = booleanPreferencesKey("guide_search_ondemand")
+        val vodSearchLive = booleanPreferencesKey("vod_search_live")
+        val vodSearchCatalog = booleanPreferencesKey("vod_search_catalog")
+        val vodSearchOnDemand = booleanPreferencesKey("vod_search_ondemand")
+        val showAllGroup = booleanPreferencesKey("show_all_group")
+        val resumeInPreview = booleanPreferencesKey("resume_in_preview")
+        val showGroupCounts = booleanPreferencesKey("show_group_counts")
+        val smallHeader = booleanPreferencesKey("small_header")
+        val aspectMode = stringPreferencesKey("aspect_mode")
+        val sequentialNumbers = booleanPreferencesKey("sequential_numbers")
+        val overlayMode = booleanPreferencesKey("overlay_mode")
+        val overlayKeepOpen = booleanPreferencesKey("overlay_keep_open")
+        val overlayShowDetails = booleanPreferencesKey("overlay_show_details")
+        val startOnLiveTv = booleanPreferencesKey("start_on_live_tv")
+        val startPage = stringPreferencesKey("start_page")
+        val openOn = stringPreferencesKey("open_on")
+        val launcherCardShape = stringPreferencesKey("launcher_card_shape")
+        val logoSourcesOff = stringPreferencesKey("logo_sources_off")
+        val catchupPreferHls = booleanPreferencesKey("catchup_prefer_hls")
+        val catchupShift = intPreferencesKey("catchup_shift_minutes")
+        val parentalPin = stringPreferencesKey("parental_pin")
+        val lockAdultContent = booleanPreferencesKey("lock_adult_content")
+        val lockLogins = booleanPreferencesKey("lock_logins")
+        val showQualityBadges = booleanPreferencesKey("show_quality_badges")
+        val showFrameRate = booleanPreferencesKey("show_frame_rate")
+        val matchFrameRate = booleanPreferencesKey("match_frame_rate")
+        val frameRateMode = stringPreferencesKey("frame_rate_mode")
+        val onDemandInSidebar = booleanPreferencesKey("on_demand_in_sidebar")
+        val onDemandEnabled = booleanPreferencesKey("on_demand_enabled")
+        val recordingsInSidebar = booleanPreferencesKey("recordings_in_sidebar")
+        val sideMenuOrder = stringPreferencesKey("side_menu_order")
+        val sideMenuHidden = stringPreferencesKey("side_menu_hidden")
+        val calendarInMenu = booleanPreferencesKey("calendar_in_menu")
+        val sideMenuLine = booleanPreferencesKey("side_menu_line")
+        val sideMenuFit = booleanPreferencesKey("side_menu_fit")
+        val calendarUpcomingRow = booleanPreferencesKey("calendar_upcoming_row")
+        val calendarNewEpisodeCards = booleanPreferencesKey("calendar_new_episode_cards")
+        val calendarHideSpoilers = booleanPreferencesKey("calendar_hide_spoilers")
+        val calendarCountry = stringPreferencesKey("calendar_country")
+        val calendarSkipNewsTalk = booleanPreferencesKey("calendar_skip_news_talk")
+        val calendarView = stringPreferencesKey("calendar_view")
+        val calendarOkAction = stringPreferencesKey("calendar_ok_action")
+        val calendarHideWatched = booleanPreferencesKey("calendar_hide_watched")
+        val calendarSports = booleanPreferencesKey("calendar_sports")
+        val calendarFollows = stringPreferencesKey("calendar_follows")
+        val calendarHiddenShows = stringPreferencesKey("calendar_hidden_shows")
+        /** Profiles kept matched ("1,3" per group): each group shares one copy of its Live TV choices. */
+        val profileMatch = stringSetPreferencesKey("profile_match_groups")
+        val calendarChannelPicks = stringPreferencesKey("calendar_channel_picks")
+        val calendarPlans = stringPreferencesKey("calendar_plans")
+        val onDemandInStreams = booleanPreferencesKey("on_demand_in_streams")
+        val onDemandStreamsPosition = stringPreferencesKey("on_demand_streams_position")
+        val onDemandAutoPlay = booleanPreferencesKey("on_demand_auto_play")
+        val onDemandPlayDirect = booleanPreferencesKey("on_demand_play_direct")
+        val searchOrder = stringPreferencesKey("search_order")
+        val searchPreview = booleanPreferencesKey("search_preview")
+        val onDemandAddonPosters = booleanPreferencesKey("on_demand_addon_posters")
+        val groupPlaylistHeadings = booleanPreferencesKey("group_playlist_headings")
+        /** This TV has had Group by Playlist turned on once (per TV, never synced). */
+        val groupPlaylistTurnedOn = booleanPreferencesKey("group_playlist_turned_on_once")
+        /** This TV has looked once for channels renamed before renames were followed (per TV). */
+        val renamedChannelsChecked = booleanPreferencesKey("renamed_channels_checked")
+        /** This TV only: ids of playlists and guides removed here, not yet passed on by sync. */
+        val removedSources = stringSetPreferencesKey("removed_sources")
+        val nameRemovals = stringPreferencesKey("name_removals")
+        val cleanGroupNames = booleanPreferencesKey("clean_group_names")
+        val developerTools = booleanPreferencesKey("developer_tools")
+        val browseByChannelName = booleanPreferencesKey("browse_by_channel_name")
+        val showPlaylistInInfo = booleanPreferencesKey("show_playlist_in_info")
+        val showNowLine = booleanPreferencesKey("show_now_line")
+        val audioPassthrough = booleanPreferencesKey("audio_passthrough")
+        val showPosters = booleanPreferencesKey("show_posters")
+        val vodMergeDuplicates = booleanPreferencesKey("vod_merge_duplicates")
+        val vodHideNonEnglish = booleanPreferencesKey("vod_hide_non_english")
+        val homeRowPlaylistNames = booleanPreferencesKey("home_row_playlist_names")
+        val vodDefaultSort = stringPreferencesKey("vod_default_sort")
+        val recordingStorage = stringPreferencesKey("recording_storage")
+        val recordingSpaceRule = stringPreferencesKey("recording_space_rule")
+        val recordPre = intPreferencesKey("record_pre_minutes")
+        val recordPost = intPreferencesKey("record_post_minutes")
+        val vodSorts = stringPreferencesKey("vod_sorts")
+        val homeRowEnabled = booleanPreferencesKey("home_row_enabled")
+        val homeRowHiddenProfiles = stringSetPreferencesKey("home_row_hidden_profiles")
+        val homeRowAboveContinueWatching = booleanPreferencesKey("home_row_above_cw")
+        val homeRowSource = stringPreferencesKey("home_row_source")
+        val homeRowTitle = stringPreferencesKey("home_row_title")
+        val homeRowSort = stringPreferencesKey("home_row_sort")
+        val homeRowLimit = intPreferencesKey("home_row_limit")
+        val homeRowHidePlaceholders = booleanPreferencesKey("home_row_hide_placeholders")
+        val homeRowOpensGuide = booleanPreferencesKey("home_row_opens_guide")
+        val homeRowShowNext = booleanPreferencesKey("home_row_show_next")
+        val homeRowCompact = booleanPreferencesKey("home_row_compact")
+        val bufferSize = stringPreferencesKey("buffer_size")
+        val groupSort = stringPreferencesKey("group_sort")
+        val timeshiftEnabled = booleanPreferencesKey("timeshift_enabled")
+        val timeshiftMinutes = intPreferencesKey("timeshift_minutes")
+        val rewindAlways = booleanPreferencesKey("rewind_always")
+        val captionsByDefault = booleanPreferencesKey("captions_by_default")
+        val clockMode = stringPreferencesKey("clock_mode")
+        val playlistAccounts = stringPreferencesKey("playlist_accounts")
+        val clockPosition = stringPreferencesKey("clock_position")
+        val clockSize = stringPreferencesKey("clock_size")
+        val clockOpacity = intPreferencesKey("clock_opacity")
+        val clockBackground = booleanPreferencesKey("clock_background")
+        val panelBackground = stringPreferencesKey("panel_background")
+        val guideInfoBackground = stringPreferencesKey("guide_info_background")
+        val guideBackdrop = stringPreferencesKey("guide_backdrop")
+        val recentInPanel = booleanPreferencesKey("recent_in_panel")
+        val panelRow = stringPreferencesKey("panel_row")
+        val panelRowLists = stringPreferencesKey("panel_row_lists")
+        val panelRowLast = stringPreferencesKey("panel_row_last")
+        val panelRowOpens = stringPreferencesKey("panel_row_opens")
+        val channelSurf = booleanPreferencesKey("channel_surf")
+        val barHidden = stringPreferencesKey("bar_hidden")
+        val guideInfoHidden = stringPreferencesKey("guide_info_hidden")
+        val launcherRows = stringPreferencesKey("launcher_rows")
+        val lockedGroups = stringSetPreferencesKey("locked_groups")
+        val favoriteGroups = stringSetPreferencesKey("favorite_groups")
+        val collapsedPlaylists = stringSetPreferencesKey("collapsed_playlists")
+        val reminders = stringPreferencesKey("reminders")
+        val channelQuality = stringPreferencesKey("channel_quality")
+        val channelAudio = stringPreferencesKey("channel_audio")
+        val channelCaptions = stringPreferencesKey("channel_captions")
+        val vodHiddenCategories = stringSetPreferencesKey("vod_hidden_categories")
+        val vodGroupOrder = stringPreferencesKey("vod_group_order")
+        val vodGroupNames = stringPreferencesKey("vod_group_names")
+        val onDemandImports = stringPreferencesKey("on_demand_imports")
+        val channelOrder = stringPreferencesKey("channel_order")
+        val channelCopies = stringPreferencesKey("channel_copies")
+
+        val hiddenChannels = stringSetPreferencesKey("hidden_channels")
+        val hiddenGroups = stringSetPreferencesKey("hidden_groups")
+        /** Playlists (their ids) a profile doesn't show; the playlists themselves stay shared. */
+        val hiddenPlaylists = stringSetPreferencesKey("hidden_playlists")
+        val favorites = stringPreferencesKey("favorites")
+        val recent = stringPreferencesKey("recent")
+        /** Recently watched channel -> the group it was opened from, as JSON. */
+        val recentGroups = stringPreferencesKey("recent_groups")
+        val lastChannel = stringPreferencesKey("last_channel")
+        val previousChannel = stringPreferencesKey("previous_channel")
+        val lastGroup = stringPreferencesKey("last_group")
+        val channelNames = stringPreferencesKey("channel_names")
+        val channelLogos = stringPreferencesKey("channel_logos")
+        val channelNumbers = stringPreferencesKey("channel_numbers")
+        val groupNames = stringPreferencesKey("group_names")
+        val groupOrder = stringPreferencesKey("group_order")
+        val customGroups = stringPreferencesKey("custom_groups")
+        val epgOverrides = stringPreferencesKey("epg_overrides")
+        /** Channel key → PictureShape name, for channels set away from Auto. */
+        val pictureShapes = stringPreferencesKey("picture_shapes")
+        /** Sports: settings and channel fixes (shared by every profile), as JSON. */
+        val sports = stringPreferencesKey("sports")
+        /** Sports: the teams, leagues and names you follow, and game reminders (per profile), as JSON. */
+        val sportsMine = stringPreferencesKey("sports_mine")
+        /** Live TV and Sports rows added to Nuvio's home screen (per profile), as JSON. */
+        val homeRows = stringPreferencesKey("home_live_rows")
+    }
+
+    // ---------- Nuvio profiles ----------
+    // Favorites, recents, hidden and arranged groups/channels, reminders and On Demand's hidden
+    // categories and order are kept per Nuvio profile. Playlists, guides, settings, renames,
+    // channel numbers, EPG choices and parental locks stay shared by every profile.
+    // The first profile uses the original keys (so nothing moves for it); the others use the same
+    // names with "_p<id>" on the end, the same way Nuvio names its own per-profile files.
+
+    private val currentProfile: Int get() = profileManager.activeProfileId.value
+
+    private val personalStringKeys: List<Preferences.Key<String>> = listOf(
+        Keys.favorites, Keys.recent, Keys.recentGroups, Keys.lastChannel, Keys.previousChannel, Keys.lastGroup,
+        Keys.groupOrder, Keys.customGroups, Keys.channelOrder, Keys.channelCopies, Keys.reminders,
+        Keys.vodGroupOrder, Keys.vodSorts, Keys.sportsMine, Keys.homeRows
+    )
+    private val personalSetKeys: List<Preferences.Key<Set<String>>> = listOf(
+        Keys.hiddenChannels, Keys.hiddenGroups, Keys.vodHiddenCategories, Keys.favoriteGroups, Keys.hiddenPlaylists
+    )
+
+    /**
+     * Where profile [id] keeps [key]. A matched profile keeps its matched choices in its group's one
+     * shared copy (under the group's lowest profile); its history and reminders stay its own.
+     */
+    @JvmName("myString")
+    private fun my(key: Preferences.Key<String>, id: Int = currentProfile, g: MatchGroups = matchMemo): Preferences.Key<String> =
+        own(key, if (key.name in matchedKeyNames) g.owner(id) else id)
+
+    @JvmName("mySet")
+    private fun my(key: Preferences.Key<Set<String>>, id: Int = currentProfile, g: MatchGroups = matchMemo): Preferences.Key<Set<String>> =
+        own(key, if (key.name in matchedKeyNames) g.owner(id) else id)
+
+    /** Profile [id]'s own copy of [key], whatever it is matched with. */
+    @JvmName("ownString")
+    private fun own(key: Preferences.Key<String>, id: Int): Preferences.Key<String> =
+        if (id <= 1) key else stringPreferencesKey("${key.name}_p$id")
+
+    @JvmName("ownSet")
+    private fun own(key: Preferences.Key<Set<String>>, id: Int): Preferences.Key<Set<String>> =
+        if (id <= 1) key else stringSetPreferencesKey("${key.name}_p$id")
+
+    /** Groups of matched profiles. A profile in no group is its own owner. */
+    private class MatchGroups(val groups: List<Set<Int>>) {
+        fun groupOf(id: Int): Set<Int>? = groups.firstOrNull { id in it }
+        fun owner(id: Int): Int = groupOf(id)?.minOrNull() ?: id
+    }
+
+    private val noMatches = MatchGroups(emptyList())
+    private var matchMemoRaw: Set<String>? = null
+    @Volatile private var matchMemo: MatchGroups = noMatches
+
+    private fun decodeMatch(raw: Set<String>?): MatchGroups = MatchGroups(
+        raw.orEmpty().mapNotNull { e ->
+            e.split(',').mapNotNull { it.trim().toIntOrNull() }.toSet().takeIf { it.size >= 2 }
+        }
+    )
+
+    private fun groupsOf(p: Preferences): MatchGroups {
+        val raw = p[Keys.profileMatch]
+        synchronized(this) {
+            if (raw == matchMemoRaw) return matchMemo
+            val g = if (raw.isNullOrEmpty()) noMatches else decodeMatch(raw)
+            matchMemoRaw = raw
+            matchMemo = g
+            return g
+        }
+    }
+
+    private fun encodeMatch(groups: List<Set<Int>>): Set<String> =
+        groups.filter { it.size >= 2 }.map { g -> g.sorted().joinToString(",") }.toSet()
+
+    private fun seededKey(id: Int) = booleanPreferencesKey("profile_seeded_p$id")
+    private val SEEDED = Regex("""^profile_seeded_p(\d+)$""")
+
+    /**
+     * The stored data as profile [id] sees it: its own copies of the personal keys put in place
+     * of the first profile's. A profile that hasn't been set up yet sees the first profile's.
+     */
+    private fun profileView(p: Preferences, id: Int): Preferences {
+        if (id <= 1) return p
+        val g = groupsOf(p)
+        val seeded = p[seededKey(id)] == true || g.groupOf(id) != null
+        val m = p.toMutablePreferences()
+        personalStringKeys.forEach { k ->
+            val own = p[my(k, id, g)]
+            if (own != null) m[k] = own else if (seeded) m.remove(k)
+        }
+        personalSetKeys.forEach { k ->
+            val own = p[my(k, id, g)]
+            if (own != null) m[k] = own else if (seeded) m.remove(k)
+        }
+        return m
+    }
+
+    /**
+     * The first time a profile uses Live TV, it starts with a copy of the first profile's
+     * favorites, hidden groups and so on; from then on each profile changes only its own.
+     */
+    private suspend fun seedProfile(id: Int) {
+        if (id <= 1) return
+        store.edit { p ->
+            if (p[seededKey(id)] == true) return@edit
+            if (groupsOf(p).groupOf(id) != null) return@edit
+            personalStringKeys.forEach { k -> if (p[my(k, id)] == null) p[k]?.let { p[my(k, id)] = it } }
+            personalSetKeys.forEach { k -> if (p[my(k, id)] == null) p[k]?.let { p[my(k, id)] = it } }
+            p[seededKey(id)] = true
+        }
+    }
+
+    /** What "Copy Settings" carries from one profile to another (history and reminders stay). */
+    private val copiedStringKeys: List<Preferences.Key<String>> = listOf(
+        Keys.favorites, Keys.groupOrder, Keys.customGroups, Keys.channelOrder, Keys.channelCopies,
+        Keys.vodGroupOrder, Keys.vodSorts, Keys.sportsMine, Keys.homeRows
+    )
+    private val copiedCalendarKeys: List<Preferences.Key<String>> = listOf(
+        Keys.calendarFollows, Keys.calendarHiddenShows
+    )
+
+    /** The choices matched profiles share (one copy per group). */
+    private val matchedKeyNames: Set<String> =
+        (copiedStringKeys + copiedCalendarKeys + Keys.sideMenuHidden).map { it.name }.toSet() +
+            personalSetKeys.map { it.name }
+
+    /**
+     * Writes profile [from]'s Live TV choices (as [before] shows them to it) into profile [to]'s own
+     * copy: favorites, custom groups, group and channel order, hidden groups and channels, On
+     * Demand's order and hidden categories, Sports follows, Calendar shows and side-menu pages.
+     */
+    private fun writeChoices(p: MutablePreferences, before: Preferences, from: Int, to: Int) {
+        val src = profileView(before, from)
+        copiedStringKeys.forEach { k ->
+            val v = src[k]
+            if (v != null) p[own(k, to)] = v else p.remove(own(k, to))
+        }
+        personalSetKeys.forEach { k ->
+            val v = src[k]
+            if (v != null) p[own(k, to)] = v else p.remove(own(k, to))
+        }
+        copiedCalendarKeys.forEach { k ->
+            val v = mineOrShared(before, k, from)
+            if (v.isNotEmpty()) p[own(k, to)] = v else p.remove(own(k, to))
+        }
+        val menu = withMyMenu(before, from)[Keys.sideMenuHidden]
+        if (menu != null) p[own(Keys.sideMenuHidden, to)] = menu
+        else p.remove(own(Keys.sideMenuHidden, to))
+        if (to > 1) p[seededKey(to)] = true
+    }
+
+    /** The Live TV home row shows for each of [targets] exactly when it shows for [sourceId]. */
+    private fun followHomeRow(p: MutablePreferences, sourceId: Int, targets: Set<Int>) {
+        val rowHidden = p[Keys.homeRowHiddenProfiles].orEmpty()
+        val names = targets.map { it.toString() }.toSet()
+        p[Keys.homeRowHiddenProfiles] =
+            if (sourceId.toString() in rowHidden) rowHidden + names else rowHidden - names
+    }
+
+    /**
+     * Profile [targetId] gets profile [sourceId]'s Live TV choices and home row, once. Watch history
+     * and reminders are kept. Playlists, guides and settings are already shared by every profile.
+     * A matched target changes its whole group's shared copy.
+     */
+    suspend fun copyProfileChoices(sourceId: Int, targetId: Int) {
+        if (sourceId == targetId) return
+        store.edit { p ->
+            val before = p.toPreferences()
+            val g = groupsOf(before)
+            if (g.owner(sourceId) == g.owner(targetId)) return@edit
+            writeChoices(p, before, sourceId, g.owner(targetId))
+            followHomeRow(p, sourceId, g.groupOf(targetId) ?: setOf(targetId))
+        }
+    }
+
+    /** Groups of profiles kept matched (each set has two or more profiles). */
+    val profileMatchGroups: Flow<List<Set<Int>>> = store.data
+        .map { groupsOf(it).groups }
+        .distinctUntilChanged()
+
+    /**
+     * [targetId] takes [sourceId]'s Live TV choices and stays matched with it (and with anyone
+     * either was already matched with) from now on. The group keeps one copy of its choices;
+     * the other members' old copies are removed. History and reminders stay each profile's own.
+     */
+    suspend fun matchProfiles(sourceId: Int, targetId: Int) {
+        if (sourceId == targetId) return
+        store.edit { p ->
+            val before = p.toPreferences()
+            val g = groupsOf(before)
+            val a = g.groupOf(sourceId) ?: setOf(sourceId)
+            val b = g.groupOf(targetId) ?: setOf(targetId)
+            val merged = a + b
+            val owner = merged.min()
+            writeChoices(p, before, sourceId, owner)
+            (merged - owner).forEach { m ->
+                (copiedStringKeys + copiedCalendarKeys + Keys.sideMenuHidden).forEach { k -> p.remove(own(k, m)) }
+                personalSetKeys.forEach { k -> p.remove(own(k, m)) }
+                if (m > 1) p[seededKey(m)] = true
+            }
+            followHomeRow(p, sourceId, merged)
+            p[Keys.profileMatch] = encodeMatch(g.groups.filterNot { it == a || it == b } + listOf(merged))
+        }
+    }
+
+    /**
+     * Profile [id] stops matching. With [keepCopy] it keeps a copy of the group's current choices
+     * (nothing is lost); a deleted profile doesn't. The rest of the group stays matched.
+     */
+    suspend fun stopMatching(id: Int, keepCopy: Boolean = true) {
+        store.edit { p ->
+            val before = p.toPreferences()
+            val g = groupsOf(before)
+            val group = g.groupOf(id) ?: return@edit
+            val owner = group.min()
+            val rest = group - id
+            if (rest.isNotEmpty()) {
+                val newOwner = rest.min()
+                if (newOwner != owner) writeChoices(p, before, owner, newOwner)
+            }
+            if (keepCopy && id != owner) writeChoices(p, before, owner, id)
+            p[Keys.profileMatch] = encodeMatch(g.groups.filterNot { it == group } + listOf(rest))
+        }
+    }
+
+    init {
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            runCatching { turnOnPlaylistGroupsOnce() }
+        }
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            profileManager.activeProfileId.collect { id -> runCatching { seedProfile(id) } }
+        }
+        // Keeps the matched-profiles list current (it also arrives with a cloud restore).
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            runCatching { store.data.collect { groupsOf(it) } }
+        }
+    }
+
+    /**
+     * Group by Playlist, switched on once for everyone (people with several playlists kept asking
+     * where it was): the first time this version starts on a TV. Turned off after that, it stays
+     * off: this TV remembers it's been done (kept per TV, not synced) and never does it again.
+     */
+    private suspend fun turnOnPlaylistGroupsOnce() {
+        if (deviceStore.data.first()[Keys.groupPlaylistTurnedOn] == true) return
+        store.edit { it[Keys.groupPlaylistHeadings] = true }
+        deviceStore.edit { it[Keys.groupPlaylistTurnedOn] = true }
+    }
+
+    /**
+     * Each screen that watches these lists, settings or user data used to decode them again on
+     * every save (every channel change saves). One saved copy is now decoded once and every
+     * screen gets the same result; an unchanged result is handed back as the same object, so
+     * each screen's "did it change" check is instant.
+     */
+    private class SnapshotMemo<T> {
+        private var a: Any? = null
+        private var b: Any? = null
+        private var id = Int.MIN_VALUE
+        private var has = false
+        private var value: T? = null
+
+        @Suppress("UNCHECKED_CAST")
+        @Synchronized
+        fun get(a: Any, b: Any?, id: Int, compute: () -> T): T {
+            if (has && a === this.a && b === this.b && id == this.id) return value as T
+            val fresh = compute()
+            val result = if (has && fresh == value) value as T else fresh
+            this.a = a; this.b = b; this.id = id; value = result; has = true
+            return result
+        }
+    }
+
+    private val playlistsMemo = SnapshotMemo<List<PlaylistSource>>()
+    private val epgsMemo = SnapshotMemo<List<EpgSource>>()
+    private val settingsMemo = SnapshotMemo<LiveTvSettings>()
+    private val userStateMemo = SnapshotMemo<LiveUserState>()
+
+    val playlists: Flow<List<PlaylistSource>> = store.data
+        .map { p -> playlistsMemo.get(p, null, 0) { decodePlaylists(p[Keys.playlists]) } }
+        .distinctUntilChanged()
+
+    val epgSources: Flow<List<EpgSource>> = store.data
+        .map { p -> epgsMemo.get(p, null, 0) { decodeEpgs(p[Keys.epgs]) } }
+        .distinctUntilChanged()
+
+    /**
+     * Which side-menu pages are off (Calendar and the others) is chosen per Nuvio profile. The first
+     * profile keeps the original key. A profile that hasn't made its own choice yet sees the first
+     * profile's, so nothing changes for people who already turned a page off.
+     */
+    private fun withMyMenu(p: Preferences, id: Int): Preferences {
+        val g = groupsOf(p)
+        if (g.owner(id) <= 1) return p
+        val own = p[my(Keys.sideMenuHidden, id, g)] ?: return p
+        val m = p.toMutablePreferences()
+        m[Keys.sideMenuHidden] = own
+        return m
+    }
+
+    val settings: Flow<LiveTvSettings> = kotlinx.coroutines.flow.combine(store.data, profileManager.activeProfileId) { p0, id ->
+        settingsMemo.get(p0, null, id) { buildSettings(withMyMenu(p0, id)) }
+    }.distinctUntilChanged()
+
+    private fun buildSettings(p: Preferences): LiveTvSettings {
+        val d = LiveTvSettings()
+        return LiveTvSettings(
+            showInSidebar = p[Keys.showInSidebar] ?: d.showInSidebar,
+            showChannelNames = p[Keys.showNames] ?: d.showChannelNames,
+            twoLineChannelNames = p[Keys.twoLineNames] ?: d.twoLineChannelNames,
+            showChannelNumbers = p[Keys.showNumbers] ?: d.showChannelNumbers,
+            markPlayingChannel = p[Keys.markPlaying] ?: d.markPlayingChannel,
+            showChannelLogos = p[Keys.showLogos] ?: d.showChannelLogos,
+            showPreview = p[Keys.showPreview] ?: d.showPreview,
+            showProgramDetails = p[Keys.showDetails] ?: d.showProgramDetails,
+            showFavoritesGroup = p[Keys.showFavGroup] ?: d.showFavoritesGroup,
+            showRecentGroup = p[Keys.showRecentGroup] ?: d.showRecentGroup,
+            compactRows = p[Keys.compactRows] ?: d.compactRows,
+            showProgramTimes = p[Keys.showProgramTimes] ?: d.showProgramTimes,
+            showEpisodeNumbers = p[Keys.showEpisodeNumbers] ?: d.showEpisodeNumbers,
+            guideSize = p[Keys.guideSize] ?: d.guideSize,
+            epgOffsetMinutes = p[Keys.epgOffset] ?: d.epgOffsetMinutes,
+            reverseZap = p[Keys.reverseZap] ?: d.reverseZap,
+            zapMode = p[Keys.zapMode]?.let { runCatching { ZapMode.valueOf(it) }.getOrNull() } ?: d.zapMode,
+            autoPlayLastChannel = p[Keys.autoPlayLast] ?: d.autoPlayLastChannel,
+            rememberLastGroup = p[Keys.rememberGroup] ?: d.rememberLastGroup,
+            openFullscreenOnSelect = p[Keys.fullscreenOnSelect] ?: d.openFullscreenOnSelect,
+            infoBannerSeconds = p[Keys.bannerSeconds] ?: d.infoBannerSeconds,
+            playlistRefreshHours = p[Keys.playlistRefresh] ?: d.playlistRefreshHours,
+            epgRefreshHours = p[Keys.epgRefresh] ?: d.epgRefreshHours,
+            epgPastHours = p[Keys.epgPast] ?: d.epgPastHours,
+            epgFutureDays = p[Keys.epgFuture] ?: d.epgFutureDays,
+            use24HourClock = p[Keys.clock24] ?: d.use24HourClock,
+            autoReconnect = p[Keys.autoReconnect] ?: d.autoReconnect,
+            autoBackupChannel = p[Keys.autoBackupChannel] ?: d.autoBackupChannel,
+            hideStrayEntries = p[Keys.hideStrayEntries] ?: d.hideStrayEntries,
+            catchupCache = p[Keys.catchupCache] ?: d.catchupCache,
+            channelSort = p[Keys.channelSort]?.let { runCatching { ChannelSort.valueOf(it) }.getOrNull() } ?: d.channelSort,
+            solidHighlight = p[Keys.solidHighlight] ?: d.solidHighlight,
+            showInSearch = p[Keys.showInSearch] ?: d.showInSearch,
+            guideSearchLive = p[Keys.guideSearchLive] ?: d.guideSearchLive,
+            guideSearchCatalog = p[Keys.guideSearchCatalog] ?: d.guideSearchCatalog,
+            guideSearchOnDemand = p[Keys.guideSearchOnDemand] ?: d.guideSearchOnDemand,
+            onDemandSearchLive = p[Keys.vodSearchLive] ?: d.onDemandSearchLive,
+            onDemandSearchCatalog = p[Keys.vodSearchCatalog] ?: d.onDemandSearchCatalog,
+            onDemandSearchOnDemand = p[Keys.vodSearchOnDemand] ?: d.onDemandSearchOnDemand,
+            showAllChannelsGroup = p[Keys.showAllGroup] ?: d.showAllChannelsGroup,
+            resumeLastInPreview = p[Keys.resumeInPreview] ?: d.resumeLastInPreview,
+            showGroupCounts = p[Keys.showGroupCounts] ?: d.showGroupCounts,
+            smallHeader = p[Keys.smallHeader] ?: d.smallHeader,
+            aspectMode = p[Keys.aspectMode] ?: d.aspectMode,
+            sequentialNumbers = p[Keys.sequentialNumbers] ?: d.sequentialNumbers,
+            overlayMode = p[Keys.overlayMode] ?: d.overlayMode,
+            overlayKeepOpen = p[Keys.overlayKeepOpen] ?: d.overlayKeepOpen,
+            overlayShowDetails = p[Keys.overlayShowDetails] ?: d.overlayShowDetails,
+            startOnLiveTv = p[Keys.startOnLiveTv] ?: d.startOnLiveTv,
+            startPage = p[Keys.startPage] ?: d.startPage,
+            openOn = p[Keys.openOn] ?: d.openOn,
+            launcherCardShape = p[Keys.launcherCardShape] ?: d.launcherCardShape,
+            logoSourcesOff = p[Keys.logoSourcesOff] ?: d.logoSourcesOff,
+            catchupPreferHls = p[Keys.catchupPreferHls] ?: d.catchupPreferHls,
+            catchupShiftMinutes = p[Keys.catchupShift] ?: d.catchupShiftMinutes,
+            parentalPin = p[Keys.parentalPin] ?: d.parentalPin,
+            lockAdultContent = p[Keys.lockAdultContent] ?: d.lockAdultContent,
+            lockLogins = p[Keys.lockLogins] ?: d.lockLogins,
+            showQualityBadges = p[Keys.showQualityBadges] ?: d.showQualityBadges,
+            showFrameRate = p[Keys.showFrameRate] ?: d.showFrameRate,
+            // Before the three choices it was on or off; on worked like "On start/stop".
+            frameRateMode = p[Keys.frameRateMode] ?: if (p[Keys.matchFrameRate] == true) "START_STOP" else d.frameRateMode,
+            onDemandInSidebar = p[Keys.onDemandInSidebar] ?: d.onDemandInSidebar,
+            // Missing on older setups: On, so "off" from before becomes "Off the menu only" (stream list and Search come back).
+            onDemandEnabled = p[Keys.onDemandEnabled] ?: d.onDemandEnabled,
+            recordingsInSidebar = p[Keys.recordingsInSidebar] ?: d.recordingsInSidebar,
+            sideMenuOrder = p[Keys.sideMenuOrder] ?: d.sideMenuOrder,
+            sideMenuHidden = p[Keys.sideMenuHidden] ?: d.sideMenuHidden,
+            calendarInMenu = p[Keys.calendarInMenu] ?: d.calendarInMenu,
+            sideMenuLine = p[Keys.sideMenuLine] ?: d.sideMenuLine,
+            sideMenuFit = p[Keys.sideMenuFit] ?: d.sideMenuFit,
+            calendarUpcomingRow = p[Keys.calendarUpcomingRow] ?: d.calendarUpcomingRow,
+            calendarNewEpisodeCards = p[Keys.calendarNewEpisodeCards] ?: d.calendarNewEpisodeCards,
+            calendarHideSpoilers = p[Keys.calendarHideSpoilers] ?: d.calendarHideSpoilers,
+            calendarCountry = p[Keys.calendarCountry] ?: d.calendarCountry,
+            calendarSkipNewsTalk = p[Keys.calendarSkipNewsTalk] ?: d.calendarSkipNewsTalk,
+            calendarView = p[Keys.calendarView] ?: d.calendarView,
+            calendarOkAction = p[Keys.calendarOkAction] ?: d.calendarOkAction,
+            calendarHideWatched = p[Keys.calendarHideWatched] ?: d.calendarHideWatched,
+            calendarSports = p[Keys.calendarSports] ?: d.calendarSports,
+            onDemandInStreams = p[Keys.onDemandInStreams] ?: d.onDemandInStreams,
+            onDemandStreamsPosition = p[Keys.onDemandStreamsPosition] ?: d.onDemandStreamsPosition,
+            onDemandAutoPlay = p[Keys.onDemandAutoPlay] ?: d.onDemandAutoPlay,
+            onDemandPlayDirect = p[Keys.onDemandPlayDirect] ?: d.onDemandPlayDirect,
+            searchOrder = p[Keys.searchOrder] ?: d.searchOrder,
+            searchPreview = p[Keys.searchPreview] ?: d.searchPreview,
+            onDemandAddonPosters = p[Keys.onDemandAddonPosters] ?: d.onDemandAddonPosters,
+            groupPlaylistHeadings = p[Keys.groupPlaylistHeadings] ?: d.groupPlaylistHeadings,
+            nameRemovals = p[Keys.nameRemovals] ?: d.nameRemovals,
+            cleanGroupNames = p[Keys.cleanGroupNames] ?: d.cleanGroupNames,
+            developerTools = p[Keys.developerTools] ?: d.developerTools,
+            browseByChannelName = p[Keys.browseByChannelName] ?: d.browseByChannelName,
+            showPlaylistInInfo = p[Keys.showPlaylistInInfo] ?: d.showPlaylistInInfo,
+            showNowLine = p[Keys.showNowLine] ?: d.showNowLine,
+            audioPassthrough = p[Keys.audioPassthrough] ?: d.audioPassthrough,
+            showPosters = p[Keys.showPosters] ?: d.showPosters,
+            vodMergeDuplicates = p[Keys.vodMergeDuplicates] ?: d.vodMergeDuplicates,
+            vodHideNonEnglish = p[Keys.vodHideNonEnglish] ?: d.vodHideNonEnglish,
+            homeRowPlaylistNames = p[Keys.homeRowPlaylistNames] ?: d.homeRowPlaylistNames,
+            vodDefaultSort = p[Keys.vodDefaultSort] ?: d.vodDefaultSort,
+            recordingStorage = p[Keys.recordingStorage] ?: d.recordingStorage,
+            recordingSpaceRule = p[Keys.recordingSpaceRule] ?: d.recordingSpaceRule,
+            recordPreMinutes = p[Keys.recordPre] ?: d.recordPreMinutes,
+            recordPostMinutes = p[Keys.recordPost] ?: d.recordPostMinutes,
+            // The row used to be on/off for the whole app. Turned off before (with no per-profile
+            // choice saved yet): that was done from the main profile, so it stays off there only.
+            homeRowEnabled = true,
+            homeRowHiddenProfiles = p[Keys.homeRowHiddenProfiles]?.mapNotNull { it.toIntOrNull() }?.toSet()
+                ?: if (p[Keys.homeRowEnabled] == false) setOf(1) else emptySet(),
+            homeRowAboveContinueWatching = p[Keys.homeRowAboveContinueWatching] ?: d.homeRowAboveContinueWatching,
+            homeRowSource = p[Keys.homeRowSource] ?: d.homeRowSource,
+            homeRowTitle = p[Keys.homeRowTitle] ?: d.homeRowTitle,
+            homeRowSort = p[Keys.homeRowSort] ?: d.homeRowSort,
+            homeRowLimit = p[Keys.homeRowLimit] ?: d.homeRowLimit,
+            homeRowHidePlaceholders = p[Keys.homeRowHidePlaceholders] ?: d.homeRowHidePlaceholders,
+            homeRowOpensGuide = p[Keys.homeRowOpensGuide] ?: d.homeRowOpensGuide,
+            homeRowShowNext = p[Keys.homeRowShowNext] ?: d.homeRowShowNext,
+            homeRowCompact = p[Keys.homeRowCompact] ?: d.homeRowCompact,
+            bufferSize = p[Keys.bufferSize] ?: d.bufferSize,
+            groupSort = p[Keys.groupSort] ?: d.groupSort,
+            timeshiftEnabled = p[Keys.timeshiftEnabled] ?: d.timeshiftEnabled,
+            timeshiftMinutes = p[Keys.timeshiftMinutes] ?: d.timeshiftMinutes,
+            rewindAlways = p[Keys.rewindAlways] ?: d.rewindAlways,
+            captionsByDefault = p[Keys.captionsByDefault] ?: d.captionsByDefault,
+            clockMode = p[Keys.clockMode] ?: d.clockMode,
+            clockPosition = p[Keys.clockPosition] ?: d.clockPosition,
+            clockSize = p[Keys.clockSize] ?: d.clockSize,
+            clockOpacity = p[Keys.clockOpacity] ?: d.clockOpacity,
+            clockBackground = p[Keys.clockBackground] ?: d.clockBackground,
+            panelBackground = p[Keys.panelBackground] ?: d.panelBackground,
+            guideInfoBackground = p[Keys.guideInfoBackground] ?: d.guideInfoBackground,
+            guideBackdrop = p[Keys.guideBackdrop] ?: d.guideBackdrop,
+            recentInPanel = p[Keys.recentInPanel] ?: d.recentInPanel,
+            // Before the choice existed it was an on / off switch for Recent.
+            panelRow = p[Keys.panelRow] ?: if (p[Keys.recentInPanel] == false) "OFF" else d.panelRow,
+            panelRowLists = p[Keys.panelRowLists] ?: d.panelRowLists,
+            panelRowLast = p[Keys.panelRowLast] ?: d.panelRowLast,
+            panelRowOpens = p[Keys.panelRowOpens] ?: d.panelRowOpens,
+            channelSurf = p[Keys.channelSurf] ?: d.channelSurf,
+            barHidden = p[Keys.barHidden] ?: d.barHidden,
+            guideInfoHidden = p[Keys.guideInfoHidden] ?: d.guideInfoHidden,
+            launcherRows = p[Keys.launcherRows] ?: d.launcherRows,
+            showImportProgress = p[Keys.showImportProgress] ?: d.showImportProgress
+        )
+    }
+
+    /**
+     * Channels and groups hidden in every profile that uses Live TV. No one sees them, so the
+     * guide doesn't store their listings (big providers' hidden groups made the guide database
+     * many times bigger than what anyone looks at).
+     */
+    val hiddenEverywhere: Flow<HiddenEverywhere> = store.data.map { p ->
+        val ids = listOf(1) + p.asMap().keys.mapNotNull { k ->
+            SEEDED.find(k.name)?.groupValues?.get(1)?.toIntOrNull()
+                ?.takeIf { runCatching { p[booleanPreferencesKey(k.name)] }.getOrNull() == true }
+        }
+        HiddenEverywhere(ids.distinct().map { id ->
+            val v = profileView(p, id)
+            val hiddenGroups = v[Keys.hiddenGroups] ?: emptySet()
+            // Channels this profile still shows somewhere else: in Favorites, in a group of its
+            // own, or copied into another group. Their own group being hidden doesn't hide them.
+            val kept = HashSet<String>()
+            kept += decodeStringList(v[Keys.favorites])
+            decodeCustomGroups(v[Keys.customGroups]).forEach { g -> if (g.id !in hiddenGroups) kept += g.channelKeys }
+            decodeListMap(v[Keys.channelCopies]).forEach { (groupId, keys) -> if (groupId !in hiddenGroups) kept += keys }
+            HiddenView(v[Keys.hiddenChannels] ?: emptySet(), hiddenGroups, kept)
+        })
+    }.distinctUntilChanged()
+
+    suspend fun currentHiddenEverywhere(): HiddenEverywhere = hiddenEverywhere.first()
+
+    val userState: Flow<LiveUserState> = kotlinx.coroutines.flow.combine(store.data, deviceStore.data, profileManager.activeProfileId) { p0, d, id ->
+        userStateMemo.get(p0, d, id) { buildUserState(profileView(p0, id), d) }
+    // Read off the main thread: this runs on every settings change, and on a slow box with
+    // memory nearly full it used to hold up the screen until Android closed the app.
+    }.flowOn(Dispatchers.Default).distinctUntilChanged()
+
+    private fun buildUserState(p: Preferences, d: Preferences): LiveUserState =
+        LiveUserState(
+            hiddenChannels = p[Keys.hiddenChannels] ?: emptySet(),
+            hiddenGroups = p[Keys.hiddenGroups] ?: emptySet(),
+            hiddenPlaylists = p[Keys.hiddenPlaylists] ?: emptySet(),
+            favorites = decodeStringList(p[Keys.favorites]),
+            recent = decodeStringList(p[Keys.recent]),
+            recentGroups = decodeStringMap(p[Keys.recentGroups]),
+            lastChannelKey = p[Keys.lastChannel],
+            previousChannelKey = p[Keys.previousChannel],
+            lastGroupId = p[Keys.lastGroup],
+            channelNames = decodeStringMap(p[Keys.channelNames]),
+            channelLogos = decodeStringMap(p[Keys.channelLogos]),
+            channelNumbers = decodeStringMap(p[Keys.channelNumbers]).mapNotNull { (k, v) -> v.toIntOrNull()?.let { k to it } }.toMap(),
+            groupNames = decodeStringMap(p[Keys.groupNames]),
+            groupOrder = decodeStringList(p[Keys.groupOrder]),
+            customGroups = decodeCustomGroups(p[Keys.customGroups]),
+            epgOverrides = decodeStringMap(p[Keys.epgOverrides]).mapNotNull { (k, v) ->
+                val parts = v.split(EPG_SEP, limit = 2)
+                if (parts.size == 2) k to com.nuvio.tv.livetv.model.EpgAssignment(parts[0], parts[1]) else null
+            }.toMap(),
+            channelOrder = decodeListMap(p[Keys.channelOrder]),
+            channelCopies = decodeListMap(p[Keys.channelCopies]),
+            lockedGroups = p[Keys.lockedGroups] ?: emptySet(),
+            favoriteGroups = p[Keys.favoriteGroups] ?: emptySet(),
+            reminders = decodeReminders(p[Keys.reminders]),
+            channelQuality = decodeStringMap(d[Keys.channelQuality] ?: p[Keys.channelQuality]),
+            channelAudio = decodeStringMap(p[Keys.channelAudio]),
+            channelCaptions = decodeStringMap(p[Keys.channelCaptions]),
+            vodHiddenCategories = p[Keys.vodHiddenCategories] ?: emptySet(),
+            vodGroupOrder = decodeStringList(p[Keys.vodGroupOrder]),
+            vodGroupNames = decodeStringMap(p[Keys.vodGroupNames]),
+            vodSorts = decodeStringMap(p[Keys.vodSorts])
+        )
+
+    suspend fun currentPlaylists(): List<PlaylistSource> = playlists.first()
+    suspend fun currentEpgSources(): List<EpgSource> = epgSources.first()
+    suspend fun currentSettings(): LiveTvSettings = settings.first()
+
+    // ---------- sources ----------
+
+    suspend fun updatePlaylists(transform: (List<PlaylistSource>) -> List<PlaylistSource>) = sourceMutations.withLock {
+        var removed = emptySet<String>()
+        store.edit { p ->
+            val before = decodePlaylists(p[Keys.playlists])
+            val after = transform(before)
+            removed = before.map { it.id }.toSet() - after.map { it.id }.toSet()
+            p[Keys.playlists] = encodePlaylists(after)
+        }
+        noteRemovedSources(removed)
+    }
+
+    suspend fun updateEpgSources(transform: (List<EpgSource>) -> List<EpgSource>) {
+        var removed = emptySet<String>()
+        store.edit { p ->
+            val before = decodeEpgs(p[Keys.epgs])
+            val after = transform(before)
+            removed = before.map { it.id }.toSet() - after.map { it.id }.toSet()
+            p[Keys.epgs] = encodeEpgs(after)
+        }
+        noteRemovedSources(removed)
+    }
+
+    /**
+     * The old Guide Time Shift and Catch-Up Time Shift (one value for everything) moved onto each
+     * playlist and guide source, which now have their own. A source that already has its own
+     * shift keeps it. Then the old values go back to 0, so nothing is moved twice. Runs whenever
+     * an old value is found: after updating, and after a setup from an older version is synced
+     * or restored. Returns whether anything changed.
+     */
+    suspend fun moveTimeShiftsToSources(): Boolean = sourceMutations.withLock {
+        var moved = false
+        store.edit { p -> moved = moveTimeShifts(p) }
+        moved
+    }
+
+    private fun moveTimeShifts(p: androidx.datastore.preferences.core.MutablePreferences): Boolean {
+        val guide = p[Keys.epgOffset] ?: 0
+        val catchup = p[Keys.catchupShift] ?: 0
+        if (guide == 0 && catchup == 0) return false
+        val playlists = decodePlaylists(p[Keys.playlists])
+        if (playlists.isNotEmpty()) {
+            p[Keys.playlists] = encodePlaylists(playlists.map {
+                it.copy(
+                    guideShiftMinutes = if (it.guideShiftMinutes == 0) guide else it.guideShiftMinutes,
+                    catchupShiftMinutes = if (it.catchupShiftMinutes == 0) catchup else it.catchupShiftMinutes
+                )
+            })
+        }
+        val epgs = decodeEpgs(p[Keys.epgs])
+        if (epgs.isNotEmpty() && guide != 0) {
+            p[Keys.epgs] = encodeEpgs(epgs.map { if (it.shiftMinutes == 0) it.copy(shiftMinutes = guide) else it })
+        }
+        p[Keys.epgOffset] = 0
+        p[Keys.catchupShift] = 0
+        return true
+    }
+
+    // Playlists and guides removed on this TV (by you), until Google Drive sync has passed that on.
+    // Sync only takes a source out of the saved copy when it's listed here, so a TV that simply
+    // never had a playlist (or lost it) can't delete it from your other TVs.
+    private suspend fun noteRemovedSources(ids: Set<String>) {
+        val clean = ids.filter { it.isNotBlank() }
+        if (clean.isEmpty()) return
+        deviceStore.edit { it[Keys.removedSources] = (it[Keys.removedSources] ?: emptySet()) + clean }
+    }
+
+    suspend fun removedSourceIds(): Set<String> = deviceStore.data.first()[Keys.removedSources] ?: emptySet()
+
+    suspend fun forgetRemovedSources(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        deviceStore.edit { it[Keys.removedSources] = (it[Keys.removedSources] ?: emptySet()) - ids }
+    }
+
+    // ---------- calendar (synced with the rest of Live TV's settings) ----------
+
+    // Each Nuvio profile has its own followed and hidden shows, and a profile starts with none.
+    // The first profile keeps the original keys; the others use the same names with "_p<id>".
+    private fun mineOrShared(p: Preferences, key: Preferences.Key<String>, id: Int): String =
+        p[my(key, id, groupsOf(p))] ?: ""
+
+    private suspend fun editMine(key: Preferences.Key<String>, transform: (String) -> String) {
+        val me = currentProfile
+        store.edit { it[my(key, me)] = transform(mineOrShared(it, key, me)) }
+    }
+
+    /** Shows whose bell is rung (this profile's): a JSON list (see CalendarFollow). */
+    val calendarFollows: Flow<String> = kotlinx.coroutines.flow.combine(store.data, profileManager.activeProfileId) { p, id ->
+        mineOrShared(p, Keys.calendarFollows, id)
+    }.distinctUntilChanged()
+
+    suspend fun editCalendarFollows(transform: (String) -> String) = editMine(Keys.calendarFollows, transform)
+
+    /** Shows hidden from this profile's Calendar: a JSON list of { id, name }. */
+    val calendarHiddenShows: Flow<String> = kotlinx.coroutines.flow.combine(store.data, profileManager.activeProfileId) { p, id ->
+        mineOrShared(p, Keys.calendarHiddenShows, id)
+    }.distinctUntilChanged()
+
+    suspend fun editCalendarHiddenShows(transform: (String) -> String) = editMine(Keys.calendarHiddenShows, transform)
+
+    /** The channel picked for each network ("Always use the channel I pick for FX"): a JSON object. */
+    val calendarChannelPicks: Flow<String> = store.data.map { it[Keys.calendarChannelPicks] ?: "" }.distinctUntilChanged()
+
+    suspend fun editCalendarChannelPicks(transform: (String) -> String) {
+        store.edit { it[Keys.calendarChannelPicks] = transform(it[Keys.calendarChannelPicks] ?: "") }
+    }
+
+    /** The Calendar's Live TV plans ("record when it's in my guide", "record every new episode"), as JSON. */
+    val calendarPlans: Flow<String> = store.data.map { it[Keys.calendarPlans] ?: "" }.distinctUntilChanged()
+
+    suspend fun editCalendarPlans(transform: (String) -> String) {
+        store.edit { it[Keys.calendarPlans] = transform(it[Keys.calendarPlans] ?: "") }
+    }
+
+    // ---------- settings ----------
+
+    suspend fun updateSettings(transform: (LiveTvSettings) -> LiveTvSettings) {
+        val next = transform(currentSettings())
+        store.edit { p -> writeSettings(p, next) }
+    }
+
+    private fun writeSettings(p: MutablePreferences, s: LiveTvSettings) {
+        p[Keys.showInSidebar] = s.showInSidebar
+        p[Keys.showNames] = s.showChannelNames
+        p[Keys.twoLineNames] = s.twoLineChannelNames
+        p[Keys.showNumbers] = s.showChannelNumbers
+        p[Keys.markPlaying] = s.markPlayingChannel
+        p[Keys.showLogos] = s.showChannelLogos
+        p[Keys.showPreview] = s.showPreview
+        p[Keys.showDetails] = s.showProgramDetails
+        p[Keys.showFavGroup] = s.showFavoritesGroup
+        p[Keys.showRecentGroup] = s.showRecentGroup
+        p[Keys.compactRows] = s.compactRows
+        p[Keys.showProgramTimes] = s.showProgramTimes
+        p[Keys.showEpisodeNumbers] = s.showEpisodeNumbers
+        p[Keys.guideSize] = s.guideSize
+        p[Keys.epgOffset] = s.epgOffsetMinutes
+        p[Keys.reverseZap] = s.reverseZap
+        p[Keys.zapMode] = s.zapMode.name
+        p[Keys.autoPlayLast] = s.autoPlayLastChannel
+        p[Keys.rememberGroup] = s.rememberLastGroup
+        p[Keys.fullscreenOnSelect] = s.openFullscreenOnSelect
+        p[Keys.bannerSeconds] = s.infoBannerSeconds
+        p[Keys.playlistRefresh] = s.playlistRefreshHours
+        p[Keys.epgRefresh] = s.epgRefreshHours
+        p[Keys.epgPast] = s.epgPastHours
+        p[Keys.epgFuture] = s.epgFutureDays
+        p[Keys.clock24] = s.use24HourClock
+        p[Keys.autoReconnect] = s.autoReconnect
+        p[Keys.autoBackupChannel] = s.autoBackupChannel
+        p[Keys.hideStrayEntries] = s.hideStrayEntries
+        p[Keys.catchupCache] = s.catchupCache
+        p[Keys.channelSort] = s.channelSort.name
+        p[Keys.solidHighlight] = s.solidHighlight
+        p[Keys.showInSearch] = s.showInSearch
+        p[Keys.guideSearchLive] = s.guideSearchLive
+        p[Keys.guideSearchCatalog] = s.guideSearchCatalog
+        p[Keys.guideSearchOnDemand] = s.guideSearchOnDemand
+        p[Keys.vodSearchLive] = s.onDemandSearchLive
+        p[Keys.vodSearchCatalog] = s.onDemandSearchCatalog
+        p[Keys.vodSearchOnDemand] = s.onDemandSearchOnDemand
+        p[Keys.showAllGroup] = s.showAllChannelsGroup
+        p[Keys.resumeInPreview] = s.resumeLastInPreview
+        p[Keys.showGroupCounts] = s.showGroupCounts
+        p[Keys.smallHeader] = s.smallHeader
+        p[Keys.aspectMode] = s.aspectMode
+        p[Keys.sequentialNumbers] = s.sequentialNumbers
+        p[Keys.overlayMode] = s.overlayMode
+        p[Keys.overlayKeepOpen] = s.overlayKeepOpen
+        p[Keys.overlayShowDetails] = s.overlayShowDetails
+        p[Keys.startOnLiveTv] = s.startOnLiveTv
+        p[Keys.startPage] = s.startPage
+        p[Keys.openOn] = s.openOn
+        p[Keys.launcherCardShape] = s.launcherCardShape
+        p[Keys.logoSourcesOff] = s.logoSourcesOff
+        p[Keys.catchupPreferHls] = s.catchupPreferHls
+        p[Keys.catchupShift] = s.catchupShiftMinutes
+        p[Keys.parentalPin] = s.parentalPin
+        p[Keys.lockAdultContent] = s.lockAdultContent
+        p[Keys.lockLogins] = s.lockLogins
+        p[Keys.showQualityBadges] = s.showQualityBadges
+        p[Keys.showFrameRate] = s.showFrameRate
+        p[Keys.frameRateMode] = s.frameRateMode
+        p[Keys.matchFrameRate] = s.matchFrameRate
+        p[Keys.onDemandInSidebar] = s.onDemandInSidebar
+        p[Keys.onDemandEnabled] = s.onDemandEnabled
+        p[Keys.recordingsInSidebar] = s.recordingsInSidebar
+        p[Keys.sideMenuOrder] = s.sideMenuOrder
+        val me = groupsOf(p).owner(currentProfile)
+        if (me <= 1) {
+            p[Keys.sideMenuHidden] = s.sideMenuHidden
+        } else {
+            val seen = p[own(Keys.sideMenuHidden, me)] ?: p[Keys.sideMenuHidden] ?: ""
+            if (s.sideMenuHidden != seen) p[own(Keys.sideMenuHidden, me)] = s.sideMenuHidden
+        }
+        p[Keys.calendarInMenu] = s.calendarInMenu
+        p[Keys.sideMenuLine] = s.sideMenuLine
+        p[Keys.sideMenuFit] = s.sideMenuFit
+        p[Keys.calendarUpcomingRow] = s.calendarUpcomingRow
+        p[Keys.calendarNewEpisodeCards] = s.calendarNewEpisodeCards
+        p[Keys.calendarHideSpoilers] = s.calendarHideSpoilers
+        p[Keys.calendarCountry] = s.calendarCountry
+        p[Keys.calendarSkipNewsTalk] = s.calendarSkipNewsTalk
+        p[Keys.calendarView] = s.calendarView
+        p[Keys.calendarOkAction] = s.calendarOkAction
+        p[Keys.calendarHideWatched] = s.calendarHideWatched
+        p[Keys.calendarSports] = s.calendarSports
+        p[Keys.onDemandInStreams] = s.onDemandInStreams
+        p[Keys.onDemandStreamsPosition] = s.onDemandStreamsPosition
+        p[Keys.onDemandAutoPlay] = s.onDemandAutoPlay
+        p[Keys.onDemandPlayDirect] = s.onDemandPlayDirect
+        p[Keys.searchOrder] = s.searchOrder
+        p[Keys.searchPreview] = s.searchPreview
+        p[Keys.onDemandAddonPosters] = s.onDemandAddonPosters
+        p[Keys.groupPlaylistHeadings] = s.groupPlaylistHeadings
+        p[Keys.nameRemovals] = s.nameRemovals
+        p[Keys.cleanGroupNames] = s.cleanGroupNames
+        p[Keys.developerTools] = s.developerTools
+        p[Keys.browseByChannelName] = s.browseByChannelName
+        p[Keys.showPlaylistInInfo] = s.showPlaylistInInfo
+        p[Keys.showNowLine] = s.showNowLine
+        p[Keys.audioPassthrough] = s.audioPassthrough
+        p[Keys.showPosters] = s.showPosters
+        p[Keys.vodMergeDuplicates] = s.vodMergeDuplicates
+        p[Keys.vodHideNonEnglish] = s.vodHideNonEnglish
+        p[Keys.homeRowPlaylistNames] = s.homeRowPlaylistNames
+        p[Keys.vodDefaultSort] = s.vodDefaultSort
+        p[Keys.recordingStorage] = s.recordingStorage
+        p[Keys.recordingSpaceRule] = s.recordingSpaceRule
+        p[Keys.recordPre] = s.recordPreMinutes
+        p[Keys.recordPost] = s.recordPostMinutes
+        p[Keys.homeRowEnabled] = s.homeRowEnabled
+        p[Keys.homeRowHiddenProfiles] = s.homeRowHiddenProfiles.map { it.toString() }.toSet()
+        // Matched profiles show or hide the Live TV home row together.
+        groupsOf(p).groupOf(currentProfile)?.let { group -> followHomeRow(p, currentProfile, group - currentProfile) }
+        p[Keys.homeRowAboveContinueWatching] = s.homeRowAboveContinueWatching
+        p[Keys.homeRowSource] = s.homeRowSource
+        p[Keys.homeRowTitle] = s.homeRowTitle
+        p[Keys.homeRowSort] = s.homeRowSort
+        p[Keys.homeRowLimit] = s.homeRowLimit
+        p[Keys.homeRowHidePlaceholders] = s.homeRowHidePlaceholders
+        p[Keys.homeRowOpensGuide] = s.homeRowOpensGuide
+        p[Keys.homeRowShowNext] = s.homeRowShowNext
+        p[Keys.homeRowCompact] = s.homeRowCompact
+        p[Keys.bufferSize] = s.bufferSize
+        p[Keys.groupSort] = s.groupSort
+        p[Keys.timeshiftEnabled] = s.timeshiftEnabled
+        p[Keys.timeshiftMinutes] = s.timeshiftMinutes
+        p[Keys.rewindAlways] = s.rewindAlways
+        p[Keys.captionsByDefault] = s.captionsByDefault
+        p[Keys.clockMode] = s.clockMode
+        p[Keys.clockPosition] = s.clockPosition
+        p[Keys.clockSize] = s.clockSize
+        p[Keys.clockOpacity] = s.clockOpacity
+        p[Keys.clockBackground] = s.clockBackground
+        p[Keys.panelBackground] = s.panelBackground
+        p[Keys.guideInfoBackground] = s.guideInfoBackground
+        p[Keys.guideBackdrop] = s.guideBackdrop
+        p[Keys.recentInPanel] = s.recentInPanel
+        p[Keys.panelRow] = s.panelRow
+        p[Keys.panelRowLists] = s.panelRowLists
+        p[Keys.panelRowLast] = s.panelRowLast
+        p[Keys.panelRowOpens] = s.panelRowOpens
+        p[Keys.channelSurf] = s.channelSurf
+        p[Keys.barHidden] = s.barHidden
+        p[Keys.guideInfoHidden] = s.guideInfoHidden
+        p[Keys.launcherRows] = s.launcherRows
+        p[Keys.showImportProgress] = s.showImportProgress
+    }
+
+    // ---------- channel management ----------
+
+    suspend fun setChannelName(key: String, name: String?) {
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.channelNames]).toMutableMap()
+            if (name.isNullOrBlank()) m.remove(key) else m[key] = name.trim()
+            p[Keys.channelNames] = encodeStringMap(m)
+        }
+    }
+
+    /** The logo picked for a channel ("Change Logo"); null puts its own back. */
+    suspend fun setChannelLogo(key: String, url: String?) {
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.channelLogos]).toMutableMap()
+            if (url.isNullOrBlank()) m.remove(key) else m[key] = url.trim()
+            p[Keys.channelLogos] = encodeStringMap(m)
+        }
+    }
+
+    suspend fun setChannelNumber(key: String, number: Int?) {
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.channelNumbers]).toMutableMap()
+            if (number == null) m.remove(key) else m[key] = number.toString()
+            p[Keys.channelNumbers] = encodeStringMap(m)
+        }
+    }
+
+    suspend fun setGroupName(groupId: String, name: String?) {
+        if (groupId.startsWith(com.nuvio.tv.livetv.model.ChannelGroup.CUSTOM_PREFIX)) {
+            updateCustomGroups { list -> list.map { if (it.id == groupId && !name.isNullOrBlank()) it.copy(name = name.trim()) else it } }
+            return
+        }
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.groupNames]).toMutableMap()
+            if (name.isNullOrBlank()) m.remove(groupId) else m[groupId] = name.trim()
+            p[Keys.groupNames] = encodeStringMap(m)
+        }
+    }
+
+    /** Moves [groupId] within [currentOrder] (the order currently shown) and saves the result. */
+    suspend fun moveGroup(groupId: String, delta: Int, currentOrder: List<String>) {
+        val order = currentOrder.toMutableList()
+        val i = order.indexOf(groupId)
+        if (i < 0) return
+        order.removeAt(i)
+        order.add((i + delta).coerceIn(0, order.size), groupId)
+        store.edit { it[my(Keys.groupOrder)] = encodeStringList(order) }
+    }
+
+    suspend fun createCustomGroup(name: String): String {
+        val id = com.nuvio.tv.livetv.model.ChannelGroup.CUSTOM_PREFIX + java.util.UUID.randomUUID().toString().take(8)
+        updateCustomGroups { it + CustomGroup(id, name.trim().ifBlank { "My group" }) }
+        return id
+    }
+
+    suspend fun deleteCustomGroup(groupId: String) = updateCustomGroups { list -> list.filterNot { it.id == groupId } }
+
+    suspend fun addToCustomGroup(groupId: String, key: String) = updateCustomGroups { list ->
+        list.map { if (it.id == groupId && key !in it.channelKeys) it.copy(channelKeys = it.channelKeys + key) else it }
+    }
+
+    /** Adds all [keys] to one of your own groups in a single save (the ones already there are skipped). */
+    suspend fun addManyToCustomGroup(groupId: String, keys: List<String>) = updateCustomGroups { list ->
+        list.map { g ->
+            if (g.id != groupId) g
+            else g.copy(channelKeys = g.channelKeys + keys.filter { it !in g.channelKeys }.distinct())
+        }
+    }
+
+    /** Copies all [keys] into a playlist group in a single save (the ones already copied there are skipped). */
+    suspend fun copyChannels(groupId: String, keys: List<String>) {
+        store.edit { p ->
+            val m = decodeListMap(p[my(Keys.channelCopies)]).toMutableMap()
+            val cur = m[groupId].orEmpty()
+            val add = keys.filter { it !in cur }.distinct()
+            if (add.isNotEmpty()) m[groupId] = cur + add
+            p[my(Keys.channelCopies)] = encodeListMap(m)
+        }
+    }
+
+    suspend fun removeFromCustomGroup(groupId: String, key: String) = updateCustomGroups { list ->
+        list.map { if (it.id == groupId) it.copy(channelKeys = it.channelKeys - key) else it }
+    }
+
+    suspend fun moveInCustomGroup(groupId: String, key: String, delta: Int) = updateCustomGroups { list ->
+        list.map { g ->
+            if (g.id != groupId) return@map g
+            val keys = g.channelKeys.toMutableList()
+            val i = keys.indexOf(key)
+            if (i < 0) return@map g
+            keys.removeAt(i)
+            keys.add((i + delta).coerceIn(0, keys.size), key)
+            g.copy(channelKeys = keys)
+        }
+    }
+
+    suspend fun setEpgOverride(key: String, assignment: com.nuvio.tv.livetv.model.EpgAssignment?) {
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.epgOverrides]).toMutableMap()
+            if (assignment == null) m.remove(key) else m[key] = assignment.sourceId + EPG_SEP + assignment.xmltvId
+            p[Keys.epgOverrides] = encodeStringMap(m)
+        }
+    }
+
+    /** Picture shape chosen per channel (channels left on Auto aren't listed). */
+    val pictureShapes: Flow<Map<String, String>> = store.data.map { decodeStringMap(it[Keys.pictureShapes]) }
+
+    // ---------- Sports ----------
+    // Kept with Live TV's settings so Google Drive sync carries them to your other TVs too.
+
+    /** Sports settings and channel fixes (JSON, read by the Sports page). */
+    val sportsSettingsJson: Flow<String?> = store.data.map { it[Keys.sports] }.distinctUntilChanged()
+
+    /** What this profile follows in Sports (JSON). */
+    val sportsMineJson: Flow<String?> =
+        kotlinx.coroutines.flow.combine(store.data, profileManager.activeProfileId) { p, id -> profileView(p, id)[Keys.sportsMine] }
+            .distinctUntilChanged()
+
+    /** This profile's Live TV and Sports rows on Nuvio's home screen (JSON). */
+    val homeRowsJson: Flow<String?> =
+        kotlinx.coroutines.flow.combine(store.data, profileManager.activeProfileId) { p, id -> profileView(p, id)[Keys.homeRows] }
+            .distinctUntilChanged()
+
+    suspend fun editHomeRows(transform: (String?) -> String) {
+        store.edit { p ->
+            val id = currentProfile
+            p[my(Keys.homeRows, id)] = transform(profileView(p, id)[Keys.homeRows])
+        }
+    }
+
+    suspend fun editSportsSettings(transform: (String?) -> String) {
+        store.edit { p -> p[Keys.sports] = transform(p[Keys.sports]) }
+    }
+
+    suspend fun editSportsMine(transform: (String?) -> String) {
+        store.edit { p ->
+            val id = currentProfile
+            p[my(Keys.sportsMine, id)] = transform(profileView(p, id)[Keys.sportsMine])
+        }
+    }
+
+    suspend fun setPictureShape(key: String, shape: com.nuvio.tv.livetv.player.PictureShape) {
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.pictureShapes]).toMutableMap()
+            if (shape == com.nuvio.tv.livetv.player.PictureShape.AUTO) m.remove(key) else m[key] = shape.name
+            p[Keys.pictureShapes] = encodeStringMap(m)
+        }
+    }
+
+    suspend fun clearEpgOverrides() {
+        store.edit { it[Keys.epgOverrides] = encodeStringMap(emptyMap()) }
+    }
+
+    // ---------- parental controls, reminders, quality, On Demand ----------
+
+    suspend fun setGroupLocked(groupId: String, locked: Boolean) {
+        store.edit { p ->
+            val cur = p[Keys.lockedGroups] ?: emptySet()
+            p[Keys.lockedGroups] = if (locked) cur + groupId else cur - groupId
+        }
+    }
+
+    suspend fun addReminder(r: Reminder) {
+        store.edit { p ->
+            val cur = decodeReminders(p[my(Keys.reminders)]).filterNot { it.channelKey == r.channelKey && it.startMs == r.startMs }
+            p[my(Keys.reminders)] = encodeReminders((cur + r).sortedBy { it.startMs })
+        }
+    }
+
+    suspend fun removeReminder(channelKey: String, startMs: Long) {
+        store.edit { p ->
+            p[my(Keys.reminders)] = encodeReminders(
+                decodeReminders(p[my(Keys.reminders)]).filterNot { it.channelKey == channelKey && it.startMs == startMs }
+            )
+        }
+    }
+
+    /** Drops reminders for shows that started more than [graceMs] ago. */
+    suspend fun pruneReminders(now: Long, graceMs: Long = 30 * 60_000L) {
+        store.edit { p ->
+            val cur = decodeReminders(p[my(Keys.reminders)])
+            val kept = cur.filter { it.startMs + graceMs > now }
+            if (kept.size != cur.size) p[my(Keys.reminders)] = encodeReminders(kept)
+        }
+    }
+
+    /** The audio track picked on a channel, used every time it plays (null forgets it). */
+    suspend fun setChannelAudio(key: String, audio: String?) {
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.channelAudio]).toMutableMap()
+            if (audio == null) m.remove(key) else m[key] = audio
+            p[Keys.channelAudio] = encodeStringMap(m)
+        }
+    }
+
+    /** The caption choice made on a channel, used every time it plays (null forgets it). */
+    suspend fun setChannelCaptions(key: String, captions: String?) {
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.channelCaptions]).toMutableMap()
+            if (captions == null) m.remove(key) else m[key] = captions
+            p[Keys.channelCaptions] = encodeStringMap(m)
+        }
+    }
+
+    suspend fun setChannelQuality(key: String, quality: String) {
+        // Older versions kept these in the main settings: move them over once.
+        val legacy = store.data.first()[Keys.channelQuality]
+        if (legacy != null) store.edit { it.remove(Keys.channelQuality) }
+        deviceStore.edit { p ->
+            val m = decodeStringMap(p[Keys.channelQuality] ?: legacy).toMutableMap()
+            if (m[key] == quality && p[Keys.channelQuality] != null) return@edit
+            m[key] = quality
+            p[Keys.channelQuality] = encodeStringMap(m)
+        }
+    }
+
+    /** On Demand: one category's sort (null = back to the default sort). */
+    suspend fun setVodSort(uid: String, sort: String?) {
+        store.edit { p ->
+            val m = decodeStringMap(profileView(p, currentProfile)[Keys.vodSorts]).toMutableMap()
+            if (sort == null) m.remove(uid) else m[uid] = sort
+            p[my(Keys.vodSorts)] = encodeStringMap(m)
+        }
+    }
+
+    /** On Demand: every category's sort at once (Manage VOD Groups → Done). */
+    suspend fun setVodSorts(sorts: Map<String, String>) {
+        store.edit { p -> p[my(Keys.vodSorts)] = encodeStringMap(sorts) }
+    }
+
+    /** Manage VOD Groups: which groups show, their order and names, saved together (Done). */
+    suspend fun saveVodGroups(hidden: Set<String>, order: List<String>, names: Map<String, String>) {
+        store.edit { p ->
+            p[my(Keys.vodHiddenCategories)] = hidden
+            p[my(Keys.vodGroupOrder)] = encodeStringList(order)
+            p[Keys.vodGroupNames] = encodeStringMap(names.filterValues { it.isNotBlank() })
+        }
+    }
+
+    suspend fun updateVodHiddenCategories(show: Set<String>, hide: Set<String>) {
+        store.edit { p ->
+            val cur = p[my(Keys.vodHiddenCategories)] ?: emptySet()
+            p[my(Keys.vodHiddenCategories)] = (cur - show) + hide
+        }
+    }
+
+    /** Account details per playlist (expiry, connections), as the provider last reported them. */
+    val playlistAccounts: Flow<Map<String, com.nuvio.tv.livetv.model.PlaylistAccount>> = deviceStore.data.map { p ->
+        val out = HashMap<String, com.nuvio.tv.livetv.model.PlaylistAccount>()
+        runCatching {
+            val o = JSONObject(p[Keys.playlistAccounts] ?: "{}")
+            o.keys().forEach { id ->
+                val a = o.optJSONObject(id) ?: return@forEach
+                out[id] = com.nuvio.tv.livetv.model.PlaylistAccount(
+                    expiresAtMs = a.optLong("exp"),
+                    status = a.optString("status"),
+                    maxConnections = a.optInt("max"),
+                    activeConnections = a.optInt("active"),
+                    checkedAtMs = a.optLong("checked")
+                )
+            }
+        }
+        out
+    }.distinctUntilChanged()
+
+    suspend fun setPlaylistAccount(playlistId: String, a: com.nuvio.tv.livetv.model.PlaylistAccount?) {
+        deviceStore.edit { p ->
+            val o = runCatching { JSONObject(p[Keys.playlistAccounts] ?: "{}") }.getOrDefault(JSONObject())
+            if (a == null) o.remove(playlistId)
+            else o.put(playlistId, JSONObject().put("exp", a.expiresAtMs).put("status", a.status)
+                .put("max", a.maxConnections).put("active", a.activeConnections).put("checked", a.checkedAtMs))
+            p[Keys.playlistAccounts] = o.toString()
+        }
+    }
+
+    /** When each provider's On Demand catalog was last imported (per TV, not synced). */
+    suspend fun onDemandImportTimes(): Map<String, Long> =
+        decodeStringMap(deviceStore.data.first()[Keys.onDemandImports] ?: store.data.first()[Keys.onDemandImports])
+            .mapValues { it.value.toLongOrNull() ?: 0L }
+
+    suspend fun setOnDemandImportTime(playlistId: String, time: Long) {
+        val legacy = store.data.first()[Keys.onDemandImports]
+        if (legacy != null) store.edit { it.remove(Keys.onDemandImports) }
+        deviceStore.edit { p ->
+            val m = decodeStringMap(p[Keys.onDemandImports] ?: legacy).toMutableMap()
+            m[playlistId] = time.toString()
+            p[Keys.onDemandImports] = encodeStringMap(m)
+        }
+    }
+
+    suspend fun clearVodHiddenCategories() {
+        store.edit { it[my(Keys.vodHiddenCategories)] = emptySet() }
+    }
+
+    private fun decodeReminders(raw: String?): List<Reminder> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Reminder(o.optString("k"), o.optString("c"), o.optString("t"), o.optLong("s"))
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeReminders(list: List<Reminder>): String {
+        val arr = JSONArray()
+        list.forEach { arr.put(JSONObject().put("k", it.channelKey).put("c", it.channelName).put("t", it.title).put("s", it.startMs)) }
+        return arr.toString()
+    }
+
+    /**
+     * Takes out everything kept for channels and groups of playlists that no longer exist: hidden
+     * groups and channels, favorites, recents, custom groups' channels, channel copies and orders,
+     * group order, reminders, renames and per-channel choices, for every profile. Deleting a
+     * playlist used to leave all of it behind (hundreds of hidden groups still listed in
+     * Settings, custom groups counting channels that were gone).
+     *
+     * Only what clearly belongs to a deleted playlist goes: channel keys start with the
+     * playlist's id ("<id>|…") and its group ids with "<id>::" when there is more than one
+     * playlist. Group names without a playlist id (a single playlist's) can't be told apart and
+     * are left alone. Returns how many entries were taken out.
+     */
+    suspend fun forgetDeletedPlaylists(existingIds: Set<String>): Int {
+        var removed = 0
+        fun deadOwner(owner: String) = owner.isNotEmpty() && owner !in existingIds && PLAYLIST_ID.matches(owner)
+        fun deadChannel(key: String) = deadOwner(key.substringBefore('|', ""))
+        fun deadGroup(id: String) = deadOwner(id.substringBefore("::", ""))
+        fun <T> keep(list: List<T>, dead: (T) -> Boolean): List<T> = list.filterNot(dead).also { removed += list.size - it.size }
+        store.edit { p ->
+            for ((key, value) in p.asMap().toList()) {
+                val name = key.name
+                val base = name.replace(PROFILE_SUFFIX, "")
+                if (value is Set<*>) {
+                    val dead: ((String) -> Boolean) = when (base) {
+                        "hidden_channels" -> ::deadChannel
+                        "hidden_groups", "locked_groups", "favorite_groups" -> ::deadGroup
+                        "collapsed_playlists", "hidden_playlists" -> ::deadOwner
+                        else -> continue
+                    }
+                    val set = value.filterIsInstance<String>()
+                    val kept = keep(set, dead)
+                    if (kept.size != set.size) p[stringSetPreferencesKey(name)] = kept.toSet()
+                    continue
+                }
+                val raw = value as? String ?: continue
+                val strKey = stringPreferencesKey(name)
+                when (base) {
+                    "favorites", "recent" -> {
+                        val list = decodeStringList(raw)
+                        val kept = keep(list, ::deadChannel)
+                        if (kept.size != list.size) p[strKey] = encodeStringList(kept)
+                    }
+                    "group_order" -> {
+                        val list = decodeStringList(raw)
+                        val kept = keep(list, ::deadGroup)
+                        if (kept.size != list.size) p[strKey] = encodeStringList(kept)
+                    }
+                    "last_channel", "previous_channel" -> if (deadChannel(raw)) { p.remove(strKey); removed++ }
+                    "last_group" -> if (deadGroup(raw)) { p.remove(strKey); removed++ }
+                    "custom_groups" -> {
+                        val groups = decodeCustomGroups(raw)
+                        val before = removed
+                        val kept = groups.map { g -> g.copy(channelKeys = keep(g.channelKeys, ::deadChannel)) }
+                        if (removed != before) p[strKey] = encodeCustomGroups(kept)
+                    }
+                    "channel_order", "channel_copies" -> {
+                        val map = decodeListMap(raw)
+                        val before = removed
+                        val kept = LinkedHashMap<String, List<String>>()
+                        map.forEach { (groupId, keys) ->
+                            if (deadGroup(groupId)) removed++ else kept[groupId] = keep(keys, ::deadChannel)
+                        }
+                        if (removed != before) p[strKey] = encodeListMap(kept)
+                    }
+                    "recent_groups" -> {
+                        val map = decodeStringMap(raw)
+                        val kept = map.filterNot { (k, v) -> deadChannel(k) || deadGroup(v) }
+                        if (kept.size != map.size) { removed += map.size - kept.size; p[strKey] = encodeStringMap(kept) }
+                    }
+                    "group_names" -> {
+                        val map = decodeStringMap(raw)
+                        val kept = map.filterKeys { !deadGroup(it) }
+                        if (kept.size != map.size) { removed += map.size - kept.size; p[strKey] = encodeStringMap(kept) }
+                    }
+                    "channel_names", "channel_logos", "channel_numbers", "epg_overrides", "picture_shapes",
+                    "channel_quality", "channel_audio", "channel_captions" -> {
+                        val map = decodeStringMap(raw)
+                        val kept = map.filterKeys { !deadChannel(it) }
+                        if (kept.size != map.size) { removed += map.size - kept.size; p[strKey] = encodeStringMap(kept) }
+                    }
+                    "reminders" -> {
+                        val list = decodeReminders(raw)
+                        val kept = keep(list) { deadChannel(it.channelKey) }
+                        if (kept.size != list.size) p[strKey] = encodeReminders(kept)
+                    }
+                }
+            }
+        }
+        return removed
+    }
+
+    /** Saves the order of a playlist group or All channels (Reorder channels). */
+    suspend fun setChannelOrder(groupId: String, keys: List<String>) {
+        store.edit { p ->
+            val m = decodeListMap(p[my(Keys.channelOrder)]).toMutableMap()
+            m[groupId] = keys
+            p[my(Keys.channelOrder)] = encodeListMap(m)
+        }
+    }
+
+    suspend fun setFavoritesOrder(keys: List<String>) {
+        store.edit { p ->
+            val cur = decodeStringList(p[my(Keys.favorites)])
+            // Keep any favorites that weren't in the list (e.g. hidden ones) at the end.
+            p[my(Keys.favorites)] = encodeStringList(keys.filter { it in cur } + cur.filter { it !in keys })
+        }
+    }
+
+    suspend fun setCustomGroupOrder(groupId: String, keys: List<String>) = updateCustomGroups { list ->
+        list.map { g ->
+            if (g.id != groupId) g
+            else g.copy(channelKeys = keys.filter { it in g.channelKeys } + g.channelKeys.filter { it !in keys })
+        }
+    }
+
+    /** Copies a channel into another playlist group (it stays in its own group too). */
+    suspend fun copyChannel(groupId: String, key: String) {
+        store.edit { p ->
+            val m = decodeListMap(p[my(Keys.channelCopies)]).toMutableMap()
+            val cur = m[groupId].orEmpty()
+            if (key !in cur) m[groupId] = cur + key
+            p[my(Keys.channelCopies)] = encodeListMap(m)
+        }
+    }
+
+    suspend fun removeChannelCopy(groupId: String, key: String) {
+        store.edit { p ->
+            val m = decodeListMap(p[my(Keys.channelCopies)]).toMutableMap()
+            m[groupId] = m[groupId].orEmpty() - key
+            if (m[groupId].isNullOrEmpty()) m.remove(groupId)
+            p[my(Keys.channelCopies)] = encodeListMap(m)
+        }
+    }
+
+    suspend fun resetChannelOrder() {
+        store.edit { it[my(Keys.channelOrder)] = encodeListMap(emptyMap()) }
+    }
+
+    suspend fun clearChannelCopies() {
+        store.edit { it[my(Keys.channelCopies)] = encodeListMap(emptyMap()) }
+    }
+
+    suspend fun resetChannelEdits() {
+        store.edit {
+            it[Keys.channelNames] = encodeStringMap(emptyMap())
+            it[Keys.channelNumbers] = encodeStringMap(emptyMap())
+        }
+    }
+
+    suspend fun resetGroupEdits() {
+        store.edit {
+            it[Keys.groupNames] = encodeStringMap(emptyMap())
+            it[my(Keys.groupOrder)] = encodeStringList(emptyList())
+        }
+    }
+
+    private suspend fun updateCustomGroups(transform: (List<CustomGroup>) -> List<CustomGroup>) {
+        store.edit { p -> p[my(Keys.customGroups)] = encodeCustomGroups(transform(decodeCustomGroups(p[my(Keys.customGroups)]))) }
+    }
+
+    // ---------- per-channel state ----------
+
+    suspend fun setChannelHidden(key: String, hidden: Boolean) {
+        store.edit { p ->
+            val cur = p[my(Keys.hiddenChannels)] ?: emptySet()
+            p[my(Keys.hiddenChannels)] = if (hidden) cur + key else cur - key
+        }
+    }
+
+    /** Applies a batch of group show/hide changes at once (Manage visibility for groups). */
+    suspend fun updateHiddenGroups(show: Set<String>, hide: Set<String>) {
+        store.edit { p ->
+            val cur = p[my(Keys.hiddenGroups)] ?: emptySet()
+            p[my(Keys.hiddenGroups)] = (cur - show) + hide
+        }
+    }
+
+    /** Applies a batch of show/hide changes at once (Manage visibility). */
+    suspend fun updateHiddenChannels(show: Set<String>, hide: Set<String>) {
+        store.edit { p ->
+            val cur = p[my(Keys.hiddenChannels)] ?: emptySet()
+            p[my(Keys.hiddenChannels)] = (cur - show) + hide
+        }
+    }
+
+    suspend fun clearHiddenChannels() {
+        store.edit { it[my(Keys.hiddenChannels)] = emptySet() }
+    }
+
+    /** Which playlists each profile doesn't show (profile id → playlist ids). */
+    val hiddenPlaylistsByProfile: Flow<Map<Int, Set<String>>> =
+        kotlinx.coroutines.flow.combine(store.data, profileManager.profiles) { p, profiles ->
+            profiles.associate { it.id to (profileView(p, it.id)[Keys.hiddenPlaylists] ?: emptySet()) }
+        }.distinctUntilChanged()
+
+    /** Shows or hides playlist [playlistId] on profile [profileId] (profiles kept matched change together). */
+    suspend fun setPlaylistShownOn(playlistId: String, profileId: Int, shown: Boolean) {
+        if (playlistId.isBlank()) return
+        store.edit { p ->
+            val key = my(Keys.hiddenPlaylists, profileId)
+            val cur = profileView(p, profileId)[Keys.hiddenPlaylists] ?: emptySet()
+            p[key] = if (shown) cur - playlistId else cur + playlistId
+        }
+    }
+
+    suspend fun setGroupHidden(groupId: String, hidden: Boolean) {
+        store.edit { p ->
+            val cur = p[my(Keys.hiddenGroups)] ?: emptySet()
+            p[my(Keys.hiddenGroups)] = if (hidden) cur + groupId else cur - groupId
+        }
+    }
+
+    /** Stars a group (or takes the star off), for this profile. */
+    suspend fun setGroupFavorite(groupId: String, favorite: Boolean) {
+        store.edit { p ->
+            val cur = p[my(Keys.favoriteGroups)] ?: emptySet()
+            p[my(Keys.favoriteGroups)] = if (favorite) cur + groupId else cur - groupId
+        }
+    }
+
+    suspend fun clearHiddenGroups() {
+        store.edit { it[my(Keys.hiddenGroups)] = emptySet() }
+    }
+
+    suspend fun toggleFavorite(key: String) {
+        store.edit { p ->
+            val cur = decodeStringList(p[my(Keys.favorites)])
+            p[my(Keys.favorites)] = encodeStringList(if (key in cur) cur - key else cur + key)
+        }
+    }
+
+    /**
+     * Pick favorites (several at once): of [inList], exactly [chosen] are favorites afterwards.
+     * One save; favorites outside [inList] keep their place, new ones go at the end in list order.
+     */
+    suspend fun setFavoritesIn(inList: List<String>, chosen: Set<String>) {
+        store.edit { p ->
+            val cur = decodeStringList(p[my(Keys.favorites)])
+            val inSet = inList.toHashSet()
+            val kept = cur.filter { it !in inSet || it in chosen }
+            val keptSet = kept.toHashSet()
+            p[my(Keys.favorites)] = encodeStringList(kept + inList.filter { it in chosen && it !in keptSet }.distinct())
+        }
+    }
+
+    suspend fun moveFavorite(key: String, delta: Int) {
+        store.edit { p ->
+            val cur = decodeStringList(p[my(Keys.favorites)]).toMutableList()
+            val idx = cur.indexOf(key)
+            if (idx < 0) return@edit
+            val target = (idx + delta).coerceIn(0, cur.lastIndex)
+            cur.removeAt(idx)
+            cur.add(target, key)
+            p[my(Keys.favorites)] = encodeStringList(cur)
+        }
+    }
+
+    suspend fun clearFavorites() {
+        store.edit { it[my(Keys.favorites)] = encodeStringList(emptyList()) }
+    }
+
+    // ---------- Channels renamed in the playlist ----------
+    // Everything kept per channel key, in every profile: favorites, recents, last channels,
+    // hidden channels, groups you made, channel order and copies, reminders, and the per-channel
+    // renames, logos, numbers, guide choices, picture shapes, audio and quality.
+
+    private val keyLists = setOf("favorites", "recent")
+    private val keySingles = setOf("last_channel", "previous_channel")
+    private val keyListMaps = setOf("channel_order", "channel_copies")
+    private val keyMaps = setOf(
+        "channel_names", "channel_logos", "channel_numbers", "epg_overrides",
+        "picture_shapes", "channel_audio", "channel_quality"
+    )
+
+    suspend fun renamedChannelsChecked(): Boolean = deviceStore.data.first()[Keys.renamedChannelsChecked] == true
+
+    suspend fun setRenamedChannelsChecked() {
+        deviceStore.edit { it[Keys.renamedChannelsChecked] = true }
+    }
+
+    /** Every channel key something is saved for (see above). */
+    suspend fun channelKeysInUse(): Set<String> {
+        val out = HashSet<String>()
+        fun collect(p: Preferences) = p.asMap().forEach { (k, v) ->
+            val base = k.name.replace(PROFILE_SUFFIX, "")
+            when (base) {
+                in keyLists -> out += decodeStringList(v as? String)
+                in keySingles -> (v as? String)?.takeIf { it.isNotEmpty() }?.let { out += it }
+                "hidden_channels" -> (v as? Set<*>)?.forEach { if (it is String) out += it }
+                "custom_groups" -> decodeCustomGroups(v as? String).forEach { out += it.channelKeys }
+                in keyListMaps -> decodeListMap(v as? String).values.forEach { out += it }
+                "reminders" -> decodeReminders(v as? String).forEach { out += it.channelKey }
+                in keyMaps -> out += decodeStringMap(v as? String).keys
+            }
+        }
+        collect(store.data.first())
+        collect(deviceStore.data.first())
+        return out
+    }
+
+    /**
+     * Moves everything saved for each old key ([moves]: old → new) to the new key, in every
+     * profile, in one save. Where the new key already has its own value, that one is kept.
+     */
+    suspend fun moveChannelKeys(moves: Map<String, String>) {
+        if (moves.isEmpty()) return
+        fun m(k: String) = moves[k] ?: k
+        fun <V> moveMap(map: Map<String, V>): Map<String, V> {
+            val out = LinkedHashMap<String, V>()
+            map.forEach { (k, v) -> if (k !in moves) out[k] = v }
+            map.forEach { (k, v) -> moves[k]?.let { nk -> if (nk !in out) out[nk] = v } }
+            return out
+        }
+        fun moveIn(p: MutablePreferences) {
+            p.asMap().toList().forEach { (k, v) ->
+                val base = k.name.replace(PROFILE_SUFFIX, "")
+                if (v is Set<*>) {
+                    if (base != "hidden_channels") return@forEach
+                    val set = v.filterIsInstance<String>()
+                    if (set.none { it in moves }) return@forEach
+                    p[stringSetPreferencesKey(k.name)] = set.mapTo(LinkedHashSet(), ::m)
+                    return@forEach
+                }
+                val raw = v as? String ?: return@forEach
+                // Only saved again when one of the moved keys is really in it.
+                val moved: String? = when (base) {
+                    in keyLists -> decodeStringList(raw).takeIf { l -> l.any { it in moves } }
+                        ?.let { l -> encodeStringList(l.map(::m).distinct()) }
+                    in keySingles -> moves[raw]
+                    "custom_groups" -> decodeCustomGroups(raw).takeIf { l -> l.any { g -> g.channelKeys.any { it in moves } } }
+                        ?.let { l -> encodeCustomGroups(l.map { g -> g.copy(channelKeys = g.channelKeys.map(::m).distinct()) }) }
+                    in keyListMaps -> decodeListMap(raw).takeIf { mp -> mp.values.any { l -> l.any { it in moves } } }
+                        ?.let { mp -> encodeListMap(mp.mapValues { (_, l) -> l.map(::m).distinct() }) }
+                    "reminders" -> decodeReminders(raw).takeIf { l -> l.any { it.channelKey in moves } }
+                        ?.let { l -> encodeReminders(l.map { it.copy(channelKey = m(it.channelKey)) }) }
+                    in keyMaps -> decodeStringMap(raw).takeIf { mp -> mp.keys.any { it in moves } }
+                        ?.let { mp -> encodeStringMap(moveMap(mp)) }
+                    else -> null
+                }
+                if (moved != null) p[stringPreferencesKey(k.name)] = moved
+            }
+        }
+        store.edit { moveIn(it) }
+        deviceStore.edit { moveIn(it) }
+    }
+
+    suspend fun clearRecent() {
+        store.edit {
+            it[my(Keys.recent)] = encodeStringList(emptyList())
+            it[my(Keys.recentGroups)] = encodeStringMap(emptyMap())
+        }
+    }
+
+    /** Remembers the group [key] was opened from, for Recently Watched (only channels still in it are kept). */
+    suspend fun setRecentGroup(key: String, groupId: String) {
+        store.edit { p ->
+            val recent = decodeStringList(p[my(Keys.recent)]).toSet()
+            val map = decodeStringMap(p[my(Keys.recentGroups)]).filterKeys { it in recent && it != key }
+            p[my(Keys.recentGroups)] = encodeStringMap(map + (key to groupId))
+        }
+    }
+
+    /** [addToRecent] false: adult channels, which never go in Recently watched. */
+    suspend fun recordWatched(key: String, addToRecent: Boolean = true) {
+        store.edit { p ->
+            val last = p[my(Keys.lastChannel)]
+            if (last != null && last != key) p[my(Keys.previousChannel)] = last
+            p[my(Keys.lastChannel)] = key
+            if (addToRecent) {
+                val recent = decodeStringList(p[my(Keys.recent)]).filter { it != key }
+                p[my(Keys.recent)] = encodeStringList((listOf(key) + recent).take(30))
+            }
+        }
+    }
+
+    suspend fun setLastGroup(groupId: String) {
+        store.edit { it[my(Keys.lastGroup)] = groupId }
+    }
+
+    /** Playlists folded away in the guide's group list; kept between visits. */
+    suspend fun collapsedPlaylists(): Set<String> =
+        store.data.first()[my(Keys.collapsedPlaylists)] ?: emptySet()
+
+    suspend fun setCollapsedPlaylists(ids: Set<String>) {
+        store.edit { it[my(Keys.collapsedPlaylists)] = ids }
+    }
+
+    // ---------- Google Drive sync ----------
+
+    /** Fires whenever anything in Live TV's stored data changes. */
+    val changes: Flow<Unit> = store.data.map { }
+
+    /**
+     * Everything worth carrying to another TV, as JSON: sources, settings, favorites, hidden
+     * channels, groups, renames and EPG assignments. Left out: what this TV last watched, and
+     * download status (last updated, errors, counts), which differs per TV and changes constantly.
+     */
+    suspend fun exportForSync(): JSONObject {
+        val p = store.data.first()
+        val out = JSONObject()
+        p.asMap().forEach { (key, value) ->
+            val name = key.name
+            if (name in SYNC_EXCLUDED || name == com.nuvio.vpn.android.VpnBackup.KEY) return@forEach
+            val entry = when (value) {
+                is Boolean -> JSONObject().put("t", "b").put("v", value)
+                is Int -> JSONObject().put("t", "i").put("v", value)
+                is Long -> JSONObject().put("t", "l").put("v", value)
+                is Set<*> -> JSONObject().put("t", "s").put("v", JSONArray(value.map { it.toString() }))
+                is String -> {
+                    val v = when (name) {
+                        // Download status and what this TV learned about the server (its time zone,
+                        // whether HLS catch-up works) stay per TV: they differ between boxes, and
+                        // syncing them made each TV look changed to the other, so both reloaded.
+                        Keys.playlists.name -> encodePlaylists(decodePlaylists(value).map {
+                            it.copy(lastUpdatedMs = 0, lastError = null, channelCount = 0, serverTimezone = "", catchupNoHlsSince = 0L)
+                        })
+                        Keys.epgs.name -> encodeEpgs(decodeEpgs(value).map {
+                            it.copy(lastUpdatedMs = 0, lastError = null, programCount = 0, fallbackUserAgent = "")
+                        })
+                        else -> value
+                    }
+                    JSONObject().put("t", "str").put("v", v)
+                }
+                else -> null
+            } ?: return@forEach
+            out.put(name, entry)
+        }
+        val vpnKey = stringPreferencesKey(com.nuvio.vpn.android.VpnBackup.KEY)
+        val vpn = com.nuvio.vpn.android.VpnBackup.prepareExport(context, p[vpnKey])
+        if (p[vpnKey] != null) store.edit { it.remove(vpnKey) }
+        out.put(com.nuvio.vpn.android.VpnBackup.KEY, JSONObject().put("t", "str").put("v", vpn))
+        return out
+    }
+
+    /** Whether a setup from [exportForSync] has any playlist or guide in it. */
+    fun syncHasSources(data: JSONObject?): Boolean {
+        if (data == null) return false
+        fun raw(key: String) = data.optJSONObject(key)?.optString("v")
+        return runCatching { (JSONObject(raw(com.nuvio.vpn.android.VpnBackup.KEY).orEmpty()).optJSONArray("profiles")?.length() ?: 0) > 0 }.getOrDefault(false) ||
+            runCatching { decodePlaylists(raw(Keys.playlists.name)).isNotEmpty() }.getOrDefault(false) ||
+            runCatching { decodeEpgs(raw(Keys.epgs.name)).isNotEmpty() }.getOrDefault(false)
+    }
+
+    /** Replaces this TV's Live TV setup with [data] from [exportForSync], keeping per-TV state. */
+    suspend fun importFromSync(data: JSONObject): Set<String> = sourceMutations.withLock {
+        data.optJSONObject(com.nuvio.vpn.android.VpnBackup.KEY)?.optString("v")?.let {
+            com.nuvio.vpn.android.VpnBackup.restoreSetup(context, it)
+        }
+        // Playlists whose address or login changed, and guides whose link or user agent changed: they need downloading again.
+        val changed = HashSet<String>()
+        store.edit { p ->
+            val localPlaylists = decodePlaylists(p[Keys.playlists]).associateBy { it.id }
+            val localEpgs = decodeEpgs(p[Keys.epgs]).associateBy { it.id }
+            // Remove synced keys the other TV doesn't have, then write everything it does.
+            p.asMap().keys.filter { it.name !in SYNC_EXCLUDED && !data.has(it.name) }.forEach {
+                @Suppress("UNCHECKED_CAST")
+                p.remove(it as Preferences.Key<Any>)
+            }
+            data.keys().forEach { name ->
+                if (name in SYNC_EXCLUDED || name == com.nuvio.vpn.android.VpnBackup.KEY) return@forEach
+                val e = data.optJSONObject(name) ?: return@forEach
+                when (e.optString("t")) {
+                    "b" -> p[booleanPreferencesKey(name)] = e.optBoolean("v")
+                    "i" -> p[intPreferencesKey(name)] = e.optInt("v")
+                    "l" -> p[androidx.datastore.preferences.core.longPreferencesKey(name)] = e.optLong("v")
+                    "s" -> {
+                        val arr = e.optJSONArray("v") ?: JSONArray()
+                        p[stringSetPreferencesKey(name)] = (0 until arr.length()).map { arr.getString(it) }.toSet()
+                    }
+                    "str" -> {
+                        var v = e.optString("v")
+                        // Keep this TV's download status for sources it already had.
+                        if (name == Keys.playlists.name) {
+                            v = encodePlaylists(decodePlaylists(v).map { r ->
+                                localPlaylists[r.id]?.let { l ->
+                                    if (l.url != r.url || l.xtreamServer != r.xtreamServer || l.xtreamUsername != r.xtreamUsername ||
+                                        l.xtreamPassword != r.xtreamPassword || l.sourceType != r.sourceType || l.stalkerConfig != r.stalkerConfig || l.userAgent != r.userAgent || l.streamFormat != r.streamFormat
+                                    ) changed += r.id
+                                    r.copy(
+                                        lastUpdatedMs = l.lastUpdatedMs, lastError = l.lastError, channelCount = l.channelCount,
+                                        serverTimezone = l.serverTimezone, catchupNoHlsSince = l.catchupNoHlsSince,
+                                        fallbackUserAgent = l.fallbackUserAgent.ifBlank { r.fallbackUserAgent }
+                                    )
+                                } ?: r
+                            })
+                        } else if (name == Keys.epgs.name) {
+                            v = encodeEpgs(decodeEpgs(v).map { r ->
+                                localEpgs[r.id]?.let { l ->
+                                    // A new link or user agent from the other TV: downloaded again.
+                                    if (l.url != r.url || l.userAgent != r.userAgent) changed += r.id
+                                    r.copy(
+                                        lastUpdatedMs = l.lastUpdatedMs, lastError = l.lastError, programCount = l.programCount,
+                                        fallbackUserAgent = if (l.url == r.url) l.fallbackUserAgent.ifBlank { r.fallbackUserAgent } else ""
+                                    )
+                                } ?: r
+                            })
+                        }
+                        p[stringPreferencesKey(name)] = v
+                    }
+                }
+            }
+            // A setup from an older version: its one-for-everything time shifts onto each source.
+            moveTimeShifts(p)
+        }
+        // A changed portal identity must refresh its catalogue too, even when the source id is unchanged.
+        val portalIds = currentPlaylists().filter { it.isStalker }.mapTo(HashSet()) { it.id }
+        (changed intersect portalIds).forEach { setOnDemandImportTime(it, 0L) }
+        changed
+    }
+
+    // ---------- JSON helpers ----------
+
+    private fun decodePlaylists(raw: String?): List<PlaylistSource> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.optJSONObject(i) ?: return@mapNotNull null
+                PlaylistSource(
+                    id = o.optString("id"),
+                    name = o.optString("name"),
+                    url = o.optString("url"),
+                    enabled = o.optBoolean("enabled", true),
+                    userAgent = o.optString("userAgent"),
+                    fallbackUserAgent = o.optString("fallbackUserAgent"),
+                    useEmbeddedEpg = o.optBoolean("useEmbeddedEpg", true),
+                    xtreamServer = o.optString("xtreamServer"),
+                    xtreamUsername = o.optString("xtreamUsername"),
+                    xtreamPassword = o.optString("xtreamPassword"),
+                    lastUpdatedMs = o.optLong("lastUpdatedMs"),
+                    lastError = o.optString("lastError").ifBlank { null },
+                    channelCount = o.optInt("channelCount"),
+                    // Logins from before On Demand existed stay off until you switch them on.
+                    importVod = o.optBoolean("importVod", false),
+                    importLive = o.optBoolean("importLive", true),
+                    streamFormat = o.optString("streamFormat").ifBlank { "auto" },
+                    serverTimezone = o.optString("serverTimezone"),
+                    catchupTimezone = o.optString("catchupTimezone"),
+                    catchupNoHlsSince = o.optLong("catchupNoHlsSince", 0L),
+                    logoSource = o.optString("logoSource").ifBlank { "playlist" },
+                    guideShiftMinutes = o.optInt("guideShiftMinutes", 0),
+                    catchupShiftMinutes = o.optInt("catchupShiftMinutes", 0),
+                    guidesOff = o.optJSONArray("guidesOff")?.let { a -> (0 until a.length()).mapNotNullTo(HashSet()) { a.optString(it).ifBlank { null } } }.orEmpty(),
+                    sourceType = o.optString("sourceType").ifBlank { o.optString("providerKind").ifBlank { if (o.optJSONObject("stalkerConfig") != null || o.optJSONObject("stalker") != null) "stalker" else "" } },
+                    stalkerConfig = (o.optJSONObject("stalkerConfig") ?: o.optJSONObject("stalker"))?.let { value ->
+                        runCatching { com.nuvio.stalker.StalkerConfig.fromJson(kotlinx.serialization.json.Json.parseToJsonElement(value.toString()) as kotlinx.serialization.json.JsonObject) }.getOrNull()
+                    },
+                    linkServer = o.optString("linkServer"),
+                    linkUsername = o.optString("linkUsername"),
+                    linkPassword = o.optString("linkPassword"),
+                    vodInPlaylist = o.optBoolean("vodInPlaylist", false)
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodePlaylists(list: List<PlaylistSource>): String {
+        val arr = JSONArray()
+        list.forEach { s ->
+            arr.put(
+                JSONObject()
+                    .put("id", s.id).put("name", s.name).put("url", s.url)
+                    .put("enabled", s.enabled).put("userAgent", s.userAgent)
+                    .put("fallbackUserAgent", s.fallbackUserAgent)
+                    .put("useEmbeddedEpg", s.useEmbeddedEpg)
+                    .put("xtreamServer", s.xtreamServer).put("xtreamUsername", s.xtreamUsername)
+                    .put("xtreamPassword", s.xtreamPassword)
+                    .put("linkServer", s.linkServer).put("linkUsername", s.linkUsername)
+                    .put("linkPassword", s.linkPassword).put("vodInPlaylist", s.vodInPlaylist)
+                    .put("lastUpdatedMs", s.lastUpdatedMs).put("lastError", s.lastError ?: "")
+                    .put("channelCount", s.channelCount)
+                    .put("importVod", s.importVod)
+                    .put("importLive", s.importLive)
+                    .put("streamFormat", s.streamFormat)
+                    .put("serverTimezone", s.serverTimezone)
+                    .put("catchupTimezone", s.catchupTimezone)
+                    .put("catchupNoHlsSince", s.catchupNoHlsSince)
+                    .put("logoSource", s.logoSource)
+                    .put("guideShiftMinutes", s.guideShiftMinutes)
+                    .put("catchupShiftMinutes", s.catchupShiftMinutes)
+                    .apply {
+                        if (s.guidesOff.isNotEmpty()) put("guidesOff", JSONArray(s.guidesOff.sorted()))
+                        val type = if (s.isStalker) "stalker" else s.sourceType
+                        if (type.isNotBlank()) put("sourceType", type)
+                        s.stalkerConfig?.let { put("stalkerConfig", JSONObject(it.toJson().toString())) }
+                    }
+            )
+        }
+        return arr.toString()
+    }
+
+    private fun decodeEpgs(raw: String?): List<EpgSource> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                EpgSource(
+                    id = o.optString("id"),
+                    name = o.optString("name"),
+                    url = o.optString("url"),
+                    enabled = o.optBoolean("enabled", true),
+                    lastUpdatedMs = o.optLong("lastUpdatedMs"),
+                    lastError = o.optString("lastError").ifBlank { null },
+                    programCount = o.optInt("programCount"),
+                    shiftMinutes = o.optInt("shiftMinutes", 0),
+                    userAgent = o.optString("userAgent"),
+                    fallbackUserAgent = o.optString("fallbackUserAgent")
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeEpgs(list: List<EpgSource>): String {
+        val arr = JSONArray()
+        list.forEach { s ->
+            arr.put(
+                JSONObject()
+                    .put("id", s.id).put("name", s.name).put("url", s.url)
+                    .put("enabled", s.enabled).put("lastUpdatedMs", s.lastUpdatedMs)
+                    .put("lastError", s.lastError ?: "").put("programCount", s.programCount)
+                    .put("shiftMinutes", s.shiftMinutes)
+                    .put("userAgent", s.userAgent).put("fallbackUserAgent", s.fallbackUserAgent)
+            )
+        }
+        return arr.toString()
+    }
+
+    private fun decodeStringList(raw: String?): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { arr.getString(it) }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeStringList(list: List<String>): String = JSONArray(list).toString()
+
+    private companion object {
+        const val EPG_SEP = "\u0001"
+        /** Per-TV keys that Google Drive sync never copies. */
+        private val SYNC_EXCLUDED_BASE = setOf("last_channel", "previous_channel", "last_group", "recent", "on_demand_imports", "channel_quality", "developer_tools", "recording_storage")
+        private val PROFILE_SUFFIX = Regex("""_p\d+$""")
+        /** A playlist id (they are random UUIDs). */
+        private val PLAYLIST_ID = Regex("""[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}""")
+        /** Also matches each profile's own copy ("recent_p2"). */
+        val SYNC_EXCLUDED = object : AbstractSet<String>() {
+            override val size get() = SYNC_EXCLUDED_BASE.size
+            override fun iterator() = SYNC_EXCLUDED_BASE.iterator()
+            override fun contains(element: String) = element.replace(PROFILE_SUFFIX, "") in SYNC_EXCLUDED_BASE
+        }
+    }
+
+    private fun decodeListMap(raw: String?): Map<String, List<String>> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val o = JSONObject(raw)
+            o.keys().asSequence().associateWith { k ->
+                val arr = o.optJSONArray(k) ?: JSONArray()
+                (0 until arr.length()).map { arr.getString(it) }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun encodeListMap(map: Map<String, List<String>>): String {
+        val o = JSONObject()
+        map.forEach { (k, v) -> o.put(k, JSONArray(v)) }
+        return o.toString()
+    }
+
+    private fun decodeStringMap(raw: String?): Map<String, String> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val o = JSONObject(raw)
+            o.keys().asSequence().associateWith { o.optString(it) }
+        }.getOrDefault(emptyMap())
+    }
+
+    private fun encodeStringMap(map: Map<String, String>): String {
+        val o = JSONObject()
+        map.forEach { (k, v) -> o.put(k, v) }
+        return o.toString()
+    }
+
+    private fun decodeCustomGroups(raw: String?): List<CustomGroup> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                val keys = o.optJSONArray("keys")
+                CustomGroup(
+                    id = o.optString("id"),
+                    name = o.optString("name"),
+                    channelKeys = if (keys == null) emptyList() else (0 until keys.length()).map { keys.getString(it) }
+                )
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeCustomGroups(list: List<CustomGroup>): String {
+        val arr = JSONArray()
+        list.forEach { g ->
+            arr.put(JSONObject().put("id", g.id).put("name", g.name).put("keys", JSONArray(g.channelKeys)))
+        }
+        return arr.toString()
+    }
+}
+
+/** Each profile's hidden channels and hidden groups (see [LiveTvPreferences.hiddenEverywhere]). */
+/** One profile's hidden channels and groups, and the channels it shows elsewhere anyway. */
+data class HiddenView(val channels: Set<String>, val groups: Set<String>, val kept: Set<String> = emptySet())
+
+data class HiddenEverywhere(private val views: List<HiddenView>) {
+    /**
+     * True when no profile shows this channel (hidden itself, or its group is). A channel in
+     * Favorites, in a group you made, or copied into another group is shown: its listings are
+     * kept even when its own group is hidden. (They weren't: channels in your own groups whose
+     * provider group was hidden had almost no guide.)
+     */
+    fun hides(channelKey: String, groupId: String): Boolean =
+        views.isNotEmpty() && views.all { v ->
+            channelKey !in v.kept && (channelKey in v.channels || groupId in v.groups)
+        }
+}

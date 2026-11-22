@@ -74,6 +74,12 @@ internal class PlayerMediaSourceFactory(
     /** A media server's stream (Silo, Jellyfin, Emby): read with one request at a time. */
     private val isMediaServerUrl: (String) -> Boolean = { false }
 ) {
+    // Ephemeral provider credentials stay in a per-hop policy, never in generic request headers.
+    var stalkerMediaPolicy: com.nuvio.tv.livetv.stalker.StalkerMediaPolicy? = null
+        set(value) {
+            if (field !== value) field?.retire()
+            field = value
+        }
     private var customExtractorsFactory: ExtractorsFactory? = null
     private var customSubtitleParserFactory: SubtitleParser.Factory? = null
     private val loadErrorHandlingPolicy = PlayerLoadErrorHandlingPolicy()
@@ -387,7 +393,10 @@ internal class PlayerMediaSourceFactory(
         val slowStart = SlowStartServer.matches(url)
         // DefaultDataSource stays in front so data: manifests resolve; loopback engines serve
         // adaptive manifests slowly, so they get the long read timeout as well.
-        val httpDataSourceFactory = if (isHls || isDash) {
+        val httpDataSourceFactory = if (stalkerMediaPolicy != null) {
+            // Stalker links can be single-use: no extra segment reads (HLS start check) here.
+            DefaultDataSource.Factory(context, stalkerMediaPolicy!!.httpFactory())
+        } else if (isHls || isDash) {
             val adaptiveFactory = DefaultDataSource.Factory(
                 context,
                 PlayerPlaybackNetworking.createHttpDataSourceFactory(
@@ -443,7 +452,7 @@ internal class PlayerMediaSourceFactory(
         // prefetch caps lookahead at two chunks; side cursors fetch only the
         // chunk they touch).
         val mp4SessionMode = chunkSessionShape.mp4SessionMode
-        val useChunkSessionSource = chunkSessionShape.useChunkSessionSource
+        val useChunkSessionSource = stalkerMediaPolicy == null && chunkSessionShape.useChunkSessionSource
         parallelStartupPrefetchUnlocked.set(!useChunkSessionSource)
         val networkProgressiveFactory: DataSource.Factory = if (useChunkSessionSource) {
             if (mp4SessionMode) {
@@ -482,7 +491,7 @@ internal class PlayerMediaSourceFactory(
                     onResolvedUri = { resolved -> currentVodCacheResolvedUrl = resolved?.toString() }
                 )
             }
-        } else if (isLoopbackUrl(url)) {
+        } else if (stalkerMediaPolicy == null && isLoopbackUrl(url)) {
             PlayerPlaybackNetworking.createHttpDataSourceFactory(sanitizedHeaders, useLongReadTimeout = true)
         } else if (usesAutoSpeedup(
                 enabled = autoSpeedupEnabled,
@@ -511,7 +520,7 @@ internal class PlayerMediaSourceFactory(
             }
 
         // 2. VOD disk cache (opt-in).
-        val useVodCache = ENABLE_VOD_CACHE && vodCacheEnabled && !isHls && !isDash && shouldUseVodCache(url) &&
+        val useVodCache = stalkerMediaPolicy == null && ENABLE_VOD_CACHE && vodCacheEnabled && !isHls && !isDash && shouldUseVodCache(url) &&
             url !in vodCacheBypassUrls
         // A playback started inside the delay window would have its own data swept out from under it.
         pendingEvictionJob?.cancel()
@@ -607,6 +616,7 @@ internal class PlayerMediaSourceFactory(
     }
 
     fun shutdown() {
+        stalkerMediaPolicy = null
         // Free any chunk buffers retained across seek reopens so native
         // allocations never outlive the player.
         AutoSpeedup.end()

@@ -3247,10 +3247,10 @@
     <string name="stream_test_video_bitrate">平均视频比特率：%1$s</string>
     <string name="stream_test_error_connection">连接失败。上次播放的流链接可能已过期或无法访问。请重新播放视频并重试。</string>
 
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">主屏幕行</string>
+    <string name="settings_home_screen_rows_subtitle">选择主屏幕上各行的顺序</string>
+</resources>
     <plurals name="cw_episodes_left">
-        <item quantity="other">剩 %d 集</item>
-    </plurals>
     <string name="cw_no_artwork">无美术图</string>
     <string name="detail_eyebrow_episodes">剧集</string>
     <string name="detail_section_parental_guide">家长指南</string>
@@ -3264,8 +3264,6 @@
     <string name="ambient_mode_timeout">空闲后启动</string>
     <string name="ambient_mode_timeout_subtitle">氛围模式启动前等待多久</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="other">%1$d 分钟</item>
-    </plurals>
     <string name="ambient_mode_catalogs">目录</string>
     <string name="ambient_mode_catalogs_subtitle">最多选择 3 个目录来获取图片</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">最多选择 3 个目录</string>
@@ -4309,11 +4307,7 @@
     <string name="report_sent_no_phone">感谢您的报告。Arc 是业余爱好项目，并非每份报告都会得到回复。</string>
     <string name="report_sent_back">返回观看</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="other">选择所有符合的情况。Arc 已保留最近 %1$d 分钟。</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="other">播放器设置和最近 %1$d 分钟</item>
-    </plurals>
     <string name="report_settings_subtitle">说明哪里出了问题，或您希望 Arc 做什么</string>
     <string name="report_group_choose">您想报告什么？</string>
     <string name="report_group_options">选项</string>
@@ -4366,8 +4360,6 @@
     <string name="report_sent_kind_bug">有功能不能用</string>
     <string name="report_sent_kind_idea">想法或建议</string>
     <plurals name="report_my_reports_new">
-        <item quantity="other">%1$d 条新动态</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s：%2$s</string>
     <string name="report_my_reports_hint">每天检查一次。Arc 是业余爱好项目，并非每份报告都会得到回复。</string>
     <string name="report_my_reports_hint_off">检查已关闭。打开“检查我的报告”即可查看报告的处理情况。</string>
@@ -4390,8 +4382,6 @@
     <string name="report_ready_follow_off">要跟进此报告，请用手机扫描下一屏上的代码。</string>
     <string name="report_notice_title">您的报告有新进展</string>
     <plurals name="report_notice_many_title">
-        <item quantity="other">您有 %1$d 份报告有新进展</item>
-    </plurals>
     <string name="report_notice_one">%1$s，发送于 %2$s：%3$s。</string>
     <string name="report_notice_many">打开“我的报告”查看变化。</string>
     <string name="report_notice_open">打开我的报告</string>
@@ -4402,13 +4392,9 @@
     <string name="report_stop_recording">停止记录</string>
     <string name="report_recording_pill">正在记录 %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="other">正在记录 %1$s · %2$d 个标记</item>
-    </plurals>
     <string name="report_recording_no_space">可用空间不足，无法记录</string>
     <string name="report_item_recording">记录中，%1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="other">%d 个标记。仅记录数值，绝不记录声音或画面。</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">报告问题 / 标记</string>
     <string name="remote_buttons_job_report_mark_desc">打开报告面板。记录期间会添加标记。</string>
     <string name="display_mode_measured">实测</string>
@@ -4440,4 +4426,3 @@
     <string name="about_update_optimize_install_subtitle">更新后首次启动更快，但安装期间应用会关闭约一分钟。关闭此项可改用 Android 安装程序界面</string>
     <string name="update_ready_closes">下载完成。安装更新期间应用会关闭，可能需要一分钟。完成后请重新打开。</string>
     <string name="update_ready_closes_and_reopens">下载完成。安装更新期间应用会关闭，完成后会自动重新打开，可能需要一分钟。</string>
-</resources>

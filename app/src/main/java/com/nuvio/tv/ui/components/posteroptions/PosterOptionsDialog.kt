@@ -54,7 +54,11 @@ fun PosterOptionsDialog(
     scoutAddonBaseUrl: String? = null,
     scoutAliasId: String? = null,
     onMoreLike: (() -> Unit)? = null,
-    mixItem: com.nuvio.tv.domain.model.MetaPreview? = null
+    mixItem: com.nuvio.tv.domain.model.MetaPreview? = null,
+    onToggleWatched: () -> Unit,
+    /** Live TV fork: the Calendar's bell for a show ("Ring the bell…"), when offered. */
+    bellLabel: String? = null,
+    onBell: () -> Unit = {}
 ) {
     val primaryFocusRequester = remember { FocusRequester() }
 
@@ -89,6 +93,19 @@ fun PosterOptionsDialog(
                 onClick = onManageLists,
                 enabled = !isLibraryPending
             )
+        }
+
+        if (bellLabel != null) {
+            Button(
+                onClick = onBell,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.colors(
+                    containerColor = NuvioTheme.colors.BackgroundCard,
+                    contentColor = NuvioTheme.colors.TextPrimary
+                )
+            ) {
+                Text(bellLabel)
+            }
         }
 
         PanelActionRow(
@@ -179,11 +196,16 @@ fun PosterOptionsHost(
     state: PosterOptionsState,
     controller: PosterOptionsController,
     onNavigateToDetail: (id: String, type: String, addonBaseUrl: String) -> Unit,
-    onMoreLike: ((com.nuvio.tv.domain.model.MetaPreview) -> Unit)? = null
+    onMoreLike: ((com.nuvio.tv.domain.model.MetaPreview) -> Unit)? = null,
+    /** Live TV fork: offer the Calendar's bell for shows (Search). */
+    calendarBell: Boolean = false
 ) {
     val target = state.target
     if (target != null) {
         val isSeries = isSeriesLikeType(target.apiType)
+        val bell = if (calendarBell && isSeries) {
+            com.nuvio.tv.livetv.calendar.rememberShowBell(target.id, null, target.name, target.poster, target.background)
+        } else null
         PosterOptionsDialog(
             title = target.name,
             isInLibrary = state.isInLibrary,
@@ -214,6 +236,11 @@ fun PosterOptionsHost(
                 } else {
                     controller.toggleMovieWatched()
                 }
+                controller.dismiss()
+            },
+            bellLabel = bell?.let { if (it.on) "Turn off the bell" else "Ring the bell (new episodes on your Calendar)" },
+            onBell = {
+                bell?.toggle?.invoke()
                 controller.dismiss()
             }
         )

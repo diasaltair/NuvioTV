@@ -1,6 +1,7 @@
 package com.nuvio.tv.core.profile
 
 import android.content.Context
+import com.nuvio.vpn.android.VpnPlaybackProtection
 import com.nuvio.tv.R
 import com.nuvio.tv.data.local.ProfileDataStore
 import com.nuvio.tv.data.local.ProfileDataStoreFactory
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.io.File
@@ -43,6 +45,7 @@ class ProfileManager @Inject constructor(
     internal val profileHistoryGenerationChanges: StateFlow<Long> get() = factory.historyGenerationChanges
 
     val activeProfileId: StateFlow<Int> = profileDataStore.activeProfileId
+        .onEach { VpnPlaybackProtection.setActiveUserProfile(it) }
         .stateIn(scope, SharingStarted.Eagerly, 1)
 
     val activeProfileReady: StateFlow<Boolean> = profileDataStore.activeProfileId
@@ -183,6 +186,7 @@ class ProfileManager @Inject constructor(
     private suspend fun deleteProfileDataAsync(profileId: Int) = withContext(Dispatchers.IO) {
         if (profileId == 1) return@withContext
 
+        VpnPlaybackProtection.removeUserProfile(profileId)
         factory.clearProfile(profileId)
         com.nuvio.tv.ui.v2.profile.ProfilePosterWall.clear(context, profileId)
         val suffixWithExtension = "_p${profileId}.preferences_pb"

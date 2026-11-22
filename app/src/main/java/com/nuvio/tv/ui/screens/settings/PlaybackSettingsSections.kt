@@ -141,6 +141,7 @@ private fun PlaybackSectionContent(
     qualityRulesFocusRequester: FocusRequester?
 ) {
     when (section) {
+        PlaybackSection.TV_SETUP -> PlaybackTvSetupSection()
         PlaybackSection.PLAYER -> PlaybackPlayerSection(playerSettings, releaseDecoderOnBackground, onUpdate, onOpenDialog)
         PlaybackSection.STREAM_SELECTION -> PlaybackStreamSelectionSection(
             playerSettings,
@@ -171,6 +172,7 @@ private fun PlaybackSectionContent(
         PlaybackSection.REMOTE_BUTTONS -> PlaybackRemoteButtonsSection(remoteButtons) { map ->
             onUpdate { setRemoteButtons(map) }
         }
+        PlaybackSection.SEEK_THUMBNAILS -> PlaybackSeekThumbnailSection()
         PlaybackSection.AUDIO -> PlaybackAudioSection(playerSettings, onUpdate, onOpenDialog)
         PlaybackSection.SUBTITLES -> PlaybackSubtitlesSection(playerSettings, onUpdate, onOpenDialog)
         PlaybackSection.VIDEO -> PlaybackVideoSection(playerSettings, transparentLetterbox, onUpdate, onOpenDialog)

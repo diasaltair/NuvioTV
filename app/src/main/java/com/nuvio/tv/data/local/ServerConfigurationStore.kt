@@ -71,7 +71,12 @@ class ServerConfigurationStore @Inject constructor(
         fallbackBackendUrl = BuildConfig.SUPABASE_FALLBACK_URL.trim().trimEnd('/').takeIf { it.isNotBlank() },
         tvLoginWebBaseUrl = BuildConfig.TV_LOGIN_WEB_BASE_URL,
         deviceLoginWebBaseUrl = BuildConfig.DEVICE_LOGIN_WEB_BASE_URL,
+        // Live TV fork: builds made without an avatar address (ours) left every profile picture
+        // blank, since the catalog only gives each picture's path. The avatars live on the same
+        // server as the accounts, so use that, as custom servers already do.
         avatarPublicBaseUrl = BuildConfig.AVATAR_PUBLIC_BASE_URL.trimEnd('/').takeIf { it.isNotBlank() }
+            ?: BuildConfig.SUPABASE_URL.trim().trimEnd('/').takeIf { it.isNotBlank() }
+                ?.let { "$it/storage/v1/object/public/avatars" }
     )
 
     private companion object {

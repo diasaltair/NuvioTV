@@ -13,12 +13,14 @@ class SettingsStructureTest {
     fun `playback sections follow the documented order`() {
         assertEquals(
             listOf(
+                PlaybackSection.TV_SETUP,
                 PlaybackSection.PLAYER,
                 PlaybackSection.STREAM_SELECTION,
                 PlaybackSection.UP_NEXT,
                 PlaybackSection.SKIP_SEGMENTS,
                 PlaybackSection.PLAYER_INTERFACE,
                 PlaybackSection.REMOTE_BUTTONS,
+                PlaybackSection.SEEK_THUMBNAILS,
                 PlaybackSection.AUDIO,
                 PlaybackSection.SUBTITLES,
                 PlaybackSection.VIDEO,

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Power
+import androidx.compose.material.icons.filled.Reorder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -37,7 +38,9 @@ internal fun ContentDiscoverySettingsContent(
     onNavigateToAddons: () -> Unit,
     onNavigateToPlugins: () -> Unit,
     onNavigateToWatchParty: () -> Unit,
+    onNavigateToHomeRows: () -> Unit,
     showPlugins: Boolean,
+    showHomeRows: Boolean,
     initialFocusRequester: FocusRequester?
 ) {
     var serverPage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -93,7 +96,9 @@ internal fun ContentDiscoverySettingsContent(
                 onNavigateToPlugins = { lastOpenedRow = ContentDiscoveryRow.PLUGINS; onNavigateToPlugins() },
                 onNavigateToServers = { lastOpenedRow = ContentDiscoveryRow.SERVERS; openPage(SERVERS_PAGE) },
                 onNavigateToWatchParty = { lastOpenedRow = ContentDiscoveryRow.WATCH_PARTY; onNavigateToWatchParty() },
+                onNavigateToHomeRows = onNavigateToHomeRows,
                 showPlugins = showPlugins,
+                showHomeRows = showHomeRows,
                 initialFocusRequester = initialFocusRequester,
                 initialFocusRow = contentDiscoveryFocusRow(lastOpenedRow, showPlugins),
                 serversFocusRequester = hubServersRequester
@@ -116,9 +121,11 @@ internal fun ContentDiscoverySettingsContent(
 private fun ContentDiscoveryHub(
     onNavigateToAddons: () -> Unit,
     onNavigateToPlugins: () -> Unit,
+    onNavigateToHomeRows: () -> Unit,
     onNavigateToServers: () -> Unit,
     onNavigateToWatchParty: () -> Unit,
     showPlugins: Boolean,
+    showHomeRows: Boolean,
     initialFocusRequester: FocusRequester?,
     initialFocusRow: ContentDiscoveryRow,
     serversFocusRequester: FocusRequester
@@ -135,6 +142,15 @@ private fun ContentDiscoveryHub(
             subtitle = stringResource(R.string.settings_content_discovery_subtitle)
         )
         SettingsGroupCard(modifier = Modifier.fillMaxWidth()) {
+            if (showHomeRows) {
+                SettingsActionRow(
+                    title = stringResource(R.string.settings_home_screen_rows),
+                    subtitle = stringResource(R.string.settings_home_screen_rows_subtitle),
+                    onClick = onNavigateToHomeRows,
+                    leadingIcon = Icons.Default.Reorder,
+                    modifier = Modifier
+                )
+            }
             SettingsActionRow(
                 title = stringResource(R.string.addon_title),
                 subtitle = stringResource(R.string.settings_content_discovery_addons_subtitle),

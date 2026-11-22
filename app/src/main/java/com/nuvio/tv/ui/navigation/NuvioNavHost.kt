@@ -1,6 +1,7 @@
 package com.nuvio.tv.ui.navigation
 
 import android.os.SystemClock
+import kotlinx.coroutines.launch
 import com.nuvio.tv.ui.theme.NuvioMotion
 import com.nuvio.tv.ui.components.PlaybackAvailabilityProvider
 import com.nuvio.tv.ui.components.LocalPlaybackAvailability
@@ -25,6 +26,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import com.nuvio.tv.livetv.ondemand.settingsOnly
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
@@ -33,6 +38,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.nuvio.tv.core.build.AppFeaturePolicy
 import com.nuvio.tv.data.mediaserver.ServerCatalog
@@ -93,6 +99,16 @@ fun NuvioNavHost(
             }
         }
     }
+    // Live TV fork: "Remind me" messages, shown on top of whatever screen you're on.
+    com.nuvio.tv.livetv.reminders.LiveTvReminderHost(navController)
+    // Live TV fork: Nuvio account sync: starts when the app opens, and asks its one-time questions.
+    com.nuvio.tv.livetv.sync.CloudSyncHost()
+    // Live TV fork: "Loading channels… / Importing movies…" pill while things download.
+    com.nuvio.tv.livetv.ui.LiveTvLoadingHost(navController)
+    // Live TV fork: Sports reminders and scoring alerts, on top of whatever screen you're on.
+    com.nuvio.tv.livetv.sports.SportsHost(navController)
+    // Live TV fork: pinned game scoreboards in the corner while something plays.
+    com.nuvio.tv.livetv.sports.SportsPinsHost(navController)
 }
 
 // Root destinations carry the legacy sidebar inset themselves so the NavHost container
@@ -103,6 +119,28 @@ private fun NavGraphBuilder.rootComposable(
 ) {
     composable(route) { backStackEntry ->
         val inset = if (route in LocalRootRoutes.current) LocalRootContentInset.current else 0.dp
+        Box(modifier = Modifier.padding(start = inset)) {
+            content(backStackEntry)
+        }
+    }
+}
+
+/**
+ * Live TV fork pages that can be menu pages (Live TV, Recordings, On Demand, Sports, Calendar):
+ * moved aside for the older side menu only while the menu is showing (not in Live TV full screen,
+ * not when the page was opened from somewhere else), as they were before.
+ */
+private fun NavGraphBuilder.forkPageComposable(
+    route: String,
+    content: @Composable (NavBackStackEntry) -> Unit
+) {
+    composable(route) { backStackEntry ->
+        val liveTvFullscreen = if (route == Screen.LiveTv.route) {
+            val active by com.nuvio.tv.livetv.ui.LiveTvFullscreen.active.collectAsState()
+            active || com.nuvio.tv.livetv.ui.LiveTvFullscreen.pending
+        } else false
+        // Full screen must fill its first frame, without waiting for the sidebar inset animation.
+        val inset = if (liveTvFullscreen) 0.dp else com.nuvio.tv.LocalForkPageInset.current
         Box(modifier = Modifier.padding(start = inset)) {
             content(backStackEntry)
         }
@@ -208,6 +246,17 @@ private fun PlaybackNavHost(
         }
 
         rootComposable(Screen.Home.route) {
+            // Live TV fork: back from On Demand, Home starts from its own hero backdrop.
+            com.nuvio.tv.livetv.ondemand.OnDemandBackdropGuard.restoreForHome()
+            // Live TV fork: keep Home's latest layout settings for the On Demand page.
+            // Collected in the background, never read while drawing: reading it here made the
+            // whole Home page rebuild on every change (scrolling, posters, trailers).
+            run {
+                val homeVmForSettings: com.nuvio.tv.ui.screens.home.HomeViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+                androidx.compose.runtime.LaunchedEffect(homeVmForSettings) {
+                    homeVmForSettings.uiState.collect { com.nuvio.tv.livetv.ondemand.OnDemandHomeSettings.last = it }
+                }
+            }
             fun createContinueWatchingRoute(
                 item: ContinueWatchingItem,
                 manualSelection: Boolean = false,
@@ -271,6 +320,72 @@ private fun PlaybackNavHost(
                 }
             }
 
+            // Live TV fork: get Live TV ready in the background, so the guide is there when opened.
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                runCatching { com.nuvio.tv.livetv.startup.LiveTvPreload.start(context) }
+            }
+            // Live TV fork: what the home screen's Live TV row opens.
+            val openLiveTv = {
+                navController.navigate(Screen.LiveTv.route) {
+                    popUpTo(navController.graph.startDestinationId) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+            androidx.compose.runtime.CompositionLocalProvider(
+                com.nuvio.tv.livetv.home.LocalLiveTvHomeActions provides com.nuvio.tv.livetv.home.LiveTvHomeActions(
+                    onHome = true,
+                    openFullscreen = {
+                        openLiveTv()
+                        navController.navigate(Screen.LiveTvPlayer.route) { launchSingleTop = true }
+                    },
+                    openGuide = { openLiveTv() },
+                    openGame = { id ->
+                        // Back on the game comes back to Home.
+                        com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(
+                            id, com.nuvio.tv.livetv.sports.SportsLaunch.Origin(Screen.Home.route, "Home")
+                        )
+                        navController.navigate(Screen.Sports.route) {
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            ) {
+            // Live TV fork: On Demand rows on Home (their cards open like on the On Demand page).
+            com.nuvio.tv.livetv.home.HomeVodRowsHost(
+                onOpenDetail = { itemId, itemType, addonBaseUrl, onDemandUid ->
+                    navController.navigate(Screen.Detail.createRoute(itemId, itemType, addonBaseUrl))
+                    navController.currentBackStackEntry?.savedStateHandle?.set(
+                        com.nuvio.tv.livetv.ondemand.OnDemandPlay.KEY, onDemandUid
+                    )
+                },
+                onPlay = { url, title, type, poster, contentId, contentName, season, episode, episodeName ->
+                    navController.navigate(
+                        Screen.Player.createRoute(
+                            streamUrl = url,
+                            title = title,
+                            contentId = contentId,
+                            contentType = type,
+                            contentName = contentName,
+                            poster = poster,
+                            videoId = if (type == "series" && season != null && episode != null) "$contentId:$season:$episode" else contentId,
+                            season = season,
+                            episode = episode,
+                            episodeTitle = episodeName,
+                            addonName = com.nuvio.tv.livetv.ondemand.OnDemandStreams.GROUP_NAME
+                        )
+                    )
+                },
+                onOpenOnDemand = {
+                    navController.navigate(Screen.OnDemand.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            ) {
             HomeScreen(
                 onNavigateToDetail = { itemId, itemType, addonBaseUrl ->
                     com.nuvio.tv.core.performance.DetailEntryTrace.begin()
@@ -333,6 +448,8 @@ private fun PlaybackNavHost(
                     }
                 }
             )
+            }
+            }
         }
 
         composable(
@@ -403,6 +520,18 @@ private fun PlaybackNavHost(
             val heroBackdropUrl = detailArgs?.getString("heroBackdropUrl")?.takeIf { it.isNotBlank() }
             val playOnLoad = detailArgs?.getString("playOnLoad")?.toBooleanStrictOrNull() == true
             val manualSelection = detailArgs?.getString("manualSelection")?.toBooleanStrictOrNull() == true
+            val onDemandScope = androidx.compose.runtime.rememberCoroutineScope()
+            var onDemandVersions by androidx.compose.runtime.remember {
+                androidx.compose.runtime.mutableStateOf<List<com.nuvio.tv.livetv.ondemand.OnDemandRepository.Version>?>(null)
+            }
+            var onDemandPlayVersion by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<(String) -> Unit>({}) }
+            onDemandVersions?.let { versions ->
+                com.nuvio.tv.livetv.ondemand.OnDemandVersionPicker(
+                    versions = versions,
+                    onPick = { v -> onDemandVersions = null; onDemandPlayVersion(v.item.uid) },
+                    onDismiss = { onDemandVersions = null }
+                )
+            }
             DetailChildHost(parentNavController = navController) { childNav ->
             MetaDetailsScreen(
                 returnFocusSeason = returnFocusSeason,
@@ -445,6 +574,9 @@ private fun PlaybackNavHost(
                     childNav.navigateNestedDetail(itemId, itemType, addonBaseUrl)
                 },
                 onPlayClick = { videoId, contentType, contentId, title, poster, backdrop, logo, season, episode, episodeName, genres, year, runtime, contentLanguage ->
+                  // Live TV fork: Play shows every source, also for titles opened from On Demand.
+                  val onDemandUid = savedState.get<String>(com.nuvio.tv.livetv.ondemand.OnDemandPlay.KEY)
+                  val openStreams = {
                     navController.navigate(
                         Screen.Stream.createRoute(
                             videoId = videoId,
@@ -465,6 +597,51 @@ private fun PlaybackNavHost(
                             contentLanguage = contentLanguage
                         )
                     )
+                  }
+                  fun playVersion(uid: String) = onDemandScope.launch {
+                      val resolved = runCatching {
+                          com.nuvio.tv.livetv.ondemand.OnDemandPlay.resolve(context, uid, season, episode)
+                      }.getOrNull()
+                      if (resolved == null) openStreams()
+                      else navController.navigate(
+                          Screen.Player.createRoute(
+                              streamUrl = resolved.url,
+                              title = resolved.title,
+                              // Everything Nuvio needs to track progress, so it shows up in
+                              // Continue Watching (and Trakt / watched marks) like any stream.
+                              year = year,
+                              contentId = contentId,
+                              contentType = contentType,
+                              contentName = title,
+                              poster = poster ?: resolved.poster,
+                              backdrop = backdrop,
+                              logo = logo,
+                              videoId = videoId,
+                              season = season,
+                              episode = episode,
+                              episodeTitle = episodeName,
+                              addonName = com.nuvio.tv.livetv.ondemand.OnDemandStreams.GROUP_NAME,
+                              bingeGroup = com.nuvio.tv.livetv.ondemand.OnDemandStreams.BINGE_GROUP,
+                              contentLanguage = contentLanguage
+                          )
+                      )
+                  }
+                  // Play shows every source (your addons, debrid and 📡 On Demand) unless "Play Straight
+                  // from My Provider" is on and the title was opened from On Demand.
+                  if (onDemandUid == null) openStreams() else onDemandScope.launch {
+                      if (!com.nuvio.tv.livetv.ondemand.OnDemandPlay.playDirect(context)) {
+                          openStreams()
+                          return@launch
+                      }
+                      // Several copies (4K / HD, other providers): ask which one.
+                      val versions = runCatching {
+                          com.nuvio.tv.livetv.ondemand.OnDemandPlay.versions(context, onDemandUid)
+                      }.getOrDefault(emptyList())
+                      if (versions.size > 1) {
+                          onDemandVersions = versions
+                          onDemandPlayVersion = { uid -> playVersion(uid) }
+                      } else playVersion(onDemandUid)
+                  }
                 },
                 onPlayManuallyClick = { videoId, contentType, contentId, title, poster, backdrop, logo, season, episode, episodeName, genres, year, runtime, contentLanguage ->
                     navController.navigate(
@@ -985,6 +1162,11 @@ private fun PlaybackNavHost(
                     if (scoutMixNav.backPressed(args?.getString("contentId"), watched = playbackCompleted) &&
                         navController.popBackStack(Screen.ScoutMix.route, inclusive = false)
                     ) return@onBackPress
+                    // Live TV fork: a recording goes back to Recordings (it has no details page).
+                    if (com.nuvio.tv.livetv.record.RecordingResume.isRecording(args?.getString("contentType"))) {
+                        navController.popBackStack()
+                        return@onBackPress
+                    }
                     val initialSeason = args?.getString("season")?.toIntOrNull()
                     val initialEpisode = args?.getString("episode")?.toIntOrNull()
                     val episodeChangedInPlace = (currentSeason != null || currentEpisode != null) &&
@@ -1104,6 +1286,11 @@ private fun PlaybackNavHost(
                     if (nextVideoId == null && scoutMixNav.playbackEnded(args?.getString("contentId")) &&
                         navController.popBackStack(Screen.ScoutMix.route, inclusive = false)
                     ) return@onPlaybackEnded
+                    // Live TV fork: a recording that finishes goes back to Recordings.
+                    if (com.nuvio.tv.livetv.record.RecordingResume.isRecording(args?.getString("contentType"))) {
+                        navController.popBackStack()
+                        return@onPlaybackEnded
+                    }
                     val contentType = args?.getString("contentType").orEmpty()
                     val contentId = args?.getString("contentId").orEmpty()
                     val returnToDetailOnBack = args?.getString("returnToDetailOnBack")
@@ -1345,6 +1532,40 @@ private fun PlaybackNavHost(
             SearchScreen(
                 viewModel = searchViewModel,
                 onAskScout = { question -> navController.navigate(Screen.ScoutAskQuestion.createRoute(question)) },
+                // Live TV fork: the On Demand row (your provider's own titles).
+                onOpenOnDemand = { itemId, itemType, addonBaseUrl, onDemandUid ->
+                    navController.navigate(Screen.Detail.createRoute(itemId, itemType, addonBaseUrl))
+                    navController.currentBackStackEntry?.savedStateHandle?.set(
+                        com.nuvio.tv.livetv.ondemand.OnDemandPlay.KEY, onDemandUid
+                    )
+                },
+                onPlayOnDemand = { url, title, type, poster, contentId, contentName, season, episode, episodeName ->
+                    navController.navigate(
+                        Screen.Player.createRoute(
+                            streamUrl = url,
+                            title = title,
+                            contentId = contentId,
+                            contentType = type,
+                            contentName = contentName,
+                            poster = poster,
+                            videoId = if (type == "series" && season != null && episode != null) "$contentId:$season:$episode" else contentId,
+                            season = season,
+                            episode = episode,
+                            episodeTitle = episodeName,
+                            addonName = com.nuvio.tv.livetv.ondemand.OnDemandStreams.GROUP_NAME
+                        )
+                    )
+                },
+                onOpenLiveTv = {
+                    // Put the guide underneath, so Back from full screen lands on the guide
+                    // with this channel highlighted (not back in search).
+                    navController.navigate(Screen.LiveTv.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                    navController.navigate(Screen.LiveTvPlayer.route) { launchSingleTop = true }
+                },
                 onNavigateToDetail = { itemId, itemType, addonBaseUrl ->
                     val heroBackdrop = HeroBackdropState.consumeAndClear()
                     navController.navigate(
@@ -1426,14 +1647,296 @@ private fun PlaybackNavHost(
             )
         }
 
+        forkPageComposable(Screen.LiveTv.route) {
+            com.nuvio.tv.livetv.ui.LiveTvGuideScreen(
+                onOpenFullscreen = {
+                    navController.navigate(Screen.LiveTvPlayer.route) { launchSingleTop = true }
+                },
+                onOpenSettings = { navController.navigate(Screen.LiveTvSettings.route) },
+                // Recordings opens from the guide now (Back comes back to the guide).
+                onOpenRecordings = { navController.navigate(Screen.Recordings.route) { launchSingleTop = true } },
+                onOpenMultiview = { navController.navigate(Screen.LiveTvMultiview.route) { launchSingleTop = true } },
+                onOpenSportsMultiview = { panes, channelKey ->
+                    com.nuvio.tv.livetv.sports.SportsWatchLaunch.request(panes, channelKey)
+                    navController.navigate(Screen.SportsMultiview.route) { launchSingleTop = true }
+                },
+                onFindInNuvio = {
+                    // Back from search returns to the guide.
+                    navController.navigate(Screen.Search.route) { launchSingleTop = true }
+                },
+                onReturnToSports = {
+                    navController.navigate(Screen.Sports.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                // Full screen, the Games list: the game you're watching on its Sports page (the
+                // picture carries on in the page's window); Back there goes back to full screen.
+                onOpenSportsGame = { id ->
+                    com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(
+                        id, com.nuvio.tv.livetv.sports.SportsLaunch.Origin(com.nuvio.tv.livetv.sports.SportsLaunch.LIVE_FULLSCREEN, "Live TV")
+                    )
+                    navController.navigate(Screen.Sports.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                // A recording played full screen: Back goes to the screen it was picked on.
+                onReturnTo = { route ->
+                    if (!navController.popBackStack(route, inclusive = false)) {
+                        navController.navigate(route) { launchSingleTop = true }
+                    }
+                }
+            )
+        }
+
+        forkPageComposable(Screen.Recordings.route) {
+            // Live TV fork: recorded shows, played full screen in Live TV's own player (its seek
+            // bar, 30 s skips); Back comes back here.
+            com.nuvio.tv.livetv.record.RecordingsScreen(
+                onPlay = { _, _, _, recordingId, fromStart ->
+                    com.nuvio.tv.livetv.record.RecordingLaunch.open(recordingId, fromStart, Screen.Recordings.route)
+                    navController.navigate(Screen.LiveTvPlayer.route) { launchSingleTop = true }
+                }
+            )
+        }
+
+        forkPageComposable(Screen.LiveCalendar.route) {
+            // Live TV fork: when your shows' new episodes and your movies come out.
+            com.nuvio.tv.livetv.calendar.CalendarScreen(
+                onOpenDetail = { id, type, addonBaseUrl, season, episode ->
+                    navController.navigate(
+                        Screen.Detail.createRoute(
+                            itemId = id,
+                            itemType = type,
+                            addonBaseUrl = addonBaseUrl,
+                            returnFocusSeason = season,
+                            returnFocusEpisode = episode
+                        )
+                    )
+                },
+                onFindSources = { e ->
+                    val videoId = e.videoId
+                    if (videoId != null) {
+                        navController.navigate(
+                            Screen.Stream.createRoute(
+                                videoId = videoId,
+                                contentType = "series",
+                                title = e.title,
+                                poster = e.poster,
+                                backdrop = e.background,
+                                season = e.season,
+                                episode = e.episode,
+                                episodeName = e.episodeTitle,
+                                contentId = e.contentId,
+                                contentName = e.title,
+                                runtime = e.runtimeMin
+                            )
+                        )
+                    }
+                },
+                onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) },
+                onPlayRecording = { _, _, _, recordingId ->
+                    // Like Recordings: full screen in Live TV's player; Back comes back here.
+                    com.nuvio.tv.livetv.record.RecordingLaunch.open(recordingId, false, Screen.LiveCalendar.route)
+                    navController.navigate(Screen.LiveTvPlayer.route) { launchSingleTop = true }
+                },
+                onOpenGame = { id ->
+                    // Back on the game comes back here (the Calendar, where you were), not to the
+                    // Sports hub.
+                    com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(
+                        id, com.nuvio.tv.livetv.sports.SportsLaunch.Origin(Screen.LiveCalendar.route, "Calendar")
+                    )
+                    // Like picking Sports in the menu: the Calendar keeps its own place, and picking
+                    // Calendar in the menu afterwards opens the Calendar (not Sports again).
+                    navController.navigate(Screen.Sports.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+            )
+        }
+
+        forkPageComposable(Screen.Sports.route) { sportsEntry ->
+            // A Sports page that isn't the one on screen (left behind by a page switch that got
+            // cut short) stays drawn and working out of sight, a second copy alongside the real one,
+            // until Sports is picked again. Once it's been off screen longer than a page fade, it's
+            // closed (its lists, video window and timers with it).
+            val currentEntry by navController.currentBackStackEntryAsState()
+            val onScreen = currentEntry?.id == sportsEntry.id
+            var sportsShown by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+            androidx.compose.runtime.LaunchedEffect(onScreen) {
+                if (onScreen) sportsShown = true
+                else {
+                    kotlinx.coroutines.delay(1_500)
+                    if (sportsShown) com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Sports: an extra copy of the page was left open off screen; closed it")
+                    sportsShown = false
+                }
+            }
+            // Live TV fork: the Sports page (scores, schedules, which of your channels show each game).
+            if (sportsShown) com.nuvio.tv.livetv.sports.SportsScreen(
+                onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) },
+                onOpenMultiview = { channelKey ->
+                    com.nuvio.tv.livetv.sports.SportsWatchLaunch.request(2, channelKey)
+                    navController.navigate(Screen.SportsMultiview.route) { launchSingleTop = true }
+                },
+                // Back on a game opened from another page: that page again, as it was (like
+                // picking it in the side menu).
+                onReturnTo = { route ->
+                    if (route == com.nuvio.tv.livetv.sports.SportsLaunch.LIVE_FULLSCREEN) {
+                        // Opened from full screen (the Games list): back to full screen.
+                        com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController)
+                    } else if (route == Screen.LiveTvMultiview.route || route == Screen.SportsMultiview.route) {
+                        // Multiview is still under this page: go back to it, the pages beneath stay as they were.
+                        if (!navController.popBackStack(route, inclusive = false)) {
+                            runCatching { navController.navigate(route) { launchSingleTop = true } }
+                        }
+                    } else runCatching {
+                        navController.navigate(route) {
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                }
+            )
+        }
+
+        forkPageComposable(Screen.OnDemand.route) {
+            // Live TV fork: On Demand in Nuvio's own home layout (Classic, Grid or Modern, as set
+            // for Home), with every layout option taken from Home itself.
+            // Home's settings, read safely: Home may not be in the history (it's removed when the
+            // side menu switches pages and a profile picker is the start), and a removed Home
+            // must never be touched (that crashed the app, often on Back). Looked up afresh each
+            // time, used only while alive; otherwise the last settings Home had are used.
+            val homeEntry = runCatching { navController.getBackStackEntry(Screen.Home.route) }.getOrNull()
+                ?.takeIf { it.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.CREATED) }
+            val homeVm: com.nuvio.tv.ui.screens.home.HomeViewModel? = homeEntry?.let { androidx.hilt.navigation.compose.hiltViewModel(it) }
+            // Only Home's settings (layout, poster size…), not its rows: Home loading or updating
+            // its own rows in the background must not rebuild this page.
+            val homeSettingsFlow = androidx.compose.runtime.remember(homeVm) {
+                homeVm?.uiState?.map { it.settingsOnly() }?.distinctUntilChanged()
+            }
+            val homeSettings = homeSettingsFlow?.collectAsStateWithLifecycle(initialValue = null)?.value
+                ?.also { com.nuvio.tv.livetv.ondemand.OnDemandHomeSettings.last = it }
+                ?: com.nuvio.tv.livetv.ondemand.OnDemandHomeSettings.last?.settingsOnly()
+            com.nuvio.tv.livetv.ondemand.OnDemandHomeScreen(
+                homeSettings = homeSettings,
+                onOpenDetail = { itemId, itemType, addonBaseUrl, onDemandUid ->
+                    navController.navigate(Screen.Detail.createRoute(itemId, itemType, addonBaseUrl))
+                    navController.currentBackStackEntry?.savedStateHandle?.set(
+                        com.nuvio.tv.livetv.ondemand.OnDemandPlay.KEY, onDemandUid
+                    )
+                },
+                onPlay = { url, title, type, poster, contentId, contentName, season, episode, episodeName ->
+                    navController.navigate(
+                        Screen.Player.createRoute(
+                            streamUrl = url,
+                            title = title,
+                            contentId = contentId,
+                            contentType = type,
+                            contentName = contentName,
+                            poster = poster,
+                            videoId = if (type == "series" && season != null && episode != null) "$contentId:$season:$episode" else contentId,
+                            season = season,
+                            episode = episode,
+                            episodeTitle = episodeName,
+                            addonName = com.nuvio.tv.livetv.ondemand.OnDemandStreams.GROUP_NAME
+                        )
+                    )
+                },
+                // Search goes to Nuvio's own search (results open the usual details page, where
+                // your provider's copies are offered too).
+                onOpenSearch = {
+                    // What this search shows is set for On Demand in Live TV settings.
+                    com.nuvio.tv.livetv.ui.LiveTvSearchBridge.origin.value = com.nuvio.tv.livetv.ui.LiveTvSearchBridge.ON_DEMAND
+                    navController.navigate(Screen.Search.route) { launchSingleTop = true }
+                }
+            )
+        }
+
+        composable(Screen.LiveTvMultiview.route) {
+            com.nuvio.tv.livetv.multiview.MultiviewScreen(
+                onBack = { navController.popBackStack() },
+                onOpenGame = { id ->
+                    com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(
+                        id, com.nuvio.tv.livetv.sports.SportsLaunch.Origin(Screen.LiveTvMultiview.route, "Multiview")
+                    )
+                    navController.navigate(Screen.Sports.route) { launchSingleTop = true }
+                }
+            )
+        }
+
+        composable(Screen.SportsMultiview.route) {
+            // Opened from the Sports hub: Back goes back to the hub. Opened from Live TV: Back
+            // goes to the single screen with the focused channel.
+            val fromSportsHub = androidx.compose.runtime.remember {
+                navController.previousBackStackEntry?.destination?.route == Screen.Sports.route
+            }
+            com.nuvio.tv.livetv.multiview.MultiviewScreen(
+                onBack = { navController.popBackStack() },
+                startOnSports = true,
+                returnToSingle = !fromSportsHub,
+                onOpenGame = { id ->
+                    com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(
+                        id, com.nuvio.tv.livetv.sports.SportsLaunch.Origin(Screen.SportsMultiview.route, "Multiview")
+                    )
+                    navController.navigate(Screen.Sports.route) { launchSingleTop = true }
+                },
+                onSingle = {
+                    // Return directly to the guide. Restoring its saved stack can resurrect a
+                    // previous Multiview child that would release the incoming single player.
+                    if (!navController.popBackStack(Screen.LiveTv.route, inclusive = false)) {
+                        navController.navigate(Screen.LiveTv.route) {
+                            popUpTo(Screen.SportsMultiview.route) { inclusive = true }
+                            launchSingleTop = true
+                            restoreState = false
+                        }
+                    }
+                },
+            )
+        }
+
+        composable(Screen.LiveTvPlayer.route) {
+            // Live TV fork: full screen now happens inside the guide (one video view that just
+            // grows), so this route hands over to the guide in full screen.
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                com.nuvio.tv.livetv.ui.LiveTvFullscreen.request()
+                if (!navController.popBackStack(Screen.LiveTv.route, inclusive = false)) {
+                    navController.navigate(Screen.LiveTv.route) {
+                        popUpTo(Screen.LiveTvPlayer.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
+        }
+
+        composable(Screen.LiveTvSettings.route) {
+            com.nuvio.tv.ui.screens.settings.LiveTvSettingsScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
         rootComposable(Screen.Settings.route) {
             SettingsScreen(
                 showBuiltInHeader = !hideBuiltInHeaders,
+                onNavigateToLiveTv = { navController.navigate(Screen.LiveTvSettings.route) },
+                onNavigateToSportsTeams = {
+                    com.nuvio.tv.livetv.sports.SportsLaunch.openPicker()
+                    navController.navigate(Screen.Sports.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                    }
+                },
                 onNavigateToAddons = { navController.navigate(Screen.AddonManager.route) },
                 onNavigateToPlugins = { navController.navigate(Screen.Plugins.route) },
                 onNavigateToScoutTaste = { navController.navigate(Screen.ScoutTaste.route) },
                 onNavigateToScoutRoute = { route -> navController.navigate(route) },
                 onNavigateToWatchParty = { navController.navigate(Screen.WatchParty.route) },
+                onNavigateToHomeRows = { navController.navigate(Screen.CatalogOrder.route) },
                 onNavigateToAuthQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
                 onNavigateToManageProfiles = { navController.navigate(Screen.ManageProfiles.route) },
                 onNavigateToSupportersContributors = {

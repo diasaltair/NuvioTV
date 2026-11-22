@@ -154,6 +154,18 @@ sealed class Screen(val route: String) {
     data object Library : Screen("library")
     data object Calendar : Screen("calendar")
     data object Settings : Screen("settings")
+    data object LiveTv : Screen("live_tv")
+    data object LiveTvPlayer : Screen("live_tv_player")
+    data object LiveTvMultiview : Screen("live_tv_multiview")
+    data object SportsMultiview : Screen("sports_multiview")
+    data object LiveTvSettings : Screen("live_tv_settings")
+    data object OnDemand : Screen("on_demand")
+    /** Live TV fork: recorded shows. */
+    data object Recordings : Screen("recordings")
+    /** Live TV fork: release dates of your shows and movies (Arc has its own Calendar). */
+    data object LiveCalendar : Screen("live_calendar")
+    /** Live TV fork: scores, schedules and where to watch. */
+    data object Sports : Screen("sports")
     data object Tracking : Screen("trakt")
     data object TmdbSettings : Screen("tmdb_settings")
     data object WatchParty : Screen("watch_party")

@@ -1922,7 +1922,9 @@ internal fun splitUpcomingItems(
 ): Pair<List<ContinueWatchingItem>, List<ContinueWatchingItem>> {
     val unique = distinctContinueWatchingItems(items)
     if (mode != ContinueWatchingSortMode.SPLIT_UPCOMING) {
-        return unique to emptyList()
+        // Live TV fork: the Calendar's cards (new episodes of shows whose bell is rung, and the
+        // Upcoming row) go in here, where every update of Continue Watching passes.
+        return com.nuvio.tv.livetv.calendar.CalendarHomeFeed.apply(unique, emptyList())
     }
     val (upcoming, main) = unique.partition { item ->
         item is ContinueWatchingItem.NextUp && !item.info.hasAired
@@ -1942,7 +1944,7 @@ internal fun splitUpcomingItems(
             else -> dateA.compareTo(dateB)
         }
     }
-    return main to sortedUpcoming
+    return com.nuvio.tv.livetv.calendar.CalendarHomeFeed.apply(main, sortedUpcoming)
 }
 
 private suspend fun HomeViewModel.buildNextUpItem(

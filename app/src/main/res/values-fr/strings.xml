@@ -4274,6 +4274,8 @@
     <string name="party_nuvio_error_network">Impossible de joindre le serveur de Nuvio.</string>
     <string name="stream_resume_from_time">Reprendre à %1$s</string>
     <string name="stream_resume_from_percent">Reprendre à %1$d&#160;%%</string>
+    <string name="settings_home_screen_rows">Rangées de l\'écran d\'accueil</string>
+    <string name="settings_home_screen_rows_subtitle">Choisissez l\'ordre des rangées sur votre écran d\'accueil</string>
     <string name="tvdb_metadata_credit">Métadonnées fournies par %1$s</string>
     <string name="player_source_rate_limited">Ce serveur limite les requêtes. Réessayez dans environ %1$d min ou choisissez une source sur un autre serveur.</string>
     <string name="format_check_title">Test des formats</string>
@@ -4465,13 +4467,7 @@
     <string name="report_sent_no_phone">Merci pour le signalement. Arc est un projet amateur, tous les signalements ne reçoivent donc pas de réponse.</string>
     <string name="report_sent_back">Retour à la vidéo</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Choisissez tout ce qui s\'applique. Arc a gardé la dernière minute.</item>
-        <item quantity="other">Choisissez tout ce qui s\'applique. Arc a gardé les %1$d dernières minutes.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Réglages du lecteur et dernière minute</item>
-        <item quantity="other">Réglages du lecteur et %1$d dernières minutes</item>
-    </plurals>
     <string name="report_settings_subtitle">Dites ce qui n\'a pas marché ou ce que vous aimeriez qu\'Arc fasse</string>
     <string name="report_group_choose">Que souhaitez-vous signaler ?</string>
     <string name="report_group_options">Options</string>
@@ -4524,10 +4520,6 @@
     <string name="report_sent_kind_bug">Quelque chose ne marche pas</string>
     <string name="report_sent_kind_idea">Idée ou demande</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d nouveau</item>
-        <item quantity="many">%1$d nouveaux</item>
-        <item quantity="other">%1$d nouveaux</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s : %2$s</string>
     <string name="report_my_reports_hint">Vérifié une fois par jour. Arc est un projet amateur, tous les signalements ne reçoivent donc pas de réponse.</string>
     <string name="report_my_reports_hint_off">La vérification est désactivée. Activez Vérifier mes signalements pour voir ce que deviennent vos signalements.</string>
@@ -4550,10 +4542,6 @@
     <string name="report_ready_follow_off">Pour suivre ce signalement, scannez le code de l\'écran suivant avec votre téléphone.</string>
     <string name="report_notice_title">Votre signalement a évolué</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">%1$d de vos signalements a évolué</item>
-        <item quantity="many">%1$d de vos signalements ont évolué</item>
-        <item quantity="other">%1$d de vos signalements ont évolué</item>
-    </plurals>
     <string name="report_notice_one">%1$s, envoyé le %2$s : %3$s.</string>
     <string name="report_notice_many">Ouvrez Mes signalements pour voir ce qui a changé.</string>
     <string name="report_notice_open">Ouvrir Mes signalements</string>
@@ -4564,15 +4552,9 @@
     <string name="report_stop_recording">Arrêter l\'enregistrement</string>
     <string name="report_recording_pill">Enregistrement %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Enregistrement %1$s · %2$d repère</item>
-        <item quantity="other">Enregistrement %1$s · %2$d repères</item>
-    </plurals>
     <string name="report_recording_no_space">Pas assez d\'espace libre pour enregistrer</string>
     <string name="report_item_recording">Enregistrement, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d repère. Des valeurs uniquement, jamais le son ni l\'image.</item>
-        <item quantity="other">%d repères. Des valeurs uniquement, jamais le son ni l\'image.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Signaler un problème / repère</string>
     <string name="remote_buttons_job_report_mark_desc">Ouvre le panneau de signalement. Pendant l\'enregistrement, ajoute un repère.</string>
     <string name="display_mode_measured">Mesuré</string>

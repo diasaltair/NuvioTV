@@ -5,6 +5,7 @@ internal enum class SettingsRailGroup {
     YOU,
     LOOK,
     WATCH,
+    EXTRAS,
     SERVICES,
     SYSTEM
 }
@@ -15,9 +16,15 @@ internal enum class SettingsCategory(val group: SettingsRailGroup) {
     PROFILES(SettingsRailGroup.YOU),
     APPEARANCE(SettingsRailGroup.LOOK),
     LAYOUT(SettingsRailGroup.LOOK),
+    SIDE_MENU(SettingsRailGroup.LOOK), // Live TV fork
     CONTENT_DISCOVERY(SettingsRailGroup.WATCH),
     PLAYBACK(SettingsRailGroup.WATCH),
     SCOUT(SettingsRailGroup.WATCH),
+    LIVE_TV(SettingsRailGroup.EXTRAS), // Live TV fork
+    ON_DEMAND(SettingsRailGroup.EXTRAS), // Live TV fork
+    SPORTS(SettingsRailGroup.EXTRAS), // Live TV fork
+    CALENDAR(SettingsRailGroup.EXTRAS), // Live TV fork
+    VPN(SettingsRailGroup.EXTRAS),
     INTEGRATION(SettingsRailGroup.SERVICES),
     TRACKING(SettingsRailGroup.SERVICES),
     ADVANCED(SettingsRailGroup.SYSTEM),

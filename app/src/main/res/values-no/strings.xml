@@ -1125,12 +1125,9 @@
     <string name="watchlist_removed">Fjernet fra ønskelisten</string>
     <string name="playback_player_auto">Automatisk (Best for innhold)</string>
     <string name="playback_player_auto_desc">ExoPlayer for filmer og serier · MPV for anime</string>
-
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">Rader på startskjermen</string>
+    <string name="settings_home_screen_rows_subtitle">Velg rekkefølgen på radene på startskjermen</string>
     <plurals name="cw_episodes_left">
-        <item quantity="one">%d igjen</item>
-        <item quantity="other">%d igjen</item>
-    </plurals>
     <string name="cw_no_artwork">Ingen bilder</string>
     <string name="detail_eyebrow_episodes">Episoder</string>
     <string name="detail_section_parental_guide">Foreldreveiledning</string>
@@ -1145,9 +1142,6 @@
     <string name="ambient_mode_timeout">Start etter</string>
     <string name="ambient_mode_timeout_subtitle">Hvor lenge det går før Ambient-modus starter</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="one">%1$d minutt</item>
-        <item quantity="other">%1$d minutter</item>
-    </plurals>
     <string name="ambient_mode_catalogs">Kataloger</string>
     <string name="ambient_mode_catalogs_subtitle">Velg opptil 3 kataloger å hente bilder fra</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Velg opptil 3 kataloger</string>
@@ -2240,13 +2234,7 @@
     <string name="report_sent_no_phone">Takk for rapporten. Arc er et hobbyprosjekt, så ikke alle rapporter får svar.</string>
     <string name="report_sent_back">Tilbake til videoen</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Velg alt som passer. Arc har beholdt det siste minuttet.</item>
-        <item quantity="other">Velg alt som passer. Arc har beholdt de siste %1$d minuttene.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Spillerinnstillinger og det siste minuttet</item>
-        <item quantity="other">Spillerinnstillinger og de siste %1$d minuttene</item>
-    </plurals>
     <string name="report_settings_subtitle">Fortell hva som gikk galt, eller hva du ønsker at Arc skal gjøre</string>
     <string name="report_group_choose">Hva vil du rapportere?</string>
     <string name="report_group_options">Alternativer</string>
@@ -2299,9 +2287,6 @@
     <string name="report_sent_kind_bug">Noe fungerer ikke</string>
     <string name="report_sent_kind_idea">Idé eller ønske</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d ny</item>
-        <item quantity="other">%1$d nye</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Sjekkes én gang om dagen. Arc er et hobbyprosjekt, så ikke alle rapporter får svar.</string>
     <string name="report_my_reports_hint_off">Sjekking er av. Slå på Sjekk mine rapporter for å se hva som skjer med rapportene dine.</string>
@@ -2324,9 +2309,6 @@
     <string name="report_ready_follow_off">Skann koden på neste skjerm med telefonen for å følge denne rapporten.</string>
     <string name="report_notice_title">Det er nytt om rapporten din</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">Det er nytt om %1$d av rapportene dine</item>
-        <item quantity="other">Det er nytt om %1$d av rapportene dine</item>
-    </plurals>
     <string name="report_notice_one">%1$s, sendt %2$s: %3$s.</string>
     <string name="report_notice_many">Åpne Mine rapporter for å se hva som er endret.</string>
     <string name="report_notice_open">Åpne Mine rapporter</string>
@@ -2337,15 +2319,9 @@
     <string name="report_stop_recording">Stopp opptaket</string>
     <string name="report_recording_pill">Tar opp %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Tar opp %1$s · %2$d merke</item>
-        <item quantity="other">Tar opp %1$s · %2$d merker</item>
-    </plurals>
     <string name="report_recording_no_space">Ikke nok ledig plass til opptak</string>
     <string name="report_item_recording">Opptak, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d merke. Bare verdier, aldri lyd eller bilde.</item>
-        <item quantity="other">%d merker. Bare verdier, aldri lyd eller bilde.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Rapporter et problem / merk</string>
     <string name="remote_buttons_job_report_mark_desc">Åpner rapportpanelet. Under opptak legges det til et merke.</string>
     <string name="display_mode_measured">Målt</string>

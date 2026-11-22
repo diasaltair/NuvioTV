@@ -359,6 +359,8 @@ class PlayerRuntimeController(
         // clean-playback case so an error record is never clobbered by a stale
         // 'Played' one.
         val audioPathAtTeardown = currentAudioPathDescription
+        vpnSettingsSubscription.close()
+        leavePartyPlayback()
         // Cache counters only reach the card on a natural finish, so capture them when the user exits too.
         val diagnostics = lastPlaybackDiagnosticsForReport
         if (diagnostics.timestampMs > 0L) {
@@ -863,6 +865,15 @@ class PlayerRuntimeController(
     internal var currentMediaSession: MediaSession? = null
     internal var mpvMediaSessionPlayer: MpvMediaSessionPlayer? = null
     internal var ffmpegAudioRenderer: FfmpegAudioRenderer? = null
+    private val vpnSettingsSubscription = com.nuvio.vpn.android.VpnPlaybackProtection.observeSettings {
+        if (currentStreamUrl.isNotBlank()) {
+            val wasPaused = !_uiState.value.isPlaying
+            _exoPlayer?.stop()
+            releaseMpvPlayer()
+            initializePlayer(currentStreamUrl, currentHeaders, overrideInternalPlayerEngine = currentInternalPlayerEngine, startPaused = wasPaused)
+        }
+    }
+    internal var nativeVpnProxy: com.nuvio.vpn.android.VpnPlaybackProtection.NativeProxy? = null
     internal var mpvView: NuvioMpvSurfaceView? = null
     internal val subtitleCueTracker = SubtitleCueTracker()
     internal var mpvInitializationInProgress: Boolean = false
@@ -961,6 +972,8 @@ class PlayerRuntimeController(
     internal var networkDropRecoveredId: Int = 0
     internal var hasTriedDv7HevcFallback: Boolean = false
     internal var forceDv7ToHevc: Boolean = false
+    /** The stream link last rebuilt on a software video decoder (see trySoftwareVideoDecoderFallback). */
+    internal var forceSoftwareVideoForStreamUrl: String? = null
     internal var startupRetryCount: Int = 0
     internal var parsingErrorProbeAttempted: Boolean = false
     internal var hasRetriedCurrentStreamAfterUnexpectedNpe: Boolean = false

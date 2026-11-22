@@ -1033,14 +1033,24 @@ class StreamScreenViewModel @Inject constructor(
                 // fast scrape -- so the collect below and the post-collect
                 // isAllLoaded=true pass behave identically. A miss returns the
                 // live repository flow unchanged.
-                com.nuvio.tv.core.stream.StreamPrefetchCache.streamsFor(
-                    repository = streamRepository,
+                // Live TV fork: add "Watch On Demand" when an IPTV provider has this title.
+                com.nuvio.tv.livetv.ondemand.OnDemandStreams.withOnDemand(
+                    context = context,
+                    source = com.nuvio.tv.core.stream.StreamPrefetchCache.streamsFor(
+                        repository = streamRepository,
+                        type = contentType,
+                        videoId = videoId,
+                        season = season,
+                        episode = episode,
+                        forceRefresh = forceRefresh,
+                        priorityBingeGroup = persistedBingeGroup
+                    ),
                     type = contentType,
                     videoId = videoId,
                     season = season,
                     episode = episode,
-                    forceRefresh = forceRefresh,
-                    priorityBingeGroup = persistedBingeGroup
+                    title = (contentName ?: title).orEmpty(),
+                    year = year
                 )
                     // Each emission carries the FULL accumulated
                     // list and applySuccess reprocesses all of it (ordering,

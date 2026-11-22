@@ -227,6 +227,7 @@ fun ProfileSelectionScreen(
     val isCreating by viewModel.isCreating.collectAsState()
     val isSaving by viewModel.isSaving.collectAsState()
     val isCopyingSettings by viewModel.isCopyingSettings.collectAsState()
+    val profileMatchGroups by viewModel.profileMatchGroups.collectAsState()
     val profilePinEnabled by viewModel.profilePinEnabled.collectAsState()
     val isPinOperationInProgress by viewModel.isPinOperationInProgress.collectAsState()
     val avatarImageUrlsById = remember(avatarCatalog, profiles) {
@@ -598,13 +599,14 @@ fun ProfileSelectionScreen(
                 avatarCatalog = avatarCatalog,
                 isCreating = isCreating,
                 onDismiss = { if (!isCreating) showCreateProfile = false },
-                onCreateProfile = { name, colorHex, avatarId, copyFromProfileId, copyProviderCredentials ->
+                onCreateProfile = { name, colorHex, avatarId, copyFromProfileId, copyProviderCredentials, keepMatched ->
                     viewModel.createProfile(
                         name = name,
                         avatarColorHex = colorHex,
                         avatarId = avatarId,
                         copyFromProfileId = copyFromProfileId,
-                        copyProviderCredentials = copyProviderCredentials
+                        copyProviderCredentials = copyProviderCredentials,
+                        keepMatched = keepMatched
                     ) { result ->
                         when (result) {
                             is CreateProfileResult.Created -> {
@@ -761,6 +763,38 @@ fun ProfileSelectionScreen(
                     )
                 }
 
+                // Live TV fork: matched profiles (kept the same as each other).
+                val matchedWith = profileMatchGroups.firstOrNull { profile.id in it }
+                    ?.let { group -> profiles.filter { it.id in group && it.id != profile.id } }
+                    .orEmpty()
+                if (matchedWith.isNotEmpty()) {
+                    Text(
+                        text = stringResource(
+                            R.string.profile_matched_with,
+                            matchedWith.joinToString(", ") { it.name }
+                        ),
+                        color = NuvioTheme.colors.TextSecondary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Button(
+                        onClick = {
+                            longPressedProfile = null
+                            viewModel.stopMatching(profile.id)
+                            profileActionMessage = context.getString(
+                                R.string.profile_stopped_matching,
+                                profile.name
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.colors(
+                            containerColor = NuvioTheme.colors.BackgroundCard,
+                            contentColor = NuvioTheme.colors.TextPrimary
+                        )
+                    ) {
+                        Text(stringResource(R.string.profile_stop_matching))
+                    }
+                }
+
                 ProfileDialogButton(
                     label = stringResource(if (profilePinEnabled[profile.id] == true) R.string.profile_pin_change else R.string.profile_pin_set),
                     onClick = {
@@ -861,13 +895,15 @@ fun ProfileSelectionScreen(
                     settingsCopyError = null
                     settingsCopyTarget = null
                 },
-                onCopy = { sourceProfileId, copyProviderCredentials ->
+                onCopy = { sourceProfileId, copyProviderCredentials, copyLiveTv, keepMatched ->
                     settingsCopyError = null
                     val sourceName = profiles.firstOrNull { it.id == sourceProfileId }?.name.orEmpty()
                     viewModel.copyProfileSettings(
                         sourceProfileId = sourceProfileId,
                         targetProfileId = targetProfile.id,
-                        copyProviderCredentials = copyProviderCredentials
+                        copyProviderCredentials = copyProviderCredentials,
+                        copyLiveTv = copyLiveTv,
+                        keepMatched = keepMatched
                     ) { result ->
                         if (result.isSuccess) {
                             settingsCopyTarget = null
@@ -1593,7 +1629,8 @@ internal fun CreateProfileOverlay(
         colorHex: String,
         avatarId: String?,
         copyFromProfileId: Int?,
-        copyProviderCredentials: Boolean
+        copyProviderCredentials: Boolean,
+        keepMatched: Boolean
     ) -> Unit
 ) {
     BackHandler(onBack = onDismiss)
@@ -1604,6 +1641,7 @@ internal fun CreateProfileOverlay(
     var focusedAvatarName by remember { mutableStateOf<String?>(null) }
     var selectedCopySourceId by remember { mutableStateOf<Int?>(null) }
     var copyProviderCredentials by remember { mutableStateOf(false) }
+    var keepMatched by remember { mutableStateOf(false) }
     var showSettingsSourceDialog by remember { mutableStateOf(false) }
     val selectedAvatar = remember(avatarCatalog, selectedAvatarId) {
         avatarCatalog.find { it.id == selectedAvatarId }
@@ -1681,7 +1719,8 @@ internal fun CreateProfileOverlay(
                                 selectedColorHex,
                                 selectedAvatarId,
                                 selectedCopySourceId,
-                                copyProviderCredentials
+                                copyProviderCredentials,
+                                keepMatched && selectedCopySourceId != null
                             )
                         }
                     )
@@ -1846,10 +1885,12 @@ internal fun CreateProfileOverlay(
             profiles = profiles,
             selectedSourceProfileId = selectedCopySourceId,
             copyProviderCredentials = copyProviderCredentials,
+            keepMatched = keepMatched,
             onDismiss = { showSettingsSourceDialog = false },
-            onConfirm = { sourceProfileId, shouldCopyProviderCredentials ->
+            onConfirm = { sourceProfileId, shouldCopyProviderCredentials, shouldKeepMatched ->
                 selectedCopySourceId = sourceProfileId
                 copyProviderCredentials = shouldCopyProviderCredentials
+                keepMatched = shouldKeepMatched
                 showSettingsSourceDialog = false
             }
         )

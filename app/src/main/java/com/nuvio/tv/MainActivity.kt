@@ -47,6 +47,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.verticalScroll
+import com.nuvio.tv.livetv.ui.shrinkToFit
 import androidx.compose.foundation.layout.fillMaxSize
 import com.nuvio.tv.ui.screens.settings.FormatCheckHost
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,8 +62,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.movableContentOf
@@ -242,6 +253,12 @@ import kotlinx.coroutines.launch
 val LocalSidebarExpanded = compositionLocalOf { false }
 val LocalRootContentInset = compositionLocalOf { 0.dp }
 val LocalRootRoutes = compositionLocalOf<Set<String>> { emptySet() }
+
+/** Live TV fork pages' room for the older side menu (only while the menu is showing). */
+val LocalForkPageInset = compositionLocalOf { 0.dp }
+
+/** Opens Nuvio's side menu from a screen (used by Live TV's back button). */
+val LocalOpenSidebar = compositionLocalOf<() -> Unit> { {} }
 val LocalContentFocusRequester = compositionLocalOf { FocusRequester.Default }
 
 private const val SIDEBAR_AUTO_COLLAPSE_DELAY_MS = 3_000L
@@ -253,8 +270,26 @@ data class DrawerItem(
     val route: String,
     val label: String,
     val iconRes: Int? = null,
-    val icon: ImageVector? = null
+    val icon: ImageVector? = null,
+    // Live TV fork: the menu's Live TV entry (opens a list: Guide, On Demand and Recordings).
+    /** Opens its own list (or, as that list's top row, goes back) instead of opening a page. */
+    val isGroup: Boolean = false,
+    /** The group's list is showing (this is its "‹ back" row). */
+    val groupOpen: Boolean = false,
+    /** A page in a group's list. */
+    val isChild: Boolean = false,
+    /** A small red dot (something is recording). */
+    val badge: Boolean = false,
+    /** The name shown in the small floating menu pill, when not [label]. */
+    val pillLabel: String? = null,
+    /** A thin line above this item (it starts a new part of the menu). */
+    val sectionStart: Boolean = false,
+    /** Kept at the bottom of the menu, below the rest (Settings). */
+    val pinnedBottom: Boolean = false
 )
+
+/** Live TV fork: the menu entry that holds Guide, On Demand and Recordings. */
+internal const val LIVE_TV_GROUP_ROUTE = "livetv_menu_group"
 
 private data class MainUiPrefs(
     val theme: AppTheme = AppTheme.GLASS,
@@ -286,6 +321,29 @@ open class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var themeDataStore: ThemeDataStore
+
+    @Inject
+    lateinit var liveTvPreferences: com.nuvio.tv.livetv.data.LiveTvPreferences
+
+    @Inject
+    lateinit var onDemandRepository: com.nuvio.tv.livetv.ondemand.OnDemandRepository
+
+    @Inject
+    lateinit var liveTvRecorder: com.nuvio.tv.livetv.record.LiveTvRecorder
+
+    @Inject
+    lateinit var liveTvRecordingScheduler: com.nuvio.tv.livetv.record.LiveTvRecordingScheduler
+
+    @Inject
+    lateinit var sportsRepository: com.nuvio.tv.livetv.sports.SportsRepository
+
+    @Inject
+    lateinit var calendarRepository: com.nuvio.tv.livetv.calendar.CalendarRepository
+
+    // Live TV fork: set up with the app, so the Live TV player's settings and callbacks are in
+    // place whatever screen starts a channel (Home, Sports, the Calendar…).
+    @Inject
+    lateinit var liveTvPlayerHooks: com.nuvio.tv.livetv.player.LiveTvPlayerHooks
 
     @Inject
     lateinit var layoutPreferenceDataStore: LayoutPreferenceDataStore
@@ -430,6 +488,31 @@ open class MainActivity : ComponentActivity() {
         hideSystemBarsOnHandheld()
         window?.decorView?.let { com.nuvio.tv.core.util.StartupLatencyTrace.coldOnFirstDraw(it, "first_frame") }
         com.nuvio.tv.core.performance.DetailEntryTrace.attach(window)
+        // Live TV fork: a fresh open of the app (not a rebuild of the same screen), so "Start in
+        // Full Screen" runs again even if Android kept the app running in the background.
+        if (savedInstanceState == null) com.nuvio.tv.livetv.ui.LiveTvAppOpens.count++
+        // Live TV fork: start reading the saved channel list and guide as the app opens (before
+        // any screen, even the profile picker), so Live TV is ready when you get to it.
+        lifecycleScope.launch { runCatching { com.nuvio.tv.livetv.startup.LiveTvPreload.start(this@MainActivity) } }
+        // Live TV fork: Home drawn (see AppSettled): Sports' first scores round and the Calendar's
+        // first look-ups wait for it, so they don't land while Home is still loading.
+        runCatching { fullyDrawnReporter.addOnReportDrawnListener { com.nuvio.tv.livetv.startup.AppSettled.markDrawn() } }
+        // Live TV fork: "Open the App On" kept where the first screen can read it instantly.
+        lifecycleScope.launch {
+            runCatching {
+                kotlinx.coroutines.flow.combine(liveTvPreferences.settings, sportsRepository.settings) { st, sp -> st to sp.showInSidebar }
+                    .collect { (st, sportsOn) ->
+                        com.nuvio.tv.livetv.startup.StartPage.save(this@MainActivity, com.nuvio.tv.livetv.startup.StartPage.routeFor(st, sportsOn))
+                    }
+            }
+        }
+        // Live TV fork: scheduled recordings (sets their alarms; series look for new airings).
+        runCatching { liveTvRecordingScheduler.start() }
+        // Live TV fork: the Calendar (your shows' new episodes, for Home and the Calendar page).
+        runCatching {
+            com.nuvio.tv.livetv.calendar.CalendarHomeFeed.init(this)
+            calendarRepository.start()
+        }
         isFirstResumeAfterCreate = true
         val startPicture = com.nuvio.tv.ui.v2.profile.StartPicture(
             window?.decorView?.background?.constantState?.newDrawable(resources)?.takeIf {
@@ -1014,6 +1097,9 @@ open class MainActivity : ComponentActivity() {
                     } else mainUiPrefs.modernSidebarBlurPref && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
                     val hideBuiltInHeadersForFloatingPill = modernSidebarEnabled && !sidebarCollapsed
 
+                    // Live TV fork: "Open the App On": that page is the first screen, in place of
+                    // Home (read once, so the first screen never changes underneath).
+                    val openOnRoute = remember { com.nuvio.tv.livetv.startup.StartPage.cachedRoute(this@MainActivity) }
                     val startDestination = when {
                         needsExperienceSelection -> Screen.ExperienceModeSelection.route
                         layoutChosen -> Screen.Home.route
@@ -1226,6 +1312,12 @@ open class MainActivity : ComponentActivity() {
                     LaunchedEffect(navController, followsLaunchTargets, pendingDeepLink) {
                         val url = pendingDeepLink ?: return@LaunchedEffect
                         if (!followsLaunchTargets) return@LaunchedEffect
+                        // Live TV fork: a launcher row's channel or game.
+                        if (url.startsWith("nuvio://livetv")) {
+                            pendingDeepLinkUrl.value = null
+                            runCatching { com.nuvio.tv.livetv.home.LiveTvLauncherRows.open(context, navController, url) }
+                            return@LaunchedEffect
+                        }
                         when (val deepLink = DeepLinkParser.parse(url)) {
                             is AppDeepLink.Meta -> {
                                 pendingDeepLinkUrl.value = null
@@ -1326,6 +1418,22 @@ open class MainActivity : ComponentActivity() {
                     val strNavSettings = stringResource(R.string.nav_settings)
                     val strNavCalendar = stringResource(R.string.nav_calendar)
                     val strNavScout = stringResource(R.string.scout_title)
+                    // Live TV fork: its pages join Arc's menu (Live TV, Recordings, Sports, On Demand).
+                    val liveTvSettingsNow = remember { liveTvPreferences.settings }
+                        .collectAsState(initial = com.nuvio.tv.livetv.model.LiveTvSettings()).value
+                    val liveTvInSidebar = liveTvSettingsNow.showInSidebar
+                    val onDemandHasContent = remember { onDemandRepository.also { it.start() }.hasContent }
+                        .collectAsState().value
+                    val onDemandInSidebar = onDemandHasContent && liveTvSettingsNow.onDemandEnabled && liveTvSettingsNow.onDemandInSidebar
+                    val allRecordings = liveTvRecorder.recordings.collectAsState().value
+                    val recordingNow = allRecordings.any { it.status == com.nuvio.tv.livetv.record.RecordingStatus.RECORDING }
+                    val hasSchedules = liveTvRecordingScheduler.schedules.collectAsState().value.isNotEmpty()
+                    val hasSeries = liveTvRecordingScheduler.series.collectAsState().value.isNotEmpty()
+                    val recordingsInSidebar = liveTvSettingsNow.recordingsInSidebar && liveTvInSidebar &&
+                        (allRecordings.isNotEmpty() || hasSchedules || hasSeries)
+                    val recordingsFromGuide = currentRoute == Screen.Recordings.route &&
+                        navController.previousBackStackEntry?.destination?.route == Screen.LiveTv.route
+                    val sportsInSidebar = sportsRepository.settings.collectAsState().value.showInSidebar
                     val drawerItems = remember(
                         strNavHome,
                         strNavDiscover,
@@ -1335,62 +1443,52 @@ open class MainActivity : ComponentActivity() {
                         strNavCalendar,
                         discoverLocation,
                         calendarInMenu,
-                        scoutInMenu
+                        scoutInMenu,
+                        liveTvInSidebar,
+                        onDemandInSidebar,
+                        recordingNow,
+                        recordingsInSidebar,
+                        sportsInSidebar
                     ) {
                         buildList {
-                            add(
-                                DrawerItem(
-                                    route = Screen.Home.route,
-                                    label = strNavHome,
-                                    icon = Icons.Default.Home
-                                )
-                            )
+                            add(DrawerItem(route = Screen.Home.route, label = strNavHome, icon = Icons.Default.Home))
                             if (discoverLocation == DiscoverLocation.IN_SIDEBAR) {
-                                add(
-                                    DrawerItem(
-                                        route = Screen.Discover.route,
-                                        label = strNavDiscover,
-                                        icon = Icons.Default.Explore
-                                    )
-                                )
+                                add(DrawerItem(route = Screen.Discover.route, label = strNavDiscover, icon = Icons.Default.Explore))
                             }
-                            add(
-                                DrawerItem(
-                                    route = Screen.Search.route,
-                                    label = strNavSearch,
-                                    iconRes = R.raw.sidebar_search
-                                )
-                            )
+                            add(DrawerItem(route = Screen.Search.route, label = strNavSearch, iconRes = R.raw.sidebar_search))
                             if (scoutInMenu) {
                                 add(DrawerItem(route = Screen.Scout.route, label = strNavScout, iconRes = R.raw.sidebar_scout))
                             }
-                            add(
-                                DrawerItem(
-                                    route = Screen.Library.route,
-                                    label = strNavLibrary,
-                                    iconRes = R.raw.sidebar_library
-                                )
-                            )
+                            add(DrawerItem(route = Screen.Library.route, label = strNavLibrary, iconRes = R.raw.sidebar_library))
                             if (calendarInMenu) {
-                                add(
-                                    DrawerItem(
-                                        route = Screen.Calendar.route,
-                                        label = strNavCalendar,
-                                        icon = Icons.Default.CalendarMonth
-                                    )
-                                )
+                                add(DrawerItem(route = Screen.Calendar.route, label = strNavCalendar, icon = Icons.Default.CalendarMonth))
+                            }
+                            if (liveTvInSidebar) {
+                                add(DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv, badge = recordingNow && !recordingsInSidebar))
+                            }
+                            if (recordingsInSidebar) {
+                                add(DrawerItem(route = Screen.Recordings.route, label = "Recordings", icon = Icons.Default.RadioButtonChecked, badge = recordingNow))
+                            }
+                            if (sportsInSidebar) {
+                                add(DrawerItem(route = Screen.Sports.route, label = "Sports", icon = Icons.Default.EmojiEvents))
+                            }
+                            if (onDemandInSidebar) {
+                                add(DrawerItem(route = Screen.OnDemand.route, label = "On Demand", icon = Icons.Default.VideoLibrary))
                             }
                             add(
                                 DrawerItem(
                                     route = Screen.Settings.route,
                                     label = strNavSettings,
-                                    iconRes = R.raw.sidebar_settings
+                                    iconRes = R.raw.sidebar_settings,
+                                    pinnedBottom = true
                                 )
                             )
                         }
                     }
+                    // Live TV fork: Recordings belongs to Live TV in the menu.
+                    val menuRoute = if (currentRoute == Screen.Recordings.route && (recordingsFromGuide || !recordingsInSidebar)) Screen.LiveTv.route else currentRoute
                     val selectedDrawerRoute = drawerItems.firstOrNull { item ->
-                        currentRoute == item.route || currentRoute?.startsWith("${item.route}/") == true
+                        menuRoute == item.route || menuRoute?.startsWith("${item.route}/") == true
                     }?.route
                     val selectedDrawerItem = drawerItems.firstOrNull { it.route == selectedDrawerRoute } ?: drawerItems.first()
 
@@ -1419,8 +1517,14 @@ open class MainActivity : ComponentActivity() {
                     val updateViewModel: UpdateViewModel = hiltViewModel(this@MainActivity)
                     val updateState by updateViewModel.uiState.collectAsState()
                     val updateBannerState = updateState.copy(
-                        showBanner = updateState.showBanner && currentRoute?.startsWith("player/") != true
+                        showBanner = updateState.showBanner && currentRoute?.startsWith("player/") != true &&
+                            currentRoute != Screen.LiveTvMultiview.route && currentRoute != Screen.SportsMultiview.route
                     )
+                    // Live TV fork: the Live TV row on Home lets Up through to the banner while it shows.
+                    LaunchedEffect(updateBannerState.showBanner, updateBannerState.update != null) {
+                        com.nuvio.tv.livetv.home.LiveTvHomeReveal.updateBannerShown.value =
+                            updateBannerState.showBanner && updateBannerState.update != null
+                    }
 
                     UpdateBannerHost(
                         state = updateBannerState,
@@ -1569,6 +1673,11 @@ open class MainActivity : ComponentActivity() {
                                 SideEffect { startPicture.end() }
                             }
 
+                            // Live TV fork: not over a channel that's playing (the guide's preview or
+                            // full screen); the idle slideshow came up in the middle of watching TV.
+                            val liveTvPlaying by com.nuvio.tv.livetv.player.LiveWatching.active.collectAsState()
+                            // Watching counts as activity: the idle wait starts over when it stops.
+                            LaunchedEffect(liveTvPlaying) { ambientIdleController.onInteraction() }
                             val isTrailerPlaying by trailerPlayerPool.isTrailerPlaying.collectAsState()
                             val playbackActive by screensaverController.playbackActive.collectAsState()
                             val ambientShowing by ambientIdleController.isShowing.collectAsState()
@@ -1584,6 +1693,8 @@ open class MainActivity : ComponentActivity() {
                             AmbientModeHost(
                                 controller = ambientIdleController,
                                 allowed = !playbackUiActive &&
+                                    currentRoute != Screen.LiveTvPlayer.route && currentRoute != Screen.LiveTvMultiview.route &&
+                                    currentRoute != Screen.SportsMultiview.route && currentRoute != Screen.LiveTv.route &&
                                     !playbackActive &&
                                     autoNextOverlay == null &&
                                     !isTrailerPlaying &&
@@ -1616,6 +1727,13 @@ open class MainActivity : ComponentActivity() {
 
         com.nuvio.tv.ui.v2.diagnostics.UiFrameDiagnostics.frames.clear()
         jankStats = JankStats.createAndTrack(window) { frameData ->
+            // Counted per screen for the start-up report (Live TV says guide or full screen).
+            // It used to write every slow frame to the system log, which cost a little on each
+            // one and nobody could see; that's kept for debug builds only.
+            val states = frameData.states
+            val screen = states.firstOrNull { it.key == "LiveTv" }?.value
+                ?: states.firstOrNull { it.key == "Screen" }?.value
+            com.nuvio.tv.livetv.model.LiveSmoothness.frame(screen, frameData.isJank)
             qualityGovernor.frame(System.nanoTime(), frameData.isJank)
             com.nuvio.tv.ui.v2.diagnostics.UiFrameDiagnostics.frames.record(
                 System.nanoTime(), frameData.frameDurationUiNanos, frameData.isJank
@@ -1698,6 +1816,7 @@ open class MainActivity : ComponentActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) com.nuvio.tv.livetv.home.LiveTvHomeFocus.lastKeyAt = android.os.SystemClock.uptimeMillis()
         if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
             qualityGovernor.input(System.nanoTime(), event.keyCode, event.action == KeyEvent.ACTION_DOWN)
         }
@@ -1784,6 +1903,8 @@ open class MainActivity : ComponentActivity() {
         partyRuntime.setAppVisible(true)
         calendarReminders.setAppVisible(true)
         calendarAppVisibility.visible.value = true
+        // Live TV fork: make sure the launcher rows exist once the app has loaded its channels.
+        runCatching { com.nuvio.tv.livetv.home.LiveTvLauncherRows.refresh(applicationContext, afterMs = 6000) }
     }
 
     override fun onStop() {
@@ -1796,6 +1917,8 @@ open class MainActivity : ComponentActivity() {
         calendarReminders.setAppVisible(false)
         calendarAppVisibility.visible.value = false
         calendarMenuKeyDown = false
+        // Live TV fork: bring the launcher's Live TV rows up to date.
+        runCatching { com.nuvio.tv.livetv.home.LiveTvLauncherRows.refresh(applicationContext) }
     }
 
     override fun onDestroy() {
@@ -1852,12 +1975,18 @@ private fun LegacySidebarScaffold(
     showProfileSelector: Boolean,
     onSwitchProfile: () -> Unit,
     onNavigate: (String) -> Unit,
-    onExitApp: () -> Unit
+    onExitApp: () -> Unit,
+    onToggleLiveTvGroup: () -> Unit = {},
+    onSidebarExpandedChange: (Boolean) -> Unit = {}
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val drawerItemFocusRequesters = rememberDrawerItemFocusRequesters(drawerItems)
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    val showSidebar = currentRoute in rootRoutes
+    // Live TV fork: full screen now happens inside the Live TV screen (one video view that just
+    // grows), which is one of the menu's pages, so the menu has to step aside for it.
+    val liveTvFullscreen by com.nuvio.tv.livetv.ui.LiveTvFullscreen.active.collectAsState()
+    val showSidebar = currentRoute in rootRoutes && !liveTvFullscreen &&
+        !com.nuvio.tv.livetv.ui.LiveTvFullscreen.pending
 
     LaunchedEffect(currentRoute) {
         longPressBackHeld.value = false
@@ -1887,6 +2016,33 @@ private fun LegacySidebarScaffold(
     BackHandler(enabled = currentRoute in rootRoutes && drawerState.currentValue == DrawerValue.Open) {
         if (longPressBackHeld.value) return@BackHandler
         onExitApp()
+    }
+
+    // Live TV fork: back from the menu to Home, the Live TV row gets the highlight back only if
+    // it had it when the menu opened (otherwise Nuvio returns to the row you were on).
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue == DrawerValue.Open) com.nuvio.tv.livetv.home.LiveTvHomeFocus.menuOpened()
+        else if (currentRoute == Screen.Home.route) com.nuvio.tv.livetv.home.LiveTvHomeFocus.menuClosed()
+        onSidebarExpandedChange(drawerState.currentValue == DrawerValue.Open)
+    }
+
+    // Live TV fork: Back in the Live TV list returns to the main menu.
+    val liveTvListShowing = drawerItems.any { it.isGroup && it.groupOpen }
+    BackHandler(enabled = currentRoute in rootRoutes && drawerState.currentValue == DrawerValue.Open && liveTvListShowing) {
+        if (longPressBackHeld.value) return@BackHandler
+        onToggleLiveTvGroup()
+    }
+    // Live TV fork: opening the Live TV list puts the highlight on its first page (or the one
+    // you're on).
+    var pendingLiveTvListFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(drawerItems, pendingLiveTvListFocus) {
+        if (!pendingLiveTvListFocus) return@LaunchedEffect
+        val pages = drawerItems.filter { it.isChild }
+        if (pages.isEmpty()) return@LaunchedEffect
+        val target = pages.firstOrNull { it.route == selectedDrawerRoute } ?: pages.first()
+        repeat(2) { withFrameNanos { } }
+        runCatching { drawerItemFocusRequesters[target.route]?.requestFocus() }
+        pendingLiveTvListFocus = false
     }
 
     LaunchedEffect(drawerState.currentValue, pendingContentFocusTransfer) {
@@ -2018,22 +2174,31 @@ private fun LegacySidebarScaffold(
                         }
                     }
 
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .offset(y = 28.dp)
-                            .fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        horizontalAlignment = Alignment.Start
-                    ) {
-                        drawerItems.forEach { item ->
-                            key(item.route) {
+                    // Live TV fork: every page in one menu. Slimmer items, a thin line between
+                    // Nuvio's pages and the Live TV pages, Settings kept at the bottom, and the
+                    // list starts below the logo (scrolling if it ever doesn't fit) instead of
+                    // being centred, which grew up into the logo as pages were added.
+                    val renderItem: @Composable (DrawerItem) -> Unit = { item ->
+                        key(item.route) {
+                            Column {
+                                if (item.sectionStart) {
+                                    Box(
+                                        Modifier
+                                            .offset(x = NuvioTheme.spacing.md)
+                                            .width(itemWidth)
+                                            .padding(horizontal = 12.dp, vertical = 5.dp)
+                                            .height(1.dp)
+                                            .background(Color.White.copy(alpha = 0.14f))
+                                    )
+                                }
                                 LegacySidebarButton(
                                     label = item.label,
                                     iconRes = item.iconRes,
                                     icon = item.icon,
                                     selected = selectedDrawerRoute == item.route,
                                     expanded = isExpanded,
+                                    badge = item.badge,
+                                    trailingIcon = null,
                                     onClick = {
                                         keyboardController?.hide()
                                         onNavigate(item.route)
@@ -2048,12 +2213,59 @@ private fun LegacySidebarScaffold(
                                     modifier = Modifier.focusRequester(
                                         drawerItemFocusRequesters.getValue(item.route)
                                     )
+                                        // Live TV fork: Up / Down go to the item above / below,
+                                        // across the gap above Settings too (with fewer pages in
+                                        // the menu, Down from the last one landed on the page).
+                                        .focusProperties {
+                                            val i = drawerItems.indexOfFirst { it.route == item.route }
+                                            drawerItems.getOrNull(i + 1)?.let { n -> drawerItemFocusRequesters[n.route]?.let { down = it } }
+                                            if (i > 0) drawerItems.getOrNull(i - 1)?.let { p -> drawerItemFocusRequesters[p.route]?.let { up = it } }
+                                        }
                                         .width(itemWidth)
                                         .offset(x = NuvioTheme.spacing.md)
                                 )
+                            }
                         }
                     }
-                }
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxSize()
+                            .padding(top = 92.dp, bottom = 8.dp)
+                    ) {
+                        // Shrinks a little to fit when the pages don't (Settings → Menu & Features).
+                        val fitMenu = com.nuvio.tv.livetv.ui.LocalSideMenuFit.current
+                        androidx.compose.foundation.layout.BoxWithConstraints(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        ) {
+                            val room = maxHeight - 8.dp
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(androidx.compose.foundation.rememberScrollState())
+                                    // Room for the highlighted item, which grows a little.
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .shrinkToFit(fitMenu, room, 0f),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    horizontalAlignment = Alignment.Start
+                                ) {
+                                    drawerItems.filter { !it.pinnedBottom }.forEach { renderItem(it) }
+                                }
+                            }
+                        }
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            drawerItems.filter { it.pinnedBottom }.forEach { renderItem(it) }
+                        }
+                    }
             }
         }
         }
@@ -2069,6 +2281,16 @@ private fun LegacySidebarScaffold(
             animationSpec = tween(NuvioMotion.tokens.durations.medium),
             label = "rootContentInset"
         )
+        // Live TV fork pages keep the old rule: room for the menu only while it's showing.
+        val forkPageInset by animateDpAsState(
+            targetValue = if (showSidebar && !sidebarCollapsed) {
+                NuvioLayout.tokens.sidebarContentOffset
+            } else {
+                NuvioTheme.spacing.none
+            },
+            animationSpec = tween(NuvioMotion.tokens.durations.medium),
+            label = "forkPageInset"
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -2081,6 +2303,10 @@ private fun LegacySidebarScaffold(
                             showSidebar &&
                             drawerState.currentValue == DrawerValue.Closed &&
                             currentRoute in rootRoutes &&
+                            // Live TV fork: in the guide and on Sports, holding Back returns to
+                            // full screen (Sports opens the menu itself when nothing's playing).
+                            currentRoute != Screen.LiveTv.route &&
+                            currentRoute != Screen.Sports.route &&
                             keyEvent.nativeKeyEvent.isLongPress
                         ) {
                             if (!longPressBackHeld.value) {
@@ -2121,7 +2347,12 @@ private fun LegacySidebarScaffold(
                 LocalSidebarExpanded provides (drawerState.currentValue == DrawerValue.Open),
                 LocalRootContentInset provides rootContentInset,
                 LocalRootRoutes provides rootRoutes,
-                LocalContentFocusRequester provides contentFocusRequester
+                LocalForkPageInset provides forkPageInset,
+                LocalContentFocusRequester provides contentFocusRequester,
+                LocalOpenSidebar provides {
+                    pendingSidebarFocusRequest = true
+                    drawerState.setValue(DrawerValue.Open)
+                }
             ) {
                 navigationContent(hideBuiltInHeaders)
             }
@@ -2137,6 +2368,8 @@ private fun LegacySidebarButton(
     selected: Boolean,
     expanded: Boolean,
     modifier: Modifier = Modifier,
+    badge: Boolean = false,
+    trailingIcon: ImageVector? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -2181,7 +2414,8 @@ private fun LegacySidebarButton(
     Card(
         onClick = onClick,
         modifier = modifier
-            .height(NuvioComponents.tokens.sidebar.itemHeight)
+            // Live TV fork: slimmer items, so every page fits in the one menu.
+            .height(42.dp)
             .graphicsLayer {
                 scaleX = itemScale
                 scaleY = itemScale
@@ -2222,15 +2456,40 @@ private fun LegacySidebarButton(
                 .align(Alignment.CenterStart)
                 .offset(x = 13.dp)
         )
+        // Live TV fork: something is recording: a small red dot on the icon, like a badge.
+        if (badge) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = 13.dp + NuvioComponents.tokens.sidebar.iconSize - 6.dp, y = (-9).dp)
+                    .size(9.dp)
+                    .background(Color(0xFFE53935), CircleShape)
+            )
+        }
         if (expanded) {
-            com.nuvio.tv.ui.components.AutoResizeText(
+            // Live TV fork: every label the same size, small enough for all of them to fit (see
+            // SidebarLabel).
+            SidebarLabel(
                 text = label,
                 color = contentColor,
                 textAlign = TextAlign.Start,
+                key = label + if (trailingIcon != null) "|arrow" else "",
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .padding(start = 54.dp, end = 14.dp)
+                    .padding(start = 54.dp, end = if (trailingIcon != null) 44.dp else 14.dp)
             )
+            // Live TV fork: the arrow on an entry that opens its own list.
+            if (trailingIcon != null) {
+                Icon(
+                    imageVector = trailingIcon,
+                    contentDescription = null,
+                    tint = contentColor,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 14.dp)
+                        .size(22.dp)
+                )
+            }
         }
     }
 }
@@ -2256,9 +2515,15 @@ private fun ModernSidebarScaffold(
     showProfileSelector: Boolean,
     onSwitchProfile: () -> Unit,
     onNavigate: (String) -> Unit,
-    onExitApp: () -> Unit
+    onExitApp: () -> Unit,
+    onToggleLiveTvGroup: () -> Unit = {},
+    onSidebarExpandedChange: (Boolean) -> Unit = {}
 ) {
-    val showSidebar = currentRoute in rootRoutes
+    // Live TV fork: full screen now happens inside the Live TV screen (one video view that just
+    // grows), which is one of the menu's pages, so the menu has to step aside for it.
+    val liveTvFullscreen by com.nuvio.tv.livetv.ui.LiveTvFullscreen.active.collectAsState()
+    val showSidebar = currentRoute in rootRoutes && !liveTvFullscreen &&
+        !com.nuvio.tv.livetv.ui.LiveTvFullscreen.pending
     val sidebarTokens = NuvioComponents.tokens.sidebar
     val isV2Sidebar = com.nuvio.tv.ui.v2.appearance.LocalV2Appearance.current != null
     val collapsedSidebarWidth = if (sidebarCollapsed) NuvioTheme.spacing.none else sidebarTokens.collapsedWidth
@@ -2473,6 +2738,33 @@ private fun ModernSidebarScaffold(
     val sidebarDeflateOffsetX = NuvioTheme.spacing.none
     val sidebarDeflateOffsetY = NuvioTheme.spacing.none
 
+    // Live TV fork: back from the sidebar to Home, the Live TV row gets the highlight back only if
+    // it had it when the sidebar opened (otherwise Nuvio returns to the row you were on).
+    LaunchedEffect(isSidebarExpanded) {
+        if (isSidebarExpanded) com.nuvio.tv.livetv.home.LiveTvHomeFocus.menuOpened()
+        else if (currentRoute == Screen.Home.route) com.nuvio.tv.livetv.home.LiveTvHomeFocus.menuClosed()
+        onSidebarExpandedChange(isSidebarExpanded)
+    }
+
+    // Live TV fork: Back in the Live TV list returns to the main menu.
+    val liveTvListShowing = drawerItems.any { it.isGroup && it.groupOpen }
+    BackHandler(enabled = currentRoute in rootRoutes && isSidebarExpanded && !sidebarCollapsePending && liveTvListShowing) {
+        if (longPressBackHeld.value) return@BackHandler
+        onToggleLiveTvGroup()
+    }
+    // Live TV fork: opening the Live TV list puts the highlight on its first page (or the one
+    // you're on).
+    var pendingLiveTvListFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(drawerItems, pendingLiveTvListFocus) {
+        if (!pendingLiveTvListFocus) return@LaunchedEffect
+        val pages = drawerItems.filter { it.isChild }
+        if (pages.isEmpty()) return@LaunchedEffect
+        val target = pages.firstOrNull { it.route == selectedDrawerRoute } ?: pages.first()
+        repeat(2) { withFrameNanos { } }
+        runCatching { drawerItemFocusRequesters[target.route]?.requestFocus() }
+        pendingLiveTvListFocus = false
+    }
+
     LaunchedEffect(isSidebarExpanded, sidebarCollapsePending, pendingContentFocusTransfer, showSidebar) {
         if (!showSidebar || !pendingContentFocusTransfer || isSidebarExpanded || sidebarCollapsePending) {
             return@LaunchedEffect
@@ -2544,6 +2836,10 @@ private fun ModernSidebarScaffold(
                             !isSidebarExpanded &&
                             !sidebarCollapsePending &&
                             currentRoute in rootRoutes &&
+                            // Live TV fork: in the guide and on Sports, holding Back returns to
+                            // full screen (Sports opens the menu itself when nothing's playing).
+                            currentRoute != Screen.LiveTv.route &&
+                            currentRoute != Screen.Sports.route &&
                             keyEvent.nativeKeyEvent.isLongPress
                         ) {
                             if (!longPressBackHeld.value) {
@@ -2611,7 +2907,12 @@ private fun ModernSidebarScaffold(
                     sidebarPageLayout,
                 LocalSidebarExpanded provides isSidebarExpanded,
                 LocalContentFocusRequester provides contentFocusRequester,
-                com.nuvio.tv.ui.v2.components.LocalMainMenuBackdrop provides mainMenuBackdrop.takeIf { menuOnPicture }
+                com.nuvio.tv.ui.v2.components.LocalMainMenuBackdrop provides mainMenuBackdrop.takeIf { menuOnPicture },
+                LocalOpenSidebar provides {
+                    isSidebarExpanded = true
+                    sidebarCollapsePending = false
+                    pendingSidebarFocusRequest = true
+                }
             ) {
                 navigationContent(hideBuiltInHeaders)
             }
@@ -2676,6 +2977,17 @@ private fun ModernSidebarScaffold(
                                     // request the first drawer item directly.
                                     drawerItems.firstOrNull()?.route?.let { route ->
                                         drawerItemFocusRequesters[route]?.requestFocus()
+                                    }
+                                    true
+                                } else if (focusedDrawerIndex in 0 until drawerItems.lastIndex) {
+                                    // Live TV fork: straight to the next item. Settings sits at
+                                    // the bottom after a gap; with fewer pages in the menu (no On
+                                    // Demand or Recordings) the gap is big enough that moving
+                                    // focus "down" landed on the page behind instead.
+                                    val next = drawerItems[focusedDrawerIndex + 1].route
+                                    val requester = drawerItemFocusRequesters[next]
+                                    if (requester == null || runCatching { requester.requestFocus() }.isFailure) {
+                                        focusManager.moveFocus(FocusDirection.Down)
                                     }
                                     true
                                 } else {
@@ -2746,7 +3058,13 @@ private fun ModernSidebarScaffold(
                         panelShape = panelShape,
                         drawerItemFocusRequesters = drawerItemFocusRequesters,
                         onDrawerItemFocused = { focusedDrawerIndex = it },
-                        onDrawerItemClick = { targetRoute ->
+                        onDrawerItemClick = click@{ targetRoute ->
+                            // Live TV fork: Live TV opens its list; its "‹ Live TV" row goes back.
+                            if (targetRoute == LIVE_TV_GROUP_ROUTE) {
+                                if (drawerItems.none { it.isGroup && it.groupOpen }) pendingLiveTvListFocus = true
+                                onToggleLiveTvGroup()
+                                return@click
+                            }
                             keyboardController?.hide()
                             if (isV2Sidebar && currentRoute != targetRoute) {
                                 pendingDrawerDestination = targetRoute
@@ -2800,7 +3118,8 @@ private fun ModernSidebarScaffold(
                 } else CollapsedSidebarPill(
                     label = selectedDrawerItem.label,
                     iconRes = selectedDrawerItem.iconRes,
-                    icon = selectedDrawerItem.icon,
+                    // Live TV fork: the Guide page shows as "Live TV" in the pill.
+                    icon = if (selectedDrawerItem.route == Screen.LiveTv.route) Icons.Default.LiveTv else selectedDrawerItem.icon,
                     iconOnly = isFloatingPillIconOnly && !keepFloatingPillExpanded,
                     blurEnabled = collapsedPillBlurEnabled,
                     hazeState = if (collapsedPillBlurEnabled) sidebarHazeState else null,
@@ -2967,6 +3286,12 @@ internal fun appRootRoutes(discoverInSidebar: Boolean, calendarInMenu: Boolean, 
     if (calendarInMenu) add(Screen.Calendar.route)
     add(Screen.Settings.route)
     if (discoverInSidebar) add(Screen.Discover.route)
+    // Live TV fork: its pages are menu pages too (Back opens the menu first).
+    add(Screen.LiveTv.route)
+    add(Screen.Recordings.route)
+    add(Screen.Sports.route)
+    add(Screen.OnDemand.route)
+    add(Screen.LiveCalendar.route)
 }
 
 private fun navigateToDrawerRoute(
@@ -2974,6 +3299,11 @@ private fun navigateToDrawerRoute(
     currentRoute: String?,
     targetRoute: String
 ) {
+    // Live TV fork: Search picked from the side menu always shows everything, even when the
+    // search screen on top was opened from the guide or On Demand (their limited scope).
+    if (targetRoute == Screen.Search.route) {
+        com.nuvio.tv.livetv.ui.LiveTvSearchBridge.origin.value = com.nuvio.tv.livetv.ui.LiveTvSearchBridge.HOME
+    }
     if (currentRoute == targetRoute) {
         if (targetRoute == Screen.Home.route) {
             // Scroll Home to top by clearing saved focus/scroll state on the ViewModel.

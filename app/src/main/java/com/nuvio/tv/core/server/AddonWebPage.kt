@@ -128,6 +128,7 @@ ${tabButtons}
         <button class="btn" onclick="enableAllCatalogs()" style="flex:1">${context.getString(R.string.web_btn_enable_all)}</button>
         <button class="btn" onclick="disableAllCatalogs()" style="flex:1">${context.getString(R.string.web_btn_disable_all)}</button>
       </div>
+      ${LiveRowsWebPage.addButtonHtml(context)}
       <ul class="addon-list" id="catalogList"></ul>
       <div class="empty-state" id="catalogEmptyState">${context.getString(R.string.web_no_catalogs)}</div>
     </div>
@@ -1128,6 +1129,7 @@ ${tabButtons}
   .import-tab.active { display: block; }
   .import-tab-btn { font-size: 0.8rem !important; padding: 0.5rem 1rem !important; flex: 1; }
   .import-tab-btn.active { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); }
+${LiveRowsWebPage.css()}
   @media (max-width: 480px) {
     .page { padding: 0 1rem 5rem; }
     .header { padding: 2rem 0 2rem; }
@@ -1180,6 +1182,7 @@ ${tabButtons}
     </div>
   </div>
 
+${if (allowCatalogManagement) LiveRowsWebPage.sheetHtml() else ""}
   <button class="btn btn-save" id="saveBtn" onclick="saveChanges()">${context.getString(R.string.web_btn_save)}</button>
 </div>
 
@@ -1410,6 +1413,7 @@ function buildUnifiedCatalogList() {
       c.isCollection = true;
       c.collectionId = c.key.replace('collection_', '');
     }
+    if (isLiveKey(c.key)) c.isLiveRow = true;
   });
 }
 
@@ -1677,11 +1681,12 @@ async function loadState() {
     collections = normalizeCollectionsForEditing(state.collections || []);
     disabledCollectionKeys = (state.disabledCollectionKeys || []).slice();
     followAddonsOrder = state.followAddonsOrder || false;
+    liveRowsLoaded(state);
     originalAddons = JSON.parse(JSON.stringify(addons));
     originalCatalogs = JSON.parse(JSON.stringify(catalogs));
     originalCollections = JSON.parse(JSON.stringify(collections));
     originalDisabledCollectionKeys = disabledCollectionKeys.slice();
-    availableCatalogs = catalogs.map(function(c) {
+    availableCatalogs = catalogs.filter(function(c) { return !isLiveKey(c.key); }).map(function(c) {
       return { key: c.key, addonName: c.addonName, catalogName: c.catalogName, type: c.type,
         addonId: c.key.split('_')[0] || '', catalogId: c.key.split('_').slice(2).join('_') || '' };
     });
@@ -1774,7 +1779,7 @@ function renderCatalogs() {
     var typeDisplay = isCollection ? 'Collection' : formatCatalogTitle(catalog.catalogName, catalog.type);
 
     // In follow addons order mode, disable move buttons for non-collection items
-    var moveDisabled = followAddonsOrder && !isCollection;
+    var moveDisabled = followAddonsOrder && !isFreeRow(catalog);
     var upDisabled = isFirst || moveDisabled;
     var downDisabled = isLast || moveDisabled;
     var topDisabled = isFirst || moveDisabled;
@@ -1796,13 +1801,14 @@ function renderCatalogs() {
         '</button>' +
       '</div>' +
       '<div class="catalog-info">' +
-        '<div class="catalog-name">' + escapeHtml(formatCatalogTitle(catalog.catalogName, catalog.type)) +
+        '<div class="catalog-name">' + (catalog.isLiveRow ? liveCatalogName(catalog) : escapeHtml(formatCatalogTitle(catalog.catalogName, catalog.type))) +
           (isCollection ? '<span class="badge-collection">${context.getString(R.string.web_badge_collection).replace("'", "\\'")}</span>' : '') +
           (catalog.isDisabled ? '<span class="badge-disabled">${context.getString(R.string.web_badge_disabled).replace("'", "\\'")}</span>' : '') +
         '</div>' +
-        '<div class="catalog-meta">' + escapeHtml(catalog.addonName) + '</div>' +
+        '<div class="catalog-meta">' + (catalog.isLiveRow ? liveCatalogMeta(catalog) : escapeHtml(catalog.addonName)) + '</div>' +
       '</div>' +
       '<div class="addon-actions">' +
+        (catalog.isLiveRow && liveRows ? liveEditButton(i) : '') +
         '<button class="' + toggleClass + '" onclick="toggleCatalog(' + i + ')">' +
           (catalog.isDisabled ? '${context.getString(R.string.web_btn_enable).replace("'", "\\'")}' : '${context.getString(R.string.web_btn_disable).replace("'", "\\'")}') +
         '</button>' +
@@ -1816,17 +1822,17 @@ function toggleFollowAddonsOrder() {
   followAddonsOrder = !followAddonsOrder;
   if (followAddonsOrder) {
     // Reorder: addon catalogs in manifest order, collections keep relative position
-    var addonItems = catalogs.filter(function(c) { return !c.isCollection; });
+    var addonItems = catalogs.filter(function(c) { return !isFreeRow(c); });
     var collectionItems = [];
     var collectionPositions = [];
     catalogs.forEach(function(c, i) {
-      if (c.isCollection) {
+      if (isFreeRow(c)) {
         collectionItems.push(c);
         collectionPositions.push(i);
       }
     });
     // Rebuild: start with addon items in their original manifest order (from server)
-    var manifestAddonOrder = originalCatalogs.filter(function(c) { return !(c.key && c.key.indexOf('collection_') === 0); });
+    var manifestAddonOrder = originalCatalogs.filter(function(c) { return !(c.key && (c.key.indexOf('collection_') === 0 || isLiveKey(c.key))); });
     var addonByKey = {};
     addonItems.forEach(function(a) { addonByKey[a.key] = a; });
     var orderedAddons = manifestAddonOrder.map(function(c) { return addonByKey[c.key]; }).filter(Boolean);
@@ -1854,23 +1860,23 @@ function moveCatalog(index, direction) {
 
   if (followAddonsOrder) {
     // In follow mode, only collections can move, and they jump between addon blocks
-    if (!item.isCollection) return;
+    if (!isFreeRow(item)) return;
     var newIndex;
     if (direction < 0) {
       // Move up: find start of previous addon block
       var scanIdx = index - 1;
-      while (scanIdx >= 0 && catalogs[scanIdx].isCollection) scanIdx--;
+      while (scanIdx >= 0 && isFreeRow(catalogs[scanIdx])) scanIdx--;
       if (scanIdx < 0) return;
       var targetAddon = catalogs[scanIdx].addonName;
-      while (scanIdx > 0 && !catalogs[scanIdx - 1].isCollection && catalogs[scanIdx - 1].addonName === targetAddon) scanIdx--;
+      while (scanIdx > 0 && !isFreeRow(catalogs[scanIdx - 1]) && catalogs[scanIdx - 1].addonName === targetAddon) scanIdx--;
       newIndex = scanIdx;
     } else {
       // Move down: find end of next addon block
       var scanIdx = index + 1;
-      while (scanIdx < catalogs.length && catalogs[scanIdx].isCollection) scanIdx++;
+      while (scanIdx < catalogs.length && isFreeRow(catalogs[scanIdx])) scanIdx++;
       if (scanIdx >= catalogs.length) return;
       var targetAddon = catalogs[scanIdx].addonName;
-      while (scanIdx < catalogs.length - 1 && !catalogs[scanIdx + 1].isCollection && catalogs[scanIdx + 1].addonName === targetAddon) scanIdx++;
+      while (scanIdx < catalogs.length - 1 && !isFreeRow(catalogs[scanIdx + 1]) && catalogs[scanIdx + 1].addonName === targetAddon) scanIdx++;
       newIndex = scanIdx;
     }
     if (newIndex === index) return;
@@ -1888,7 +1894,7 @@ function moveCatalog(index, direction) {
 function moveCatalogToTop(index) {
   if (!allowCatalogManagement) return;
   if (index <= 0) return;
-  if (followAddonsOrder && !catalogs[index].isCollection) return;
+  if (followAddonsOrder && !isFreeRow(catalogs[index])) return;
   var item = catalogs.splice(index, 1)[0];
   catalogs.unshift(item);
   renderCatalogs();
@@ -1897,7 +1903,7 @@ function moveCatalogToTop(index) {
 function moveCatalogToBottom(index) {
   if (!allowCatalogManagement) return;
   if (index >= catalogs.length - 1) return;
-  if (followAddonsOrder && !catalogs[index].isCollection) return;
+  if (followAddonsOrder && !isFreeRow(catalogs[index])) return;
   var item = catalogs.splice(index, 1)[0];
   catalogs.push(item);
   renderCatalogs();
@@ -2081,6 +2087,7 @@ async function saveChanges() {
         collections: collections,
         disabledCollectionKeys: disabledCollectionKeys,
         followAddonsOrder: followAddonsOrder,
+        liveRows: liveRowsForSave(),
         trackingConsentUrls: addons
           .filter(function(a) { return a.trackingConsent; })
           .map(function(a) { return a.url; })
@@ -2132,7 +2139,9 @@ function showRejectedStatus() {
   setTimeout(function() {
     addons = JSON.parse(JSON.stringify(originalAddons));
     catalogs = JSON.parse(JSON.stringify(originalCatalogs));
+    liveRowsRestore();
     collections = JSON.parse(JSON.stringify(originalCollections));
+    buildUnifiedCatalogList();
     disabledCollectionKeys = originalDisabledCollectionKeys.slice();
     renderAddons();
     renderCatalogs();
@@ -3456,6 +3465,8 @@ if (addonUrlInput) {
     if (e.key === 'Enter') addAddon();
   });
 }
+
+${LiveRowsWebPage.script(context)}
 
 loadState();
 </script>

@@ -4393,6 +4393,8 @@
     <string name="playback_release_decoder_on_background">Uvoľniť dekodér na pozadí</string>
     <string name="playback_release_decoder_on_background_sub">Uvoľní video dekodér, keď Nuvio Arc prejde na pozadie. Zapnite, ak po návrate do aplikácie prehrávanie skončí chybou dekodéra. Prehrávač sa pri návrate znova načíta, aj po šetriči obrazovky</string>
     <string name="autosync_toast_no_fit">Synchronizácia zlyhala: tieto titulky sa nezhodujú s touto verziou videa.</string>
+    <string name="settings_home_screen_rows">Riadky domovskej obrazovky</string>
+    <string name="settings_home_screen_rows_subtitle">Vyberte poradie riadkov na domovskej obrazovke</string>
     <string name="layout_hero_description_auto_scroll">Automatické posúvanie popisov</string>
     <string name="layout_hero_description_auto_scroll_sub">Pomaly posúvať dlhé popisy na domovskej obrazovke namiesto ich orezávania.</string>
     <string name="player_dts_hd_decoding_notice">Bezstratový výstup DTS-HD prestal fungovať, preto zvuk tohto titulu dekóduje priamo Nuvio Arc.</string>
@@ -4480,17 +4482,7 @@
     <string name="report_sent_no_phone">Vďaka za hlásenie. Arc je hobby projekt, preto nie každé hlásenie dostane odpoveď.</string>
     <string name="report_sent_back">Späť na sledovanie</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Vyberte všetko, čo platí. Arc si uchoval poslednú minútu.</item>
-        <item quantity="few">Vyberte všetko, čo platí. Arc si uchoval posledné %1$d minúty.</item>
-        <item quantity="many">Vyberte všetko, čo platí. Arc si uchoval posledných %1$d minúty.</item>
-        <item quantity="other">Vyberte všetko, čo platí. Arc si uchoval posledných %1$d minút.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Nastavenia prehrávača a posledná minúta</item>
-        <item quantity="few">Nastavenia prehrávača a posledné %1$d minúty</item>
-        <item quantity="many">Nastavenia prehrávača a posledných %1$d minúty</item>
-        <item quantity="other">Nastavenia prehrávača a posledných %1$d minút</item>
-    </plurals>
     <string name="report_settings_subtitle">Napíšte, čo sa pokazilo alebo čo by ste chceli, aby Arc robil</string>
     <string name="report_group_choose">Čo chcete nahlásiť?</string>
     <string name="report_group_options">Možnosti</string>
@@ -4543,11 +4535,6 @@
     <string name="report_sent_kind_bug">Niečo nefunguje</string>
     <string name="report_sent_kind_idea">Nápad alebo požiadavka</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d nové</item>
-        <item quantity="few">%1$d nové</item>
-        <item quantity="many">%1$d nového</item>
-        <item quantity="other">%1$d nových</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Kontroluje sa raz denne. Arc je hobby projekt, preto nie každé hlásenie dostane odpoveď.</string>
     <string name="report_my_reports_hint_off">Kontrola je vypnutá. Zapnite Kontrolovať moje hlásenia a uvidíte, čo sa deje s vašimi hláseniami.</string>
@@ -4570,11 +4557,6 @@
     <string name="report_ready_follow_off">Ak chcete toto hlásenie sledovať, naskenujte telefónom kód na ďalšej obrazovke.</string>
     <string name="report_notice_title">Pri vašom hlásení je novinka</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">Pri %1$d vašom hlásení je novinka</item>
-        <item quantity="few">Pri %1$d vašich hláseniach sú novinky</item>
-        <item quantity="many">Pri %1$d vašich hláseniach sú novinky</item>
-        <item quantity="other">Pri %1$d vašich hláseniach sú novinky</item>
-    </plurals>
     <string name="report_notice_one">%1$s, odoslané %2$s: %3$s.</string>
     <string name="report_notice_many">Otvorte Moje hlásenia a uvidíte, čo sa zmenilo.</string>
     <string name="report_notice_open">Otvoriť Moje hlásenia</string>
@@ -4585,19 +4567,9 @@
     <string name="report_stop_recording">Zastaviť nahrávanie</string>
     <string name="report_recording_pill">Nahrávanie %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Nahrávanie %1$s · %2$d značka</item>
-        <item quantity="few">Nahrávanie %1$s · %2$d značky</item>
-        <item quantity="many">Nahrávanie %1$s · %2$d značky</item>
-        <item quantity="other">Nahrávanie %1$s · %2$d značiek</item>
-    </plurals>
     <string name="report_recording_no_space">Nedostatok voľného miesta na nahrávanie</string>
     <string name="report_item_recording">Nahrávanie, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d značka. Len čísla, nikdy zvuk ani obraz.</item>
-        <item quantity="few">%d značky. Len čísla, nikdy zvuk ani obraz.</item>
-        <item quantity="many">%d značky. Len čísla, nikdy zvuk ani obraz.</item>
-        <item quantity="other">%d značiek. Len čísla, nikdy zvuk ani obraz.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Nahlásiť problém / označiť</string>
     <string name="remote_buttons_job_report_mark_desc">Otvorí panel hlásenia. Počas nahrávania pridá značku.</string>
     <string name="display_mode_measured">Namerané</string>

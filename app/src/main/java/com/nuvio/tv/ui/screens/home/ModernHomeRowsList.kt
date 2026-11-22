@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusDirection
@@ -175,6 +176,8 @@ internal fun ModernHomeRowsList(
     blockLeftOnFirstExpandedItem: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    // Live TV fork: where the Live TV row goes (null = hidden).
+    val liveTvRowAbove = com.nuvio.tv.livetv.home.rememberLiveTvHomeRowPosition()
     // Unwrap StableRef wrappers for internal use (not passed to child composables)
     val focusedItemByRowMap = focusedItemByRow.value
     val rowListStatesMap = rowListStates.value
@@ -572,11 +575,15 @@ internal fun ModernHomeRowsList(
                     }
                     val firstRowKey = carouselRows.list.firstOrNull()?.key
                     val lastRowKey = carouselRows.list.lastOrNull()?.key
+                    // Live TV fork: not when the Live TV row is waiting above the top row (with no
+                    // Continue watching, the top row is a catalog whose card expands, and this
+                    // swallowed Up, so the Live TV row could never be opened).
                     if (event.type == KeyEventType.KeyDown &&
                         event.key == Key.DirectionUp &&
                         effectiveExpandEnabled &&
                         expandedCatalogFocusKey.value != null &&
-                        activeRowKey.value == firstRowKey
+                        activeRowKey.value == firstRowKey &&
+                        !(liveTvRowAbove == true && com.nuvio.tv.livetv.home.LiveTvHomeReveal.available.value)
                     ) return@onPreviewKeyEvent true
                     if (event.type == KeyEventType.KeyDown &&
                         event.key == Key.DirectionDown &&
@@ -628,7 +635,13 @@ internal fun ModernHomeRowsList(
                                     ?: visibleItems.firstOrNull()?.index
                                     ?: verticalRowListState.firstVisibleItemIndex
                         }
-                        val targetRow = carouselRows.list.getOrNull(targetRowIndex)
+                        // Live TV fork: land on the next poster row, not on a Live TV row.
+                        val targetRow = carouselRows.list.getOrNull(targetRowIndex)?.let { r ->
+                            if (!com.nuvio.tv.livetv.home.isLiveHomeRowKey(r.key)) r
+                            else (if (sign < 0) carouselRows.list.subList(0, targetRowIndex).lastOrNull { !com.nuvio.tv.livetv.home.isLiveHomeRowKey(it.key) }
+                                else carouselRows.list.drop(targetRowIndex + 1).firstOrNull { !com.nuvio.tv.livetv.home.isLiveHomeRowKey(it.key) })
+                                ?: carouselRows.list.firstOrNull { !com.nuvio.tv.livetv.home.isLiveHomeRowKey(it.key) }
+                        }
                         if (targetRow == null) null
                         else {
                             val column = focusedCardCenter()
@@ -654,6 +667,11 @@ internal fun ModernHomeRowsList(
                 key = { _, row -> row.key },
                 contentType = { _, row -> row.apiType ?: "modern_home_row" }
             ) { rowIndex, row ->
+                // Live TV fork: the Live TV row sits with Continue watching (above or below it),
+                // or above the first row when there's no Continue watching.
+                val hasContinueWatching = carouselRows.list.any { it.key == MODERN_CONTINUE_WATCHING_ROW_KEY }
+                val liveTvHere = liveTvRowAbove != null &&
+                    (if (hasContinueWatching) row.key == MODERN_CONTINUE_WATCHING_ROW_KEY else rowIndex == 0)
                 val stableOnContinueWatchingOptions = remember(onContinueWatchingOptions) {
                     { item: ContinueWatchingItem -> onContinueWatchingOptions(item) }
                 }
@@ -704,6 +722,33 @@ internal fun ModernHomeRowsList(
                         }
                     }
                 }
+                androidx.compose.foundation.layout.Column {
+                if (liveTvHere && (liveTvRowAbove == true || !hasContinueWatching)) {
+                    com.nuvio.tv.livetv.home.LiveTvHomeRow(hideUnlessFocused = true, above = liveTvRowAbove == true, startPadding = 52.dp, titleStyle = androidx.tv.material3.MaterialTheme.typography.titleMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
+                }
+                androidx.compose.runtime.CompositionLocalProvider(com.nuvio.tv.livetv.home.LocalLiveTvHintHere provides (liveTvHere && liveTvRowAbove == true)) {
+                // Live TV fork: a Live TV or Sports row, sized like this layout's cards.
+                if (com.nuvio.tv.livetv.home.isLiveHomeRowKey(row.key)) {
+                    com.nuvio.tv.livetv.home.HomeLiveRowSection(
+                        rowKey = row.key,
+                        style = com.nuvio.tv.livetv.home.HomeLiveRowStyle(
+                            landscape = useLandscapePosters,
+                            portraitWidth = portraitCatalogCardWidth,
+                            portraitHeight = portraitCatalogCardHeight,
+                            landscapeWidth = landscapeCatalogCardWidth,
+                            landscapeHeight = landscapeCatalogCardHeight,
+                            startPadding = 52.dp,
+                            cornerRadius = posterCardCornerRadius,
+                            titleStyle = androidx.tv.material3.MaterialTheme.typography.titleMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                            titleBottom = 14.dp
+                        ),
+                        // The row Home goes back to (from the side menu, or back from a page) is
+                        // this one when a card here was the last one highlighted.
+                        modifier = Modifier
+                            .focusRequester(rowFocusRequesters.getOrPut(row.key) { FocusRequester() })
+                            .onFocusChanged { if (it.hasFocus && activeRowKey.value != row.key) onActiveRowKeyChange(row.key) }
+                    )
+                } else
                 androidx.compose.runtime.CompositionLocalProvider(
                     com.nuvio.tv.core.image.LocalHomePosterPriority provides
                         com.nuvio.tv.core.image.HomePosterPriority(imageViewport, rowIndex)
@@ -768,6 +813,11 @@ internal fun ModernHomeRowsList(
                         StableRef(mutableMapOf())
                     }
                 )
+                }
+                }
+                if (liveTvHere && liveTvRowAbove == false && hasContinueWatching) {
+                    com.nuvio.tv.livetv.home.LiveTvHomeRow(hideUnlessFocused = true, above = false, startPadding = 52.dp, titleStyle = androidx.tv.material3.MaterialTheme.typography.titleMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold))
+                }
                 }
             }
         }

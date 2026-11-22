@@ -24,6 +24,8 @@ import com.nuvio.tv.data.repository.PlaybackIssuePlaybackFormatInput
 import com.nuvio.tv.data.repository.PlaybackIssuePlaybackHealthSnapshotInput
 import com.nuvio.tv.data.repository.PlaybackIssuePlaybackLoadErrorInput
 import com.nuvio.tv.data.repository.PlaybackIssuePlaybackLoadInput
+import com.nuvio.tv.core.player.isStalkerPlaybackAddress
+import com.nuvio.tv.core.player.redactStalkerPlaybackDetails
 
 private const val PLAYBACK_ANALYTICS_EVENT_LIMIT = 140
 private const val PLAYBACK_RAW_EVENT_LIMIT = 220
@@ -118,6 +120,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
     private var lastCompletedMediaLoad: PlaybackIssuePlaybackLoadInput? = null
     private var traceHost: String = "unknown"
     private var traceEngine: String = "unknown"
+    private var isStalkerSession = false
     private var launchStartedAtElapsedMs: Long? = null
     private var initializationStartedAtWallTimeMs: Long = 0L
     private var startPositionMs: Long? = null
@@ -125,7 +128,8 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
     private var rebufferAheadAtStartMs: Long = 0L
 
     fun setTraceContext(host: String?, engine: String?) {
-        traceHost = host?.takeIf { it.isNotBlank() } ?: "unknown"
+        isStalkerSession = host.equals("stalker", ignoreCase = true) || isStalkerPlaybackAddress(host)
+        traceHost = if (isStalkerSession) "stalker" else host?.takeIf { it.isNotBlank() } ?: "unknown"
         traceEngine = engine?.takeIf { it.isNotBlank() } ?: "unknown"
     }
 
@@ -273,6 +277,10 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
     fun audioUnderrunTotal(): Int = audioUnderrunCount
 
     fun recordRawEventLine(line: String) {
+        appendRawEventLine(if (isStalkerSession) "Stalker playback diagnostic event" else redactStalkerPlaybackDetails(line))
+    }
+
+    private fun appendRawEventLine(line: String) {
         rawEventLines.addLast(line.rawPlaybackLine())
         while (rawEventLines.size > PLAYBACK_RAW_EVENT_LIMIT) {
             rawEventLines.removeFirst()
@@ -674,7 +682,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
     ) {
         loadStartedCount += 1
         lastLoadStartedAtElapsedMs = SystemClock.elapsedRealtime()
-        lastLoad = loadEventInfo.toPlaybackLoad(mediaLoadData)
+        lastLoad = loadEventInfo.toPlaybackLoad(mediaLoadData, isStalkerSession)
         record(
             name = "load_started",
             eventTime = eventTime,
@@ -689,7 +697,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
     ) {
         loadCompletedCount += 1
         totalBytesLoaded += loadEventInfo.bytesLoaded.coerceAtLeast(0L)
-        lastLoad = loadEventInfo.toPlaybackLoad(mediaLoadData)
+        lastLoad = loadEventInfo.toPlaybackLoad(mediaLoadData, isStalkerSession)
         if (mediaLoadData.dataType == C.DATA_TYPE_MEDIA) {
             lastCompletedMediaLoad = lastLoad
         }
@@ -706,7 +714,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
         mediaLoadData: MediaLoadData
     ) {
         loadCanceledCount += 1
-        lastLoad = loadEventInfo.toPlaybackLoad(mediaLoadData)
+        lastLoad = loadEventInfo.toPlaybackLoad(mediaLoadData, isStalkerSession)
         record(
             name = "load_canceled",
             eventTime = eventTime,
@@ -723,14 +731,14 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
     ) {
         loadErrorCount += 1
         lastLoadErrorClasses = PlayerErrorCauses.causeClasses(error)
-        val load = loadEventInfo.toPlaybackLoad(mediaLoadData)
+        val load = loadEventInfo.toPlaybackLoad(mediaLoadData, isStalkerSession)
         lastLoad = load
         lastLoadError = PlaybackIssuePlaybackLoadErrorInput(
             host = load.host,
             dataType = load.dataType,
             trackType = load.trackType,
             exceptionClass = error.javaClass.name,
-            message = error.message,
+            message = if (isStalkerSession) "Stalker playback request failed" else error.message,
             httpStatus = error.findHttpStatus(),
             wasCanceled = wasCanceled,
             bytesLoaded = load.bytesLoaded,
@@ -793,8 +801,12 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
         val firstFrameElapsed = firstFrameElapsedMs
         val combinedRawEventLines = buildList {
             addAll(rawEventLines)
-            PlaybackConnectionEvents.resolvedHost()?.let {
-                add("resolved_serving_host host=$it")
+            if (!isStalkerSession) {
+                PlaybackConnectionEvents.resolvedHost()?.let {
+                    add("resolved_serving_host host=$it")
+                }
+                addAll(PlaybackConnectionEvents.recentEvents())
+                addAll(LoggingDataSource.recentEvents())
             }
             addAll(PlaybackConnectionEvents.recentEvents())
             addAll(LoggingDataSource.recentEvents())
@@ -846,7 +858,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
             videoDroppedBuffers = videoDroppedBuffers,
             videoMaxConsecutiveDroppedBuffers = videoMaxConsecutiveDroppedBuffers,
             videoFrameProcessingOffsetAverageUs = videoFrameProcessingOffsetAverageUs(),
-            videoFormat = videoFormat,
+            videoFormat = if (isStalkerSession) videoFormat?.copy(id = null, label = null) else videoFormat,
             audioDecoderName = audioDecoderName,
             audioDecoderInitMs = audioDecoderInitMs,
             audioDecoderReleaseCount = audioDecoderReleaseCount,
@@ -854,7 +866,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
             audioUnderrunBufferSize = audioUnderrunBufferSize,
             audioUnderrunBufferSizeMs = audioUnderrunBufferSizeMs,
             audioUnderrunElapsedSinceLastFeedMs = audioUnderrunElapsedSinceLastFeedMs,
-            audioFormat = audioFormat,
+            audioFormat = if (isStalkerSession) audioFormat?.copy(id = null, label = null) else audioFormat,
             bandwidthEstimateBps = bandwidthEstimateBps,
             bandwidthTransferDurationMs = bandwidthTransferDurationMs,
             bandwidthBytesTransferred = bandwidthBytesTransferred,
@@ -936,12 +948,20 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
         if (!name.keptInEventLists()) return
         val position = eventTime?.currentPlaybackPositionMs.safeTimeMs() ?: positionMs
         val bufferedPosition = eventTime?.bufferedPositionMs() ?: bufferedPositionMs
+        val safeDetails = if (isStalkerSession) details.mapValues { (key, value) ->
+            when {
+                key == "host" -> "stalker"
+                key in setOf("message", "url", "uri", "headers", "id", "label") -> "[Stalker playback details redacted]"
+                value.contains("://") || isStalkerPlaybackAddress(value) -> "[Stalker playback details redacted]"
+                else -> value
+            }
+        } else details
         val rawLine = buildRawEventLine(
             name = name,
             elapsedMs = (now - sessionStartedAtElapsedMs).coerceAtLeast(0L),
             positionMs = position,
             bufferedPositionMs = bufferedPosition,
-            details = details
+            details = safeDetails
         )
         recordRawEventLine(rawLine)
         mirrorToRecorder(name, details)
@@ -963,7 +983,7 @@ internal class PlayerPlaybackAnalyticsDiagnostics {
                 playbackState = playbackStateName,
                 positionMs = position,
                 bufferedPositionMs = bufferedPosition,
-                details = details
+                details = safeDetails
             )
         )
         while (events.size > PLAYBACK_ANALYTICS_EVENT_LIMIT) {
@@ -1079,10 +1099,10 @@ private fun String.rawPlaybackLine(): String =
         .replace('\r', ' ')
         .take(2000)
 
-private fun LoadEventInfo.toPlaybackLoad(mediaLoadData: MediaLoadData): PlaybackIssuePlaybackLoadInput {
+private fun LoadEventInfo.toPlaybackLoad(mediaLoadData: MediaLoadData, isStalker: Boolean): PlaybackIssuePlaybackLoadInput {
     val requestUri = uri
     return PlaybackIssuePlaybackLoadInput(
-        host = requestUri.host,
+        host = if (isStalker) "stalker" else requestUri.host,
         scheme = requestUri.scheme,
         dataType = mediaLoadData.dataType.dataTypeName(),
         trackType = mediaLoadData.trackType.trackTypeName(),

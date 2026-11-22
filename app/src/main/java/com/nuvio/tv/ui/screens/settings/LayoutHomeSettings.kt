@@ -234,11 +234,7 @@ internal fun LayoutSidebarSection(
             onToggle = { onEvent(LayoutSettingsEvent.SetSidebarCollapsed(!uiState.sidebarCollapsedByDefault)) }
         )
     }
-    DiscoverLocationRow(
-        selectedLocation = uiState.discoverLocation,
-        rememberedLocation = uiState.lastNonOffDiscoverLocation,
-        onLocationSelected = { location -> onEvent(LayoutSettingsEvent.SetDiscoverLocation(location)) }
-    )
+    // Live TV fork: where Discover goes is set in Settings → Menu & Features (with the rest of the menu).
 }
 
 @Composable

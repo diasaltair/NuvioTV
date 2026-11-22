@@ -28,6 +28,7 @@ import com.nuvio.tv.ui.v2.appearance.LocalV2Appearance
 import com.nuvio.tv.ui.components.OwnFocusEdge
 import com.nuvio.tv.ui.components.focusZIndex
 import com.nuvio.tv.ui.v2.components.nuvioV2Focus
+import androidx.compose.foundation.layout.Row
 import com.nuvio.tv.ui.theme.NuvioTheme
 
 import android.view.KeyEvent as AndroidKeyEvent
@@ -49,7 +50,6 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.foundation.layout.Column
@@ -951,12 +951,15 @@ internal fun ModernRowSection(
                 .padding(start = rowLeadingInset, end = 52.dp, bottom = rowTitleBottom)
                 .fillMaxWidth()
         }
-        Text(
-            text = rowTitle,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, textDirection = rowTitle.contentTextDirection()),
-            color = NuvioTheme.colors.TextPrimary,
-            modifier = railHeaderModifier
-        )
+        Row(modifier = railHeaderModifier, verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = rowTitle,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold, textDirection = rowTitle.contentTextDirection()),
+                color = NuvioTheme.colors.TextPrimary
+            )
+            // Live TV fork: "Live TV ▲" hint when this is the top row.
+            com.nuvio.tv.livetv.home.LiveTvHomeHint()
+        }
 
         val firstRowItem = row.items.list.firstOrNull()
         val firstCardWidth = when {

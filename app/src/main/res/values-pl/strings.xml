@@ -4308,6 +4308,8 @@
     <string name="cd_emoji_option">Emoji %1$s</string>
     <string name="cd_trailer_controls">Sterowanie zwiastunem</string>
     <string name="cd_seek_bar">Pasek przewijania</string>
+    <string name="settings_home_screen_rows">Rzędy ekranu głównego</string>
+    <string name="settings_home_screen_rows_subtitle">Wybierz kolejność rzędów na ekranie głównym</string>
     <string name="assessment_value_on_auto">Wł. · Auto, do ≈%1$s</string>
     <string name="assessment_value_connections_auto">Automatycznie (zgodnie z Automatycznym przyspieszeniem)</string>
     <string name="assessment_grounds_connections_auto">Automatyczne przyspieszenie jest włączone i samo dodaje połączenia, gdy film ich potrzebuje; stała liczba by je wyłączyła. Zmierzono: jedno połączenie %1$s, %3$d × %4$d MB osiągnęło %2$s.</string>
@@ -4549,17 +4551,7 @@
     <string name="report_sent_no_phone">Dzięki za zgłoszenie. Arc to projekt hobbystyczny, więc nie każde zgłoszenie dostaje odpowiedź.</string>
     <string name="report_sent_back">Wróć do oglądania</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Wybierz wszystko, co pasuje. Arc zachował ostatnią minutę.</item>
-        <item quantity="few">Wybierz wszystko, co pasuje. Arc zachował ostatnie %1$d minuty.</item>
-        <item quantity="many">Wybierz wszystko, co pasuje. Arc zachował ostatnich %1$d minut.</item>
-        <item quantity="other">Wybierz wszystko, co pasuje. Arc zachował ostatnich %1$d minut.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Ustawienia odtwarzacza i ostatnia minuta</item>
-        <item quantity="few">Ustawienia odtwarzacza i ostatnie %1$d minuty</item>
-        <item quantity="many">Ustawienia odtwarzacza i ostatnich %1$d minut</item>
-        <item quantity="other">Ustawienia odtwarzacza i ostatnich %1$d minut</item>
-    </plurals>
     <string name="report_settings_subtitle">Napisz, co poszło nie tak lub co Arc powinien robić</string>
     <string name="report_group_choose">Co chcesz zgłosić?</string>
     <string name="report_group_options">Opcje</string>
@@ -4612,11 +4604,6 @@
     <string name="report_sent_kind_bug">Coś nie działa</string>
     <string name="report_sent_kind_idea">Pomysł lub prośba</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d nowe</item>
-        <item quantity="few">%1$d nowe</item>
-        <item quantity="many">%1$d nowych</item>
-        <item quantity="other">%1$d nowego</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Sprawdzane raz dziennie. Arc to projekt hobbystyczny, więc nie każde zgłoszenie dostaje odpowiedź.</string>
     <string name="report_my_reports_hint_off">Sprawdzanie jest wyłączone. Włącz Sprawdzaj moje zgłoszenia, aby widzieć, co dzieje się z Twoimi zgłoszeniami.</string>
@@ -4639,11 +4626,6 @@
     <string name="report_ready_follow_off">Aby śledzić to zgłoszenie, zeskanuj telefonem kod na następnym ekranie.</string>
     <string name="report_notice_title">Nowości w Twoim zgłoszeniu</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">Nowości w %1$d Twoim zgłoszeniu</item>
-        <item quantity="few">Nowości w %1$d Twoich zgłoszeniach</item>
-        <item quantity="many">Nowości w %1$d Twoich zgłoszeniach</item>
-        <item quantity="other">Nowości w %1$d Twoich zgłoszeniach</item>
-    </plurals>
     <string name="report_notice_one">%1$s, wysłane %2$s: %3$s.</string>
     <string name="report_notice_many">Otwórz Moje zgłoszenia, aby zobaczyć, co się zmieniło.</string>
     <string name="report_notice_open">Otwórz Moje zgłoszenia</string>
@@ -4654,19 +4636,9 @@
     <string name="report_stop_recording">Zatrzymaj nagrywanie</string>
     <string name="report_recording_pill">Nagrywanie %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Nagrywanie %1$s · %2$d znacznik</item>
-        <item quantity="few">Nagrywanie %1$s · %2$d znaczniki</item>
-        <item quantity="many">Nagrywanie %1$s · %2$d znaczników</item>
-        <item quantity="other">Nagrywanie %1$s · %2$d znacznika</item>
-    </plurals>
     <string name="report_recording_no_space">Za mało wolnego miejsca na nagranie</string>
     <string name="report_item_recording">Nagrywanie, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d znacznik. Tylko liczby, nigdy dźwięk ani obraz.</item>
-        <item quantity="few">%d znaczniki. Tylko liczby, nigdy dźwięk ani obraz.</item>
-        <item quantity="many">%d znaczników. Tylko liczby, nigdy dźwięk ani obraz.</item>
-        <item quantity="other">%d znacznika. Tylko liczby, nigdy dźwięk ani obraz.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Zgłoś problem / oznacz</string>
     <string name="remote_buttons_job_report_mark_desc">Otwiera panel zgłoszenia. Podczas nagrywania dodaje znacznik.</string>
     <string name="display_mode_measured">Zmierzone</string>

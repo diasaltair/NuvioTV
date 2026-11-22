@@ -39,8 +39,9 @@ internal fun ProfileSettingsSourceDialog(
     profiles: List<UserProfile>,
     selectedSourceProfileId: Int?,
     copyProviderCredentials: Boolean,
+    keepMatched: Boolean = false,
     onDismiss: () -> Unit,
-    onConfirm: (sourceProfileId: Int?, copyProviderCredentials: Boolean) -> Unit
+    onConfirm: (sourceProfileId: Int?, copyProviderCredentials: Boolean, keepMatched: Boolean) -> Unit
 ) {
     var pendingSourceProfileId by remember(selectedSourceProfileId) {
         mutableStateOf(selectedSourceProfileId)
@@ -48,6 +49,7 @@ internal fun ProfileSettingsSourceDialog(
     var pendingCopyProviderCredentials by remember(copyProviderCredentials) {
         mutableStateOf(copyProviderCredentials)
     }
+    var pendingKeepMatched by remember(keepMatched) { mutableStateOf(keepMatched) }
     val focusRequester = remember { FocusRequester() }
     val selectedIndex = selectedSourceProfileId
         ?.let { selectedId -> profiles.indexOfFirst { it.id == selectedId }.takeIf { it >= 0 } }
@@ -90,6 +92,7 @@ internal fun ProfileSettingsSourceDialog(
                     onClick = {
                         pendingSourceProfileId = null
                         pendingCopyProviderCredentials = false
+                        pendingKeepMatched = false
                     }
                 )
             }
@@ -118,6 +121,22 @@ internal fun ProfileSettingsSourceDialog(
                     pendingCopyProviderCredentials = !pendingCopyProviderCredentials
                 }
             )
+            SourceProfileButton(
+                text = if (pendingKeepMatched) {
+                    stringResource(R.string.profile_keep_matched_on)
+                } else {
+                    stringResource(R.string.profile_keep_matched_off)
+                },
+                selected = pendingKeepMatched,
+                onClick = { pendingKeepMatched = !pendingKeepMatched }
+            )
+            if (pendingKeepMatched) {
+                Text(
+                    text = stringResource(R.string.profile_keep_matched_details),
+                    color = NuvioTheme.colors.TextTertiary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
         Text(
             text = stringResource(R.string.profile_copy_settings_exclusions),
@@ -141,7 +160,11 @@ internal fun ProfileSettingsSourceDialog(
                 selected = true,
                 modifier = Modifier.weight(1f),
                 onClick = {
-                    onConfirm(pendingSourceProfileId, pendingCopyProviderCredentials)
+                    onConfirm(
+                        pendingSourceProfileId,
+                        pendingCopyProviderCredentials,
+                        pendingKeepMatched && pendingSourceProfileId != null
+                    )
                 }
             )
         }
@@ -155,7 +178,7 @@ internal fun CopyProfileSettingsDialog(
     isCopying: Boolean,
     errorMessage: String?,
     onDismiss: () -> Unit,
-    onCopy: (sourceProfileId: Int, copyProviderCredentials: Boolean) -> Unit
+    onCopy: (sourceProfileId: Int, copyProviderCredentials: Boolean, copyLiveTv: Boolean, keepMatched: Boolean) -> Unit
 ) {
     val sourceProfiles = remember(profiles, targetProfile.id) {
         profiles.filterNot { it.id == targetProfile.id }
@@ -167,6 +190,8 @@ internal fun CopyProfileSettingsDialog(
         mutableStateOf(defaultSourceId)
     }
     var copyProviderCredentials by remember(targetProfile.id) { mutableStateOf(false) }
+    var copyLiveTv by remember(targetProfile.id) { mutableStateOf(true) }
+    var keepMatched by remember(targetProfile.id) { mutableStateOf(false) }
     val focusRequester = remember(targetProfile.id) { FocusRequester() }
 
     LaunchedEffect(targetProfile.id) {
@@ -220,6 +245,39 @@ internal fun CopyProfileSettingsDialog(
             enabled = !isCopying,
             onClick = { copyProviderCredentials = !copyProviderCredentials }
         )
+        SourceProfileButton(
+            text = if (copyLiveTv || keepMatched) {
+                stringResource(R.string.profile_copy_settings_live_tv_on)
+            } else {
+                stringResource(R.string.profile_copy_settings_live_tv_off)
+            },
+            selected = copyLiveTv || keepMatched,
+            // Matched profiles always share Live TV.
+            enabled = !isCopying && !keepMatched,
+            onClick = { copyLiveTv = !copyLiveTv }
+        )
+        SourceProfileButton(
+            text = if (keepMatched) {
+                stringResource(R.string.profile_keep_matched_on)
+            } else {
+                stringResource(R.string.profile_keep_matched_off)
+            },
+            selected = keepMatched,
+            enabled = !isCopying,
+            onClick = { keepMatched = !keepMatched }
+        )
+        if (keepMatched) {
+            Text(
+                text = stringResource(R.string.profile_keep_matched_details),
+                color = NuvioTheme.colors.TextTertiary,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        Text(
+            text = stringResource(R.string.profile_copy_settings_live_tv_details),
+            color = NuvioTheme.colors.TextTertiary,
+            style = MaterialTheme.typography.bodySmall
+        )
         Text(
             text = stringResource(R.string.profile_copy_settings_details),
             color = NuvioTheme.colors.TextTertiary,
@@ -253,7 +311,7 @@ internal fun CopyProfileSettingsDialog(
                 },
                 onClick = {
                     selectedSourceId?.let { sourceProfileId ->
-                        onCopy(sourceProfileId, copyProviderCredentials)
+                        onCopy(sourceProfileId, copyProviderCredentials, copyLiveTv || keepMatched, keepMatched)
                     }
                 },
                 enabled = selectedSourceId != null && !isCopying,

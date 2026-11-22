@@ -123,8 +123,15 @@ fun GridHomeContent(
     catalogSeeAllLabel: String? = null,
     onSaveGridFocusState: (Int, Int, String?, GridFocusSlot?) -> Unit,
     onFocusedRowKeyChanged: (String?) -> Unit = {},
-    scrollToTopTrigger: Int = 0
+    scrollToTopTrigger: Int = 0,
+    /**
+     * Live TV fork: a fixed title for the header at the top (On Demand shows "On Demand - the
+     * playlist" there) instead of the name of the group scrolled to.
+     */
+    stickyTitle: String? = null
 ) {
+    // Live TV fork: where the Live TV row goes (null = hidden).
+    val liveTvRowAbove = com.nuvio.tv.livetv.home.rememberLiveTvHomeRowPosition()
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = gridFocusState.verticalScrollIndex,
         initialFirstVisibleItemScrollOffset = gridFocusState.verticalScrollOffset
@@ -358,7 +365,7 @@ fun GridHomeContent(
     // are "pre-section" items (e.g. Hero). Continue Watching goes between them and the rest.
     val firstSectionIndex = remember(gridItemsWithKeys) {
         gridItemsWithKeys.indexOfFirst { (item, _) ->
-            item is GridItem.SectionDivider || item is GridItem.CollectionHeader
+            item is GridItem.SectionDivider || item is GridItem.CollectionHeader || item is GridItem.LiveRow
         }
     }
     val preItems = remember(gridItemsWithKeys, firstSectionIndex) {
@@ -409,13 +416,13 @@ fun GridHomeContent(
             var i = 0
             while (i < postItems.size) {
                 val (item, _) = postItems[i]
-                if (item is GridItem.SectionDivider || item is GridItem.CollectionHeader) {
+                if (item is GridItem.SectionDivider || item is GridItem.CollectionHeader || item is GridItem.LiveRow) {
                     // Collect all items in this section
                     result.add(postItems[i])
                     i++
                     val sectionContent = mutableListOf<Pair<GridItem, String>>()
                     var seeAllItem: Pair<GridItem, String>? = null
-                    while (i < postItems.size && postItems[i].first !is GridItem.SectionDivider && postItems[i].first !is GridItem.CollectionHeader) {
+                    while (i < postItems.size && postItems[i].first !is GridItem.SectionDivider && postItems[i].first !is GridItem.CollectionHeader && postItems[i].first !is GridItem.LiveRow) {
                         if (postItems[i].first is GridItem.SeeAll) {
                             seeAllItem = postItems[i]
                         } else if (postItems[i].first is GridItem.Content) {
@@ -490,7 +497,7 @@ fun GridHomeContent(
                     key = { it.second },
                     span = { pair ->
                         val spanCount = when (pair.first) {
-                            is GridItem.Hero, is GridItem.SectionDivider, is GridItem.CollectionHeader -> maxLineSpan
+                            is GridItem.Hero, is GridItem.SectionDivider, is GridItem.CollectionHeader, is GridItem.LiveRow -> maxLineSpan
                             else -> 1
                         }
                         GridItemSpan(spanCount)
@@ -503,6 +510,7 @@ fun GridHomeContent(
                             is GridItem.SeeAll -> "see_all"
                             is GridItem.CollectionHeader -> "collection_header"
                             is GridItem.CollectionFolder -> "collection_folder"
+                            is GridItem.LiveRow -> "live_home_row"
                         }
                     }
                 ) { (gridItem, itemKey) ->
@@ -543,6 +551,10 @@ fun GridHomeContent(
             }
 
             // Emit Continue Watching as a dedicated item
+            // Live TV fork: the Live TV row, above Continue watching (when set so).
+            if (liveTvRowAbove == true) item(key = "live_tv_home_above", span = { GridItemSpan(maxLineSpan) }, contentType = "live_tv_home") {
+                com.nuvio.tv.livetv.home.LiveTvHomeRow(above = true, startPadding = 0.dp, titleStyle = MaterialTheme.typography.headlineMedium)
+            }
             if (continueWatchingItems.isNotEmpty()) {
                 item(
                     key = "continue_watching",
@@ -556,6 +568,7 @@ fun GridHomeContent(
                             cwPendingScrollToStart.intValue = 0
                         }
                     }
+                    androidx.compose.runtime.CompositionLocalProvider(com.nuvio.tv.livetv.home.LocalLiveTvHintHere provides (liveTvRowAbove == true)) {
                     GridContinueWatchingSection(
                         modifier = Modifier.fillMaxWidth(),
                         fullWidth = gridWidth,
@@ -611,10 +624,15 @@ fun GridHomeContent(
                         posterCardWidth = posterCardStyle.width,
                         posterCardHeight = posterCardStyle.height
                     )
+                    }
                 }
             }
 
             // Emit Upcoming section if SPLIT_UPCOMING mode has upcoming items
+            // Live TV fork: the Live TV row, below Continue watching (the default).
+            if (liveTvRowAbove == false) item(key = "live_tv_home_below", span = { GridItemSpan(maxLineSpan) }, contentType = "live_tv_home") {
+                com.nuvio.tv.livetv.home.LiveTvHomeRow(above = false, startPadding = 0.dp, titleStyle = MaterialTheme.typography.headlineMedium)
+            }
             if (uiState.continueWatchingEnabled && uiState.shownUpcomingItems.isNotEmpty()) {
                 item(
                     key = "upcoming_section",
@@ -735,7 +753,7 @@ fun GridHomeContent(
                     key = { it.second },
                     span = { pair ->
                         val spanCount = when (pair.first) {
-                            is GridItem.Hero, is GridItem.SectionDivider, is GridItem.CollectionHeader -> maxLineSpan
+                            is GridItem.Hero, is GridItem.SectionDivider, is GridItem.CollectionHeader, is GridItem.LiveRow -> maxLineSpan
                             else -> 1
                         }
                         GridItemSpan(spanCount)
@@ -748,6 +766,7 @@ fun GridHomeContent(
                             is GridItem.SeeAll -> "see_all"
                             is GridItem.CollectionHeader -> "collection_header"
                             is GridItem.CollectionFolder -> "collection_folder"
+                            is GridItem.LiveRow -> "live_home_row"
                         }
                     }
                 ) { (gridItem, itemKey) ->
@@ -892,6 +911,21 @@ fun GridHomeContent(
                         SectionDivider(catalogName = gridItem.title)
                     }
 
+                    // Live TV fork: a Live TV or Sports row across the grid, sized like its posters.
+                    is GridItem.LiveRow -> {
+                        com.nuvio.tv.livetv.home.HomeLiveRowSection(
+                            rowKey = gridItem.key,
+                            style = com.nuvio.tv.livetv.home.HomeLiveRowStyle.fromPoster(
+                                posterWidth = posterCardStyle.width,
+                                posterHeight = posterCardStyle.height,
+                                startPadding = 0.dp,
+                                cornerRadius = posterCardStyle.cornerRadius,
+                                titleStyle = MaterialTheme.typography.headlineMedium,
+                                cardSpacing = NuvioTheme.spacing.md
+                            ).copy(landscape = globalLandscape)
+                        )
+                    }
+
                     is GridItem.CollectionFolder -> {
                         GridCollectionFolderCard(
                             folder = gridItem.folder,
@@ -918,7 +952,8 @@ fun GridHomeContent(
         GridStickyHeader(
             gridState = gridState,
             sectionMapping = sectionMapping,
-            isScrolledPastHeroState = isScrolledPastHeroState
+            isScrolledPastHeroState = isScrolledPastHeroState,
+            fixedTitle = stickyTitle
         )
     }
 }
@@ -927,13 +962,15 @@ fun GridHomeContent(
 private fun GridStickyHeader(
     gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
     sectionMapping: SectionMapping,
-    isScrolledPastHeroState: androidx.compose.runtime.State<Boolean>
+    isScrolledPastHeroState: androidx.compose.runtime.State<Boolean>,
+    fixedTitle: String? = null
 ) {
-    val currentSectionName by remember(gridState, sectionMapping) {
+    val sectionName by remember(gridState, sectionMapping) {
         derivedStateOf {
             sectionMapping.findSectionForIndex(gridState.firstVisibleItemIndex)?.catalogName
         }
     }
+    val currentSectionName = fixedTitle ?: sectionName
 
     AnimatedVisibility(
         visible = isScrolledPastHeroState.value && currentSectionName != null,

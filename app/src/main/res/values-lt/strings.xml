@@ -4500,4 +4500,6 @@
     <string name="autosync_thorough_description">Prieš sinchronizuojant toliau lyginti kitus subtitrus ir įterptus takelius, ieškant tikslesnės atitikties. Išjungus greičiau naudojama pirma gera atitiktis. Taikomos tik patikimos atitiktys.</string>
     <string name="autosync_toast_no_fit">Nepavyko sinchronizuoti: šie subtitrai neatitinka šios vaizdo įrašo versijos.</string>
     <string name="autosync_label_synced">Sinchronizuota automatiškai</string>
+    <string name="settings_home_screen_rows">Pradžios ekrano eilutės</string>
+    <string name="settings_home_screen_rows_subtitle">Pasirinkite eilučių tvarką pradžios ekrane</string>
 </resources>

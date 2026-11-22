@@ -3989,15 +3989,12 @@ Próbálj meg egy másik forrást. [%1$s]</string>
     <string name="player_track_role_commentary">Kommentár</string>
     <string name="player_track_role_audio_description">Audioleírás</string>
 
+    <string name="settings_home_screen_rows">Kezdőképernyő sorai</string>
+    <string name="settings_home_screen_rows_subtitle">Válaszd ki a sorok sorrendjét a kezdőképernyőn</string>
     <string name="playback_release_decoder_on_background">Dekóder felszabadítása a háttérben</string>
     <string name="playback_release_decoder_on_background_sub">Felszabadítja a videódekódert, amikor a Nuvio Arc a háttérbe kerül. Kapcsold be, ha az alkalmazásba visszatérve dekóderhiba miatt nem működik a lejátszás. Visszatéréskor a lejátszó újratöltődik, a képernyőkímélő után is.</string>
     <string name="autosync_toast_no_fit">Sikertelen szinkronizálás: ezek a feliratok nem illeszkednek a videó ezen változatához.</string>
-
-    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
-        <item quantity="one">Még %d</item>
-        <item quantity="other">Még %d</item>
-    </plurals>
     <string name="detail_section_parental_guide">Szülői útmutató</string>
     <string name="licenses_attributions_subtitle_fonts_title">Felirat-betűtípusok</string>
     <string name="licenses_attributions_subtitle_fonts_body">Roboto, Montserrat, Asap Condensed és Noto Sans (Noto Sans Arabic, Hebrew, Devanagari, Bengali és Tamil változattal), készítők: The Roboto Project Authors, The Montserrat Project Authors, The Asap Project Authors és The Noto Project Authors. SIL Open Font License, Version 1.1 alatt érhető el.</string>
@@ -4281,13 +4278,7 @@ Próbálj meg egy másik forrást. [%1$s]</string>
     <string name="report_sent_no_phone">Köszönet a jelentésért. Az Arc hobbiprojekt, ezért nem minden jelentésre érkezik válasz.</string>
     <string name="report_sent_back">Vissza a nézéshez</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Válassz ki mindent, ami illik rá. Az Arc megőrizte az utolsó percet.</item>
-        <item quantity="other">Válassz ki mindent, ami illik rá. Az Arc megőrizte az utolsó %1$d percet.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Lejátszóbeállítások és az utolsó perc</item>
-        <item quantity="other">Lejátszóbeállítások és az utolsó %1$d perc</item>
-    </plurals>
     <string name="report_settings_subtitle">Mondd el, mi romlott el, vagy mit szeretnél az Arctól</string>
     <string name="report_group_choose">Mit szeretnél jelenteni?</string>
     <string name="report_group_options">Beállítások</string>
@@ -4340,9 +4331,6 @@ Próbálj meg egy másik forrást. [%1$s]</string>
     <string name="report_sent_kind_bug">Valami nem működik</string>
     <string name="report_sent_kind_idea">Ötlet vagy kérés</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d új</item>
-        <item quantity="other">%1$d új</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Naponta egyszer ellenőrizve. Az Arc hobbiprojekt, ezért nem minden jelentésre érkezik válasz.</string>
     <string name="report_my_reports_hint_off">Az ellenőrzés ki van kapcsolva. Kapcsold be a Jelentéseim ellenőrzése kapcsolót, hogy lásd, mi történik a jelentéseiddel.</string>
@@ -4365,9 +4353,6 @@ Próbálj meg egy másik forrást. [%1$s]</string>
     <string name="report_ready_follow_off">A jelentés követéséhez olvasd be a telefonoddal a következő képernyőn lévő kódot.</string>
     <string name="report_notice_title">Változás történt a jelentésednél</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">%1$d jelentésednél változás történt</item>
-        <item quantity="other">%1$d jelentésednél változás történt</item>
-    </plurals>
     <string name="report_notice_one">%1$s, elküldve %2$s: %3$s.</string>
     <string name="report_notice_many">Nyisd meg a Jelentéseim oldalt, hogy lásd, mi változott.</string>
     <string name="report_notice_open">Jelentéseim megnyitása</string>
@@ -4378,15 +4363,9 @@ Próbálj meg egy másik forrást. [%1$s]</string>
     <string name="report_stop_recording">Rögzítés leállítása</string>
     <string name="report_recording_pill">Rögzítés %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Rögzítés %1$s · %2$d jelölés</item>
-        <item quantity="other">Rögzítés %1$s · %2$d jelölés</item>
-    </plurals>
     <string name="report_recording_no_space">Nincs elég szabad hely a rögzítéshez</string>
     <string name="report_item_recording">Rögzítés, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d jelölés. Csak számadatok, soha hang vagy kép.</item>
-        <item quantity="other">%d jelölés. Csak számadatok, soha hang vagy kép.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Probléma jelentése / jelölés</string>
     <string name="remote_buttons_job_report_mark_desc">Megnyitja a jelentés panelt. Rögzítés közben jelölést ad hozzá.</string>
     <string name="display_mode_measured">Mért érték</string>

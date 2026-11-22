@@ -1,0 +1,4050 @@
+package com.nuvio.tv.livetv.data
+
+import io.ktor.http.encodeURLParameter
+
+import android.content.Context
+import com.nuvio.tv.R
+import com.nuvio.tv.core.util.withAppLocale
+import android.util.Log
+import com.nuvio.tv.livetv.model.EpgAssignment
+import com.nuvio.tv.livetv.record.LiveTvNotice
+import com.nuvio.tv.livetv.model.EpgChannelEntry
+import com.nuvio.tv.livetv.model.EpgProgram
+import com.nuvio.tv.livetv.model.EpgSourceChannels
+import com.nuvio.tv.livetv.model.EpgSource
+import com.nuvio.tv.livetv.model.LiveChannel
+import com.nuvio.tv.livetv.model.LiveTvLoadReport as LIVE_REPORT
+import com.nuvio.tv.livetv.model.CatchupInfo
+import com.nuvio.tv.livetv.model.LiveTvSettings
+import com.nuvio.tv.livetv.model.PlaylistSource
+import com.nuvio.tv.livetv.model.PlaylistGroupOrder
+import com.nuvio.tv.livetv.model.PlaylistAccount
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.InputStream
+import java.security.MessageDigest
+import java.util.UUID
+import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
+import javax.inject.Inject
+import javax.inject.Singleton
+
+data class LiveTvStatus(
+    val loading: Boolean = false,
+    val message: String? = null,
+    val error: String? = null,
+    val loadedOnce: Boolean = false,
+    /** Busy, but nothing worth announcing (reading the saved channels at start-up). */
+    val quiet: Boolean = false,
+    /** A routine update (scheduled check, start-up): no "working on it" pill; failures still get their own. */
+    val silent: Boolean = false
+)
+
+@Singleton
+class LiveTvRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val prefs: LiveTvPreferences,
+    private val guideDb: EpgDatabase,
+    private val stalker: com.nuvio.tv.livetv.stalker.StalkerGateway
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Declared before anything that starts work on [scope] (a playlist update reads them).
+    /** Server time zone lookups in progress, per playlist (shared, so a second replay doesn't ask again). */
+    private val zoneLookups = HashMap<String, kotlinx.coroutines.Deferred<String?>>()
+
+    /** Playlist id -> when its server time zone lookup last failed (asked again after [ZONE_RETRY_MS]). */
+    private val zoneFailedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** Playlist id -> when its time zone was last found (this session), for the background re-check. */
+    private val zoneCheckedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private val mutex = Mutex()
+
+    private val http: OkHttpClient = ForkHttp.builder()
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        // A provider that trickles data forever would otherwise hold up every other update
+        // (deleting a playlist, turning one off) until the app is restarted.
+        .callTimeout(10, TimeUnit.MINUTES)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
+        .dns(ForkDns.provider)
+        .apply { ForgivingTls.trustManager?.let { tm -> ForgivingTls.socketFactory?.let { sslSocketFactory(it, tm) } } }
+        .build()
+
+    private val baseDir = File(context.filesDir, "livetv")
+    private val playlistDir = File(baseDir, "playlists")
+    private val epgDir = File(baseDir, "epg")
+
+    private val _channels = MutableStateFlow<List<LiveChannel>>(emptyList())
+    val channels: StateFlow<List<LiveChannel>> = _channels.asStateFlow()
+
+    /** Programs keyed by [LiveChannel.key], sorted by start. Offset is not applied here. */
+    private val _programs = MutableStateFlow<Map<String, List<EpgProgram>>>(emptyMap())
+    val programs: StateFlow<Map<String, List<EpgProgram>>> = _programs.asStateFlow()
+
+    /** Channel key -> the guide channel picked automatically (shown in Assign EPG). */
+    private val _autoMatches = MutableStateFlow<Map<String, EpgAssignment>>(emptyMap())
+    val autoMatches: StateFlow<Map<String, EpgAssignment>> = _autoMatches.asStateFlow()
+
+    /** Every loaded EPG source with its channel list (for "Change EPG"). */
+    private val _epgSources = MutableStateFlow<List<EpgSourceChannels>>(emptyList())
+    val epgSources: StateFlow<List<EpgSourceChannels>> = _epgSources.asStateFlow()
+
+    private val _status = MutableStateFlow(LiveTvStatus())
+    val status: StateFlow<LiveTvStatus> = _status.asStateFlow()
+
+    private var initialized = false
+    /** The start-up update check has run (later checks may start). */
+    @Volatile private var firstCheckDone = false
+
+    /** Loads cached data immediately, then refreshes anything older than the configured interval. */
+    fun ensureLoaded(updateCheckDelayMs: Long = 0L) {
+        if (initialized) return
+        initialized = true
+        scope.launch {
+            // The guides' channel lists used to be saved in a file of their own; they're in the
+            // stored guide now.
+            withContext(Dispatchers.IO) { runCatching { File(baseDir, "epg_channel_lists.bin").delete() } }
+            // Saved channels and guide first: reading them only uses the device's storage.
+            loadFromCache()
+            // Settings left behind by playlists deleted before this was done on delete (or deleted
+            // on another TV and synced here). Not with no playlists at all: a fresh install or a
+            // restore still on its way.
+            runCatching {
+                val ids = prefs.currentPlaylists().mapTo(HashSet()) { it.id }
+                if (ids.isNotEmpty()) {
+                    val n = prefs.forgetDeletedPlaylists(ids)
+                    if (n > 0) LIVE_REPORT.add("Took out $n saved settings for channels and groups of deleted playlists")
+                }
+            }.onFailure { Log.w(TAG, "Clean-up of deleted playlists failed", it) }
+            // The servers channels play from get the player's automatic DNS retry.
+            scope.launch { channels.collect { ForkDns.addProviderHosts(it) } }
+            // A playlist running out within a week: say so (once per app start).
+            runCatching {
+                val names = prefs.currentPlaylists().associate { it.id to it.name }
+                prefs.playlistAccounts.first().forEach { (id, a) -> names[id]?.let { warnIfExpiring(id, it, a) } }
+            }
+            // Groups hidden or shown since the guide was stored (and from now on).
+            watchHidden()
+            // Space left empty in the guide database by earlier versions or updates.
+            scheduleCompact()
+            // Checking for playlist / guide updates uses the network and a lot of processing,
+            // so when this starts with the app it waits a little, out of Nuvio's way.
+            if (updateCheckDelayMs > 0) delay(updateCheckDelayMs)
+            refreshStale()
+            firstCheckDone = true
+            // Then keep checking while the app stays open. TV boxes keep the app running for
+            // days (Home only sends it to the background), and the check used to happen only
+            // when the app started: the guide ran out after a day or two and never refreshed
+            // until the box restarted or someone pressed Update now.
+            while (true) {
+                delay(STALE_CHECK_MS)
+                runCatching { refreshStale() }.onFailure { Log.w(TAG, "Update check failed", it) }
+            }
+        }
+    }
+
+    /** Opening Live TV: update anything past its update time (the playlist or guide interval). */
+    fun refreshIfStale() {
+        // Not before the start-up check (the saved channels may not be read yet).
+        if (!firstCheckDone) return
+        if (mutex.isLocked) return // an update is already running
+        // Just checked (the start-up check, or Live TV opened a moment ago): nothing can be due yet.
+        if (System.currentTimeMillis() - lastAutoCheckAt < RECHECK_GAP_MS) return
+        scope.launch { runCatching { refreshStale() } }
+    }
+
+    fun refreshAll(force: Boolean = true) {
+        scope.launch { refreshInternal(forcePlaylists = force, forceEpg = force) }
+    }
+
+    /** After a restore from Google Drive: rebuild from the new sources, downloading what's missing. */
+    /** After another TV's setup was applied: [changedPlaylists] get downloaded again straight away. */
+    fun reloadAfterSync(changedPlaylists: Set<String> = emptySet()) {
+        scope.launch {
+            rebuild()
+            // Brought in from the other TV in the background: no bubble while this TV already has
+            // channels to show (a new TV restoring its setup still shows what it's doing).
+            refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = changedPlaylists, quiet = _channels.value.isNotEmpty())
+        }
+    }
+
+    fun refreshEpgOnly() {
+        scope.launch { refreshInternal(forcePlaylists = false, forceEpg = true) }
+    }
+
+    // Automatic updates run at low priority, so the screen and video stay smooth meanwhile.
+    private suspend fun refreshStale() = withContext(BackgroundWork.quietUpdate) { refreshInternal(forcePlaylists = false, forceEpg = false) }
+
+    // ---------------------------------------------------------------- sources CRUD
+
+    suspend fun addPlaylist(name: String, url: String, userAgent: String = "", epgUrl: String = ""): String {
+        val id = UUID.randomUUID().toString()
+        prefs.updatePlaylists { it + PlaylistSource(id = id, name = name.ifBlank { "Playlist" }, url = url.trim(), userAgent = userAgent.trim()) }
+        val guideId = addGuideForNewPlaylist(id, name.ifBlank { "Playlist" }, epgUrl)
+        scope.launch { refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = setOfNotNull(id, guideId)) }
+        return id
+    }
+
+    /**
+     * The guide link typed in while adding a playlist: added as a guide that's switched on for
+     * that playlist only (switched off in every other playlist's Guides settings). Null when no
+     * link was given. The same link as a guide already added: that guide is switched on for the
+     * new playlist (it is already, unless every other playlist has it off) and no copy is made.
+     */
+    private suspend fun addGuideForNewPlaylist(playlistId: String, playlistName: String, epgUrl: String): String? {
+        val url = PlaylistSource.tidyLink(epgUrl)
+        if (url.isBlank()) return null
+        // The same link written a little differently (http/https, a trailing slash, letter case in
+        // the server name) is still the same guide: making a second copy switched it off for the
+        // playlists that were already getting their listings from it.
+        fun sameLink(u: String): String {
+            val t = PlaylistSource.tidyLink(u).trimEnd('/')
+            val rest = t.substringAfter("://", t)
+            val host = rest.substringBefore('/').lowercase()
+            return host + rest.removePrefix(rest.substringBefore('/'))
+        }
+        val key = sameLink(url)
+        prefs.currentEpgSources().firstOrNull { it.url.trim() == url || sameLink(it.url) == key }?.let { existing ->
+            prefs.updatePlaylists { list -> list.map { if (it.id == playlistId) it.copy(guidesOff = it.guidesOff - existing.id) else it } }
+            if (!existing.enabled) prefs.updateEpgSources { l -> l.map { if (it.id == existing.id) it.copy(enabled = true) else it } }
+            return existing.id
+        }
+        val guideId = UUID.randomUUID().toString()
+        prefs.updateEpgSources { it + EpgSource(id = guideId, name = "$playlistName guide", url = url) }
+        prefs.updatePlaylists { list -> list.map { if (it.id == playlistId) it else it.copy(guidesOff = it.guidesOff + guideId) } }
+        return guideId
+    }
+
+    /**
+     * A playlist's Guides switch: [guideKey] (an added guide's id, or another playlist's
+     * [PlaylistSource.builtInGuideKey]) on or off for playlist [playlistId]. The guide is matched
+     * again; a guide that wasn't used by any playlist before is downloaded now.
+     */
+    suspend fun setPlaylistGuide(playlistId: String, guideKey: String, on: Boolean) {
+        prefs.updatePlaylists { list ->
+            list.map { if (it.id == playlistId) it.copy(guidesOff = if (on) it.guidesOff - guideKey else it.guidesOff + guideKey) else it }
+        }
+        scope.launch {
+            rebuild()
+            refreshInternal(forcePlaylists = false, forceEpg = false)
+        }
+    }
+
+    suspend fun addXtream(
+        name: String,
+        server: String,
+        username: String,
+        password: String,
+        importVod: Boolean = true,
+        importLive: Boolean = true,
+        epgUrl: String = ""
+    ): String {
+        val id = UUID.randomUUID().toString()
+        // Accept a pasted full link: keep just the server, and take the login from it if needed.
+        val fromLink = PlaylistSource.credentialsFromLink(server)
+        val user = username.trim().ifBlank { fromLink?.first.orEmpty() }
+        val pass = password.trim().ifBlank { fromLink?.second.orEmpty() }
+        prefs.updatePlaylists {
+            it + PlaylistSource(
+                id = id, name = name.ifBlank { "Xtream" }, url = "",
+                xtreamServer = PlaylistSource.cleanXtreamServer(server),
+                xtreamUsername = user, xtreamPassword = pass,
+                importVod = importVod,
+                importLive = importLive
+            )
+        }
+        val guideId = addGuideForNewPlaylist(id, name.ifBlank { "Xtream" }, epgUrl)
+        scope.launch { refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = setOfNotNull(id, guideId)) }
+        return id
+    }
+
+    suspend fun addStalker(name: String, config: com.nuvio.stalker.StalkerConfig, importVod: Boolean = true, importLive: Boolean = true, useEmbeddedEpg: Boolean = true, epgUrl: String = ""): String {
+        val id = UUID.randomUUID().toString()
+        prefs.updatePlaylists { it + PlaylistSource(id, name.ifBlank { "Stalker portal" }, "",
+            sourceType = "stalker", stalkerConfig = config, importVod = importVod, importLive = importLive, useEmbeddedEpg = useEmbeddedEpg) }
+        val guideId = addGuideForNewPlaylist(id, name.ifBlank { "Stalker portal" }, epgUrl)
+        scope.launch { refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = setOfNotNull(id, guideId)) }
+        return id
+    }
+
+    suspend fun updatePlaylist(input: PlaylistSource) {
+        val source = if (input.isXtream) {
+            val fromLink = PlaylistSource.credentialsFromLink(input.xtreamServer)
+            input.copy(
+                xtreamServer = PlaylistSource.cleanXtreamServer(input.xtreamServer),
+                xtreamUsername = input.xtreamUsername.trim().ifBlank { fromLink?.first.orEmpty() },
+                xtreamPassword = input.xtreamPassword.trim().ifBlank { fromLink?.second.orEmpty() }
+            )
+        } else input
+        val wasLive = prefs.currentPlaylists().firstOrNull { it.id == source.id }?.liveEnabled == true
+        prefs.updatePlaylists { list -> list.map { if (it.id == source.id) source else it } }
+        stalker.invalidate(source.id)
+        if (!source.liveEnabled) {
+            // TV channels switched off (or never on, for an On Demand-only login): take them out
+            // of the guide straight away and leave Live TV alone. Nothing to download for the
+            // guide, so no "Loading Live TV" bubble; On Demand imports on its own.
+            dropPlaylistNow(source.id)
+            if (wasLive) scope.launch { rebuild() }
+            return
+        }
+        scope.launch {
+            rebuild()
+            refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = setOf(source.id))
+        }
+    }
+
+    suspend fun removePlaylist(id: String) {
+        prefs.updatePlaylists { list -> list.filterNot { it.id == id } }
+        stalker.invalidate(id)
+        File(playlistDir, "$id.m3u").delete()
+        groupOrderFile(id).delete()
+        embeddedEpgUrls.remove(id)
+        dropPlaylistNow(id)
+        // Its hidden groups, favorites, custom groups' channels, reminders and so on go with it.
+        runCatching {
+            val n = prefs.forgetDeletedPlaylists(prefs.currentPlaylists().mapTo(HashSet()) { it.id })
+            if (n > 0) LIVE_REPORT.add("Playlist deleted: took out $n saved settings for its channels and groups")
+        }.onFailure { Log.w(TAG, "Clean-up of deleted playlist failed", it) }
+        scope.launch { rebuild() }
+    }
+
+    /**
+     * Takes a deleted or turned-off playlist's channels out of the guide straight away, without
+     * waiting for the full rebuild (which can be queued behind a long guide download).
+     */
+    private fun dropPlaylistNow(id: String) {
+        builtSegments = builtSegments - id
+        val remaining = _channels.value.filterNot { it.sourceId == id }
+        if (remaining.size == _channels.value.size) return
+        val keys = remaining.mapTo(HashSet()) { it.key }
+        _channels.value = remaining
+        _programs.value = _programs.value.filterKeys { it in keys }
+    }
+
+    suspend fun setPlaylistEnabled(id: String, enabled: Boolean) {
+        prefs.updatePlaylists { list -> list.map { if (it.id == id) it.copy(enabled = enabled) else it } }
+        if (!enabled) dropPlaylistNow(id)
+        // Rebuild from the cached files first (turning a playlist on or off downloads nothing,
+        // so the refresh alone wouldn't rebuild the channel list), then fetch anything missing.
+        scope.launch {
+            rebuild()
+            refreshInternal(forcePlaylists = false, forceEpg = false)
+        }
+    }
+
+    suspend fun movePlaylist(id: String, delta: Int) {
+        prefs.updatePlaylists { list ->
+            val m = list.toMutableList()
+            val i = m.indexOfFirst { it.id == id }
+            if (i < 0) return@updatePlaylists list
+            val item = m.removeAt(i)
+            m.add((i + delta).coerceIn(0, m.size), item)
+            m
+        }
+        scope.launch { rebuild() }
+    }
+
+    suspend fun addEpg(name: String, url: String, userAgent: String = ""): String {
+        val id = UUID.randomUUID().toString()
+        prefs.updateEpgSources { it + EpgSource(id = id, name = name.ifBlank { "EPG" }, url = url.trim(), userAgent = userAgent.trim()) }
+        scope.launch { refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = setOf(id)) }
+        return id
+    }
+
+    suspend fun updateEpg(source: EpgSource) {
+        prefs.updateEpgSources { list ->
+            list.map { old ->
+                if (old.id != source.id) old
+                // A new link or user agent: the remembered fallback is worked out again.
+                else if (old.url.trim() != source.url.trim() || old.userAgent.trim() != source.userAgent.trim())
+                    source.copy(url = source.url.trim(), userAgent = source.userAgent.trim(), fallbackUserAgent = "")
+                else source
+            }
+        }
+        scope.launch { refreshInternal(forcePlaylists = false, forceEpg = false, forceIds = setOf(source.id)) }
+    }
+
+    suspend fun removeEpg(id: String) {
+        prefs.updateEpgSources { list -> list.filterNot { it.id == id } }
+        File(epgDir, "$id.xml").delete()
+        scope.launch { rebuild() }
+    }
+
+    suspend fun setEpgEnabled(id: String, enabled: Boolean) {
+        prefs.updateEpgSources { list -> list.map { if (it.id == id) it.copy(enabled = enabled) else it } }
+        scope.launch {
+            rebuild()
+            refreshInternal(forcePlaylists = false, forceEpg = false)
+        }
+    }
+
+    // ---------------------------------------------------------------- core
+
+    private suspend fun loadFromCache() {
+        if (_epgLogos.value.isEmpty()) _epgLogos.value = withContext(Dispatchers.IO) { readEpgLogos() }
+        mutex.withLock { rebuildLocked() }
+    }
+
+    // ---------------------------------------------------------------- logos from the guide
+
+    private val epgLogosFile get() = File(baseDir, "epg_logos.json")
+    private val _epgLogos = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    /** Channel key -> the logo its matched guide channel has (playlists can prefer these). */
+    val epgLogos: StateFlow<Map<String, String>> = _epgLogos.asStateFlow()
+
+    private fun readEpgLogos(): Map<String, String> = runCatching {
+        val f = epgLogosFile
+        if (!f.exists()) return@runCatching emptyMap<String, String>()
+        val o = org.json.JSONObject(f.readText())
+        val out = HashMap<String, String>(o.length())
+        o.keys().forEach { k -> o.optString(k).takeIf { it.isNotBlank() }?.let { out[k] = it } }
+        out
+    }.getOrDefault(emptyMap())
+
+    // ---- The guides' channel lists (Assign EPG and the logo picker), only while one of them is open.
+    /** A picker that shows the lists is open: only then are they kept in memory. */
+    @Volatile private var listsWanted = false
+
+    /** Stops reading a guide once its channel list has been read (the programmes aren't needed). */
+    private class ChannelListRead(val channels: Map<String, XmltvChannel>) : RuntimeException()
+
+    /** Short label shown under each guide channel in the picker, e.g. "github.com". */
+    private fun guideLabel(t: EpgTarget): String =
+        runCatching { java.net.URI(t.url).host?.removePrefix("www.") }.getOrNull()?.takeIf { it.isNotBlank() } ?: t.name
+
+    /** Just a guide file's channel list (the short part at the top of the file), for a guide not stored yet. */
+    private fun readChannelList(t: EpgTarget): List<EpgChannelEntry> {
+        val channels: Map<String, XmltvChannel> = try {
+            openMaybeGzip(epgFile(t.fileId)).use { input ->
+                XmltvParser.parse(input, 0L, 0L) { xc -> throw ChannelListRead(LinkedHashMap(xc)) }
+            }
+            emptyMap()
+        } catch (e: ChannelListRead) {
+            e.channels
+        } catch (e: Exception) {
+            Log.w(TAG, "Couldn't read the channel list of ${t.name}", e)
+            emptyMap()
+        }
+        return channels.values.map { EpgChannelEntry(it.id, it.displayNames, it.icon) }
+    }
+
+    /**
+     * The guides' channel lists, as the last guide update left them: from the stored guide (each
+     * file's own list), or for a guide not stored yet, read from the top of its file. Marked with
+     * the guide channels already feeding a playlist channel (matched or assigned).
+     */
+    private suspend fun sourceListsFromDb(targets: List<EpgTarget>): List<EpgSourceChannels> {
+        // Hand-picked guides of channels that are shown, as a guide update counts them.
+        val hidden = prefs.currentHiddenEverywhere()
+        val shown = _channels.value.filter { !hidden.hides(it.key, it.groupId) }.mapTo(HashSet()) { it.key }
+        val overrides = prefs.userState.first().epgOverrides.filterKeys { it in shown }
+        val used = HashMap<String, MutableSet<String>>()
+        (_autoMatches.value.values + overrides.values).forEach { used.getOrPut(it.sourceId) { HashSet() } += it.xmltvId }
+        val lists = ArrayList<EpgSourceChannels>()
+        var fromFiles = 0
+        for (t in targets) {
+            if (!epgFile(t.fileId).exists()) continue
+            val stored = runCatching { guideDb.sourceChannels(t.fileId) }.getOrNull().orEmpty()
+            val entries = if (stored.isNotEmpty() || runCatching { guideDb.sourceState(t.fileId) }.getOrNull() != null) {
+                stored.map { (id, names, icon) -> EpgChannelEntry(id, names, icon) }
+            } else {
+                fromFiles++
+                readChannelList(t)
+            }
+            lists += EpgSourceChannels(t.fileId, t.name, guideLabel(t), entries.sortedBy { it.displayName.lowercase() }, used[t.fileId].orEmpty(), guideUsers[t.fileId])
+        }
+        if (fromFiles > 0) LIVE_REPORT.add("Assign EPG lists: $fromFiles guide(s) not stored yet, their channel lists read from the files")
+        return lists
+    }
+
+    private val _epgListsLoading = MutableStateFlow(false)
+    /** Assign EPG's channel lists are being read (see [ensureSourceLists]). */
+    val epgListsLoading: StateFlow<Boolean> = _epgListsLoading.asStateFlow()
+
+    /**
+     * Assign EPG or the logo picker opened: the guides' channel lists, from the stored guide.
+     * Kept in memory until [releaseSourceLists] (both pickers closed).
+     */
+    fun ensureSourceLists() {
+        listsWanted = true
+        if (_epgSources.value.isNotEmpty() || _epgListsLoading.value) return
+        _epgListsLoading.value = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val lists = sourceListsFromDb(collectEpgTargets())
+                // Only if still wanted, and nothing filled them in the meantime (a guide update wins).
+                if (listsWanted && _epgSources.value.isEmpty()) _epgSources.value = lists
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't get the guides' channel lists", e)
+            } finally {
+                _epgListsLoading.value = false
+            }
+        }
+    }
+
+    /** Both pickers closed: the lists aren't kept in memory (they're read again next time, in a moment). */
+    fun releaseSourceLists() {
+        listsWanted = false
+        _epgSources.value = emptyList()
+    }
+
+    private fun saveEpgLogos(map: Map<String, String>) {
+        runCatching {
+            val o = org.json.JSONObject()
+            map.forEach { (k, v) -> o.put(k, v) }
+            baseDir.mkdirs()
+            epgLogosFile.writeText(o.toString())
+        }
+    }
+
+    /** Catch-up time zone picked for one playlist ("" = Automatic): only replay links change, nothing reloads. */
+    suspend fun setPlaylistCatchupZone(id: String, zone: String) {
+        prefs.updatePlaylists { list -> list.map { if (it.id == id) it.copy(catchupTimezone = zone) else it } }
+    }
+
+    /** "Prefer logos from playlist / EPG" for one playlist: only the logos change, nothing reloads. */
+    suspend fun setPlaylistLogoSource(id: String, logoSource: String) {
+        prefs.updatePlaylists { list -> list.map { if (it.id == id) it.copy(logoSource = logoSource) else it } }
+    }
+
+    /** A playlist's built-in guide time shift: the guide is matched and stored again with it. */
+    suspend fun setPlaylistGuideShift(id: String, minutes: Int) {
+        val before = prefs.currentPlaylists().firstOrNull { it.id == id }?.guideShiftMinutes ?: return
+        if (before == minutes) return
+        prefs.updatePlaylists { list -> list.map { if (it.id == id) it.copy(guideShiftMinutes = minutes) else it } }
+        restoreShiftedGuide()
+    }
+
+    /** A playlist's catch-up time shift: only the next catch-up link changes, nothing reloads. */
+    suspend fun setPlaylistCatchupShift(id: String, minutes: Int) {
+        prefs.updatePlaylists { list -> list.map { if (it.id == id) it.copy(catchupShiftMinutes = minutes) else it } }
+    }
+
+    /** A guide source's time shift: the guide is matched and stored again with it. */
+    suspend fun setEpgShift(id: String, minutes: Int) {
+        val before = prefs.currentEpgSources().firstOrNull { it.id == id }?.shiftMinutes ?: return
+        if (before == minutes) return
+        prefs.updateEpgSources { list -> list.map { if (it.id == id) it.copy(shiftMinutes = minutes) else it } }
+        restoreShiftedGuide()
+    }
+
+    private fun restoreShiftedGuide() {
+        // Past listings from the Xtream API are fetched again (with the new shift) as you browse.
+        archiveFetched.clear()
+        rematchEpg()
+    }
+
+    private suspend fun rebuild() {
+        mutex.withLock { rebuildLocked() }
+    }
+
+    /** "Hide stray entries" switched: the channel list is made again from the downloaded playlists. */
+    fun rebuildChannelList() {
+        scope.launch { rebuild() }
+    }
+
+    private suspend fun refreshInternal(
+        forcePlaylists: Boolean,
+        forceEpg: Boolean,
+        forceIds: Set<String> = emptySet(),
+        quiet: Boolean = false
+    ): Unit {
+        val automatic = !forcePlaylists && !forceEpg && forceIds.isEmpty()
+        if (!automatic) {
+            // An update you asked for (Update now, a new playlist…) doesn't queue up behind an
+            // automatic check that's waiting for Nuvio's player to close: that check stops
+            // waiting and finishes now. (It could wait for hours, and "Update now" did nothing.)
+            manualQueued.value = true
+            if (mutex.isLocked) LIVE_REPORT.add("Update asked for: finishing the update already running first")
+        }
+        mutex.withLock { refreshLocked(forcePlaylists, forceEpg, forceIds, automatic, quiet) }
+    }
+
+    /** When the last automatic check finished (see [refreshIfStale]). */
+    @Volatile private var lastAutoCheckAt = 0L
+
+    /** An update you asked for is waiting: automatic checks stop waiting for Nuvio's player. */
+    private val manualQueued = MutableStateFlow(false)
+
+    private suspend fun refreshLocked(
+        forcePlaylists: Boolean,
+        forceEpg: Boolean,
+        forceIds: Set<String>,
+        automatic: Boolean,
+        quiet: Boolean = false
+    ) {
+        if (!automatic) manualQueued.value = false
+        val t0Update = System.currentTimeMillis()
+        LIVE_REPORT.add(if (automatic) "Update check started" else "Update started")
+        // A scheduled check works without a pill; an update you asked for (or a new playlist) shows it.
+        routineRun = automatic || quiet
+        runCatching { sweepStrayTempFiles() }.onFailure { Log.w(TAG, "Temp file sweep failed", it) }
+        try { refreshBody(forcePlaylists, forceEpg, forceIds, automatic) }
+        finally {
+            routineRun = false
+            if (automatic) lastAutoCheckAt = System.currentTimeMillis()
+            LIVE_REPORT.add("Update finished in ${(System.currentTimeMillis() - t0Update) / 1000} s")
+        }
+        runCatching { sweepLeftoverFiles() }.onFailure { Log.w(TAG, "Leftover file sweep failed", it) }
+    }
+
+    /**
+     * Deletes saved guide and playlist files no source uses any more. A playlist's built-in
+     * guide is saved under a name made from its web address, so removing the playlist, or the
+     * provider changing that address (a new domain, a new login), left the old file behind for
+     * good. Guides are often 50–200 MB, and a box with little storage left slows right down.
+     * Only files untouched for two weeks go, so a guide that's just turned off for a while, or
+     * a source being added right now, is left alone (one turned back on is downloaded again).
+     */
+    private suspend fun sweepLeftoverFiles() {
+        val now = System.currentTimeMillis()
+        val oldEnough = now - 14L * 24 * HOUR
+        val guideIds = collectEpgTargets().mapTo(HashSet()) { it.fileId }
+        prefs.currentEpgSources().forEach { guideIds += it.id }
+        val playlistIds = prefs.currentPlaylists().mapTo(HashSet()) { it.id }
+        var freed = 0L
+        var count = 0
+        fun sweep(dir: File, idOf: (String) -> String, keep: Set<String>) {
+            dir.listFiles()?.forEach { f ->
+                if (!f.isFile || f.lastModified() > oldEnough) return@forEach
+                if (idOf(f.name) in keep) return@forEach
+                val size = f.length()
+                if (f.delete()) { freed += size; count++ }
+            }
+        }
+        sweep(epgDir, { it.substringBefore(".xml").substringBefore(".tmp") }, guideIds)
+        sweep(playlistDir, { it.substringBefore(".m3u").substringBefore(".tmp") }, playlistIds)
+        if (count > 0) LIVE_REPORT.add("Cleanup: deleted $count saved guide/playlist files no source uses (${freed / (1024 * 1024)} MB freed)")
+    }
+
+    /**
+     * Half-written download files (".tmp") left by an update that was cut off when the app was
+     * closed or the box lost power. A big guide's can be 100 MB or more, and on a box that is
+     * nearly full that space is what the next update needs. Only ones untouched for an hour go,
+     * so nothing being written right now is touched.
+     */
+    private fun sweepStrayTempFiles() {
+        val cutoff = System.currentTimeMillis() - HOUR
+        var freed = 0L
+        var count = 0
+        listOf(epgDir, playlistDir, baseDir).forEach { dir ->
+            dir.listFiles()?.forEach { f ->
+                if (!f.isFile || !f.name.endsWith(".tmp") || f.lastModified() > cutoff) return@forEach
+                val size = f.length()
+                if (f.delete()) { freed += size; count++ }
+            }
+        }
+        if (count > 0) LIVE_REPORT.add("Cleanup: deleted $count unfinished download file(s) from an update that was cut off (${freed / (1024 * 1024)} MB freed)")
+    }
+
+    private suspend fun refreshBody(
+        forcePlaylists: Boolean,
+        forceEpg: Boolean,
+        forceIds: Set<String>,
+        automatic: Boolean
+    ) {
+        val settings = prefs.currentSettings()
+        val now = System.currentTimeMillis()
+        val playlists = prefs.currentPlaylists().filter { it.liveEnabled }
+        var changed = false
+        // Playlists downloaded for the first time (just added): the channel list is still read
+        // from every saved playlist, but the message only names these.
+        val newlyAdded = ArrayList<String>()
+        // Automatic checks wait while a movie or episode is playing in Nuvio's player (unless
+        // an update you asked for is waiting behind this one).
+        suspend fun outOfTheWay() {
+            if (!automatic || !(BackgroundWork.nuvioPlaying.value || BackgroundWork.liveHold.value) || manualQueued.value) return
+            LIVE_REPORT.add("Update check waiting while a channel is playing full screen or Nuvio's player is open")
+            kotlinx.coroutines.flow.combine(BackgroundWork.nuvioPlaying, BackgroundWork.liveHold, manualQueued) { playing, hold, manual -> (!playing && !hold) || manual }
+                .first { it }
+        }
+
+        for (pl in playlists) {
+            outOfTheWay()
+            val file = playlistFile(pl.id)
+            val stale = !file.exists() ||
+                now - file.lastModified() > settings.playlistRefreshHours.coerceAtLeast(1) * HOUR
+            if (forcePlaylists || stale || pl.id in forceIds) {
+                LIVE_REPORT.add("Checking playlist \"${pl.name}\" for updates")
+                setStatus(loading = true, message = statusText(R.string.iptv_repository_status_updating_playlist, pl.name))
+                val before = if (file.exists()) file.length() to file.lastModified() else null
+                val result = runCatching {
+                    if (pl.hasCatalog) {
+                        val old = if (file.exists()) File(file.parentFile, file.name + ".prev").also { file.copyTo(it, overwrite = true) } else null
+                        if (pl.isStalker) downloadStalker(pl, file) else downloadXtream(pl, file)
+                        // Xtream lists are rebuilt each time: unchanged if identical to before.
+                        val unchanged = old != null && sameDecoded(old, file)
+                        old?.delete()
+                        if (!unchanged) markChanged(file)
+                        LIVE_REPORT.add(if (unchanged) "Playlist \"${pl.name}\": no changes" else "Playlist \"${pl.name}\": new content")
+                        !unchanged
+                    } else downloadM3u(pl, file, full = forcePlaylists || pl.id in forceIds)
+                }
+                // M3U links from Xtream providers (get.php with a login): the account's details.
+                if (!pl.hasCatalog) refreshM3uAccount(pl)
+                val err = result.exceptionOrNull()?.let { e ->
+                    if (pl.isStalker) com.nuvio.tv.livetv.stalker.StalkerGateway.safeUpdateError(e) else when (e) {
+                        is java.net.UnknownHostException -> "Couldn't find the provider's server (${e.message?.substringAfter("\"")?.substringBefore("\"") ?: "address"}). Check the address, your internet, or try again later."
+                        is java.net.SocketTimeoutException -> "The provider took too long to answer (timeout). It may be busy; try again later."
+                        else -> e.message ?: e.javaClass.simpleName
+                    }
+                }
+                prefs.updatePlaylists { list ->
+                    list.map {
+                        if (it.id == pl.id) it.copy(lastUpdatedMs = if (err == null) now else it.lastUpdatedMs, lastError = err) else it
+                    }
+                }
+                if (err != null) {
+                    LiveTvNotice.show(statusText(R.string.iptv_repository_status_playlist_update_failed, pl.name, if (pl.isStalker) err else result.exceptionOrNull()?.let { playlistNoticeError(it) }.orEmpty()))
+                    Log.w(TAG, "Playlist ${pl.name} failed: $err")
+                    LIVE_REPORT.add("Playlist \"${pl.name}\" failed: $err" + if (pl.isXtream) " (Xtream login: server ${if (pl.xtreamServer.isBlank()) "missing" else "set"}, user ${if (pl.xtreamUsername.isBlank()) "missing" else "set"}, password ${if (pl.xtreamPassword.isBlank()) "missing" else "set"})" else "")
+                }
+                if (before == null && file.exists()) newlyAdded += pl.name
+                if (result.getOrNull() == true || (before == null && file.exists())) changed = true
+            } else if (!pl.hasCatalog && pl.m3uLogin == null && !pl.vodInPlaylist && file.exists() && linkLoginChecked.add(pl.id)) {
+                // Playlists saved before movies, series and logins were read from their links:
+                // looked at once per start, so On Demand doesn't wait for the next playlist update.
+                refreshM3uAccount(pl)
+            }
+        }
+
+        // Build channels first so EPG matching knows which channels exist.
+        if (changed || _channels.value.isEmpty()) {
+            outOfTheWay()
+            setStatus(loading = true, message = addingMessage(newlyAdded) ?: statusText(R.string.iptv_repository_status_reading_channels))
+            buildChannels(addingMessage(newlyAdded))
+            saveChannels() // so the next start uses it straight away
+        }
+
+        val epgTargets = collectEpgTargets()
+        // Files saved by earlier versions, unzipped: zipped once (see download()).
+        (epgTargets.map { epgFile(it.fileId) } + playlists.map { playlistFile(it.id) }).forEach { zipInPlace(it) }
+        for (target in epgTargets) {
+            outOfTheWay()
+            val file = epgFile(target.fileId)
+            val stale = !file.exists() ||
+                now - file.lastModified() > settings.epgRefreshHours.coerceAtLeast(1) * HOUR
+            // A playlist saved again (its login, user agent…): its own guide is downloaded again too.
+            val forcedHere = target.sourceId in forceIds || target.playlistId in forceIds
+            if (forceEpg || stale || forcedHere || guideHoles || (target.sourceId == null && changed && !file.exists())) {
+                setStatus(loading = true, message = statusText(R.string.iptv_repository_status_downloading_guide, target.name))
+                LIVE_REPORT.add("Downloading guide \"${target.name}\" (user agent: ${target.userAgent.ifBlank { "app default" }})")
+                val result = runCatching {
+                    if (target.url.startsWith("stalker:")) {
+                        val source = playlists.firstOrNull { it.id == target.playlistId }
+                            ?: throw com.nuvio.stalker.StalkerException(com.nuvio.stalker.StalkerError.STALE_SESSION)
+                        downloadStalkerGuide(source, file, settings)
+                    } else downloadGuide(
+                        target, file,
+                        // Also whole when the guide has gone stale: a provider that keeps answering
+                        // "not changed" to the short check left channels without listings overnight.
+                        full = forceEpg || forcedHere || stale || guideHoles
+                    )
+                }
+                if (result.getOrNull() == true) changed = true
+                val isStalkerGuide = target.url.startsWith("stalker:")
+                val err = result.exceptionOrNull()?.let {
+                    if (isStalkerGuide) com.nuvio.tv.livetv.stalker.StalkerGateway.safeUpdateError(it) else it.message ?: it.javaClass.simpleName
+                }
+                if (target.sourceId != null) {
+                    prefs.updateEpgSources { list ->
+                        list.map { if (it.id == target.sourceId) it.copy(lastUpdatedMs = if (err == null) now else it.lastUpdatedMs, lastError = err) else it }
+                    }
+                }
+                if (err != null) {
+                    LiveTvNotice.show(statusText(R.string.iptv_repository_status_guide_update_failed, target.name, if (isStalkerGuide) err else result.exceptionOrNull()?.let { plainDownloadError(it) }.orEmpty()))
+                    Log.w(TAG, "EPG ${target.name} failed: $err")
+                    LIVE_REPORT.add("Guide \"${target.name}\" failed: $err")
+                }
+            }
+        }
+
+        // A guide kept in the database fills in in the background (empty for a moment), so an
+        // empty list then doesn't mean there's no guide: only re-match if something changed.
+        // "Update guide now" always matches the guides again, even when the files came back
+        // unchanged: a guide matched wrong or stored empty was otherwise kept until a file
+        // changed, so pressing Update did nothing for it.
+        if (changed || forceEpg || guideHoles || (_programs.value.isEmpty() && (!guideInDb || storedGuideEmpty))) {
+            storedGuideEmpty = false
+            guideHoles = false
+            outOfTheWay()
+            setStatus(loading = true, message = statusText(R.string.iptv_repository_status_matching_data))
+            // An update you asked for by hand reads every guide file again, whatever is stored.
+            buildPrograms(settings, epgTargets, forceRead = forceEpg)
+        }
+        _status.value = LiveTvStatus(loading = false, loadedOnce = true)
+    }
+
+    private suspend fun rebuildLocked() {
+        // Reading the saved channels and guide takes a second or two and changes nothing, so no
+        // "Loading channels…" bubble for it (people took it for a full reload every time). The
+        // bubble only shows if the playlists really have to be read again.
+        setStatus(loading = true, message = null, quiet = true)
+        // The channel list as it was last read, when no playlist has changed since: Live TV
+        // (Favorites included) appears straight away instead of re-reading every playlist file.
+        var t0 = System.currentTimeMillis()
+        // The stored guide is read at the same time as the channel list (it only has to be
+        // checked against the channels afterwards), so the two waits overlap.
+        val guidePreRead = scope.async(Dispatchers.IO) { preReadGuide() }
+        try {
+        val savedUsed = loadSavedChannels()
+        // The saved list was out of date but is on screen anyway (see loadSavedChannels).
+        val shownOutdated = !savedUsed && _channels.value.isNotEmpty()
+        // Channels are already there: bringing them and the guide up to date isn't announced.
+        // (Only a first setup, with nothing to show yet, says what it's doing.)
+        if (savedUsed || shownOutdated) routineRun = true
+        var guideShown = false
+        val pre = if (shownOutdated) guidePreRead.await() else null
+        if (pre?.fingerprint != null) {
+            // The stored guide too, as it was, while the changed playlists are read again.
+            guideShown = showStoredGuide(pre, checkGaps = false, targets = emptyList())
+            if (guideShown) LIVE_REPORT.add("Saved channels and stored guide shown while the channel list is brought up to date")
+        }
+        if (!savedUsed) {
+            // No bubble here: buildChannels says so itself for each playlist it has to read.
+            buildChannels()
+            saveChannels()
+            LIVE_REPORT.add("Channel list updated: ${_channels.value.size} in ${System.currentTimeMillis() - t0} ms")
+        } else {
+            LIVE_REPORT.add("Saved channel list used: ${_channels.value.size} channels in ${System.currentTimeMillis() - t0} ms")
+            carryOverRenamedChannels(null, _channels.value)
+        }
+        val targets = collectEpgTargets()
+        val settings = prefs.currentSettings()
+        // The guide as it was last matched, if nothing it depends on has changed: the guide
+        // fills in straight away instead of re-reading every guide file at each start.
+        t0 = System.currentTimeMillis()
+        if (!loadGuideFromDb(settings, targets, guidePreRead.await(), alreadyShown = guideShown)) {
+            if (dropRemovedPlaylistsFromGuide(settings, targets)) {
+                LIVE_REPORT.add("Guide kept: turned-off playlists' channels taken out in ${System.currentTimeMillis() - t0} ms")
+            } else {
+                buildPrograms(settings, targets)
+                LIVE_REPORT.add("Guide re-read from guide files in ${System.currentTimeMillis() - t0} ms")
+            }
+        } else {
+            LIVE_REPORT.add("Stored guide used: ${_programs.value.size} channels with listings in ${System.currentTimeMillis() - t0} ms")
+        }
+        } finally { routineRun = false }
+        _status.value = LiveTvStatus(loading = false, loadedOnce = true)
+    }
+
+    /** Which parts of a saved copy's fingerprint differ (for the start-up report). */
+    private fun fingerprintDiff(old: String, new: String): String {
+        val a = old.split('|', ',').toSet()
+        val b = new.split('|', ',').toSet()
+        val changed = (b - a).take(4).joinToString("; ") { it.take(60) }
+        return if (changed.isBlank()) "format changed" else "changed: $changed"
+    }
+
+    // ---------------------------------------------------------------- saved channel list
+
+    private val savedChannelsFile get() = File(baseDir, "channels_cache3.bin")
+
+    /** Everything the channel list is built from; a different value means it must be re-read. */
+    private suspend fun channelsFingerprint(
+        playlists: List<PlaylistSource>? = null
+    ): String {
+        val sb = StringBuilder().append(CHANNELS_CACHE_VERSION).append('|')
+        (playlists ?: prefs.currentPlaylists().filter { it.liveEnabled }).forEach { pl ->
+            sb.append(playlistSegment(pl)).append(',')
+        }
+        return sb.toString()
+    }
+
+    /** One playlist's part of [channelsFingerprint]: the same value means its channels are unchanged. */
+    private suspend fun playlistSegment(pl: PlaylistSource): String {
+        val f = playlistFile(pl.id)
+        val sb = StringBuilder()
+        sb.append(pl.id).append(':').append(pl.name.hashCode()).append(':').append(pl.effectiveUserAgent.hashCode())
+            .append(':').append(f.length()).append(':').append(contentStamp(f))
+        // M3U links: the chosen stream format changes the channel links (Auto adds nothing,
+        // so lists saved before this setting existed stay valid).
+        if (!pl.hasCatalog && pl.streamFormat != "auto") sb.append(":fmt=").append(pl.streamFormat)
+        if (pl.isStalker) sb.append(":stalker=").append(pl.stalkerConfig?.let { com.nuvio.tv.livetv.stalker.StalkerGateway.configIdentity(it) } ?: "invalid")
+        // Stray entries are left out unless that's switched off. Only "off" is added, so lists
+        // saved before this setting existed stay valid (they're cleaned at the next update).
+        if (!pl.isStalker && !prefs.currentSettings().hideStrayEntries) sb.append(":stray=off")
+        return sb.toString()
+    }
+
+    /**
+     * Saved channel list, format 3: not zipped (unzipping cost more than reading a slightly
+     * bigger file on TV boxes), and text that repeats across channels (playlist, group,
+     * catch-up type) stored once and referred to by number. Faster to read, less memory.
+     */
+    private suspend fun loadSavedChannels(): Boolean = withContext(Dispatchers.IO) {
+        runCatching { File(baseDir, "channels_cache.bin").delete() } // the old zipped format
+        val file = savedChannelsFile
+        if (!file.exists()) return@withContext false
+        val livePlaylists = prefs.currentPlaylists().filter { it.liveEnabled }
+        val expected = channelsFingerprint(livePlaylists)
+        runCatching {
+            java.io.DataInputStream(java.io.BufferedInputStream(file.inputStream(), 256 * 1024)).use { input ->
+                val stored = input.readUTF()
+                // Out of date: only the playlists that changed are read again (see
+                // [buildChannels]); the others' channels are taken from here as they are.
+                val outdated = stored != expected
+                if (outdated) {
+                    LIVE_REPORT.add("Saved channel list out of date: ${fingerprintDiff(stored, expected)}")
+                    if (stored.substringBefore('|').toIntOrNull() !in 8..CHANNELS_CACHE_VERSION) return@withContext false
+                }
+                val storedVersion = stored.substringBefore('|').toInt()
+                val epg = HashMap<String, List<String>>()
+                repeat(input.readInt()) {
+                    val id = input.readUTF()
+                    epg[id] = List(input.readInt()) { input.readUTF() }
+                }
+                val table = Array(input.readInt()) { input.readUTF() }
+                fun shared(): String = table[input.readInt()]
+                fun opt(): String? = if (input.readBoolean()) input.readUTF() else null
+                val count = input.readInt()
+                val list = ArrayList<LiveChannel>(count)
+                // Channels from a playlist that's turned off (a list saved while one was being
+                // switched off): left out, and the saved copy is put right.
+                val liveIds = livePlaylists.mapTo(HashSet()) { it.id }
+                var strayFound = false
+                repeat(count) {
+                    val key = input.readUTF()
+                    val sourceId = shared()
+                    val sourceName = shared()
+                    val name = input.readUTF()
+                    val tvgId = opt()
+                    val tvgName = opt()
+                    val logo = opt()
+                    val groupId = shared()
+                    val group = shared()
+                    val number = input.readInt()
+                    val autoNumber = input.readBoolean()
+                    val url = input.readUTF()
+                    val headerCount = input.readInt()
+                    val headers: Map<String, String> = if (headerCount == 0) emptyMap()
+                    else HashMap<String, String>(headerCount * 2).apply { repeat(headerCount) { put(shared(), input.readUTF()) } }
+                    val catchup = if (input.readBoolean()) CatchupInfo(shared(), opt(), input.readInt(), input.readDouble()) else null
+                    val drm = if (input.readBoolean()) {
+                        val scheme = shared()
+                        val license = input.readUTF()
+                        val lh = HashMap<String, String>().apply { repeat(input.readInt()) { put(input.readUTF(), input.readUTF()) } }
+                        com.nuvio.tv.livetv.model.DrmInfo(scheme, license, lh, opt())
+                    } else null
+                    val tvgShift = input.readInt()
+                    val stalkerRef = if (storedVersion >= 9) opt()?.let(com.nuvio.stalker.StalkerStreamRef::decode) else null
+                    if (sourceId !in liveIds) strayFound = true
+                    else list += LiveChannel(key, sourceId, sourceName, name, tvgId, tvgName, logo, groupId, group, number, url, headers, catchup, drm, tvgShift, autoNumber, stalkerRef)
+                }
+                embeddedEpgUrls.clear()
+                embeddedEpgUrls.putAll(epg.filterKeys { it in liveIds })
+                if (outdated || strayFound) {
+                    if (strayFound && !outdated) LIVE_REPORT.add("Saved channel list had channels from a turned-off playlist: taking them out")
+                    // Kept for [buildChannels] (it reuses the playlists that haven't changed and
+                    // lets go of this straight after), stream links included for renamed channels.
+                    reusable = Reusable(list, segmentsOf(stored))
+                    // Shown as it is in the meantime: the channels (and the stored guide) are on
+                    // screen straight away while the playlists that changed are read again,
+                    // instead of an empty Live TV until that's done. (An update cut short, for
+                    // one, left the saved list out of date and every start looked like a reload.)
+                    if (list.isNotEmpty()) {
+                        loadGroupOrder()
+                        _channels.value = list
+                        builtSegments = segmentsOf(stored)
+                    }
+                    return@withContext false
+                }
+                loadGroupOrder()
+                _channels.value = list
+                builtSegments = segmentsOf(stored)
+                true
+            }
+        }.getOrElse {
+            Log.w(TAG, "Saved channel list unreadable", it)
+            reusable = null
+            false
+        }
+    }
+
+    /** Channels from the saved list kept for [buildChannels], with each playlist's fingerprint part. */
+    private class Reusable(val channels: List<LiveChannel>, val segments: Map<String, String>)
+    @Volatile private var reusable: Reusable? = null
+
+    /** Each playlist's part of the fingerprint the current channel list was read with. */
+    @Volatile private var builtSegments: Map<String, String> = emptyMap()
+
+    /** Splits a fingerprint into each playlist's part, by playlist id. */
+    private fun segmentsOf(fingerprint: String): Map<String, String> =
+        fingerprint.substringAfter('|').split(',').filter { it.isNotBlank() }.associateBy { it.substringBefore(':') }
+
+    private suspend fun saveChannels() = withContext(BackgroundWork.cpu()) {
+        // Labelled with the playlists the list was actually read from, not the ones on now: a
+        // playlist switched on or off while it was being read makes the next start read again.
+        val fingerprint = CHANNELS_CACHE_VERSION.toString() + "|" + builtSegments.values.joinToString("") { "$it," }
+        runCatching {
+            val list = _channels.value
+            // Text shared by many channels, stored once.
+            val index = LinkedHashMap<String, Int>()
+            fun id(v: String): Int = index.getOrPut(v) { index.size }
+            list.forEach { c ->
+                id(c.sourceId); id(c.sourceName); id(c.groupId); id(c.group)
+                c.headers.keys.forEach { id(it) }
+                c.catchup?.let { id(it.type) }
+                c.drm?.let { id(it.scheme) }
+            }
+            val tmp = File(baseDir, "channels_cache3.tmp")
+            java.io.DataOutputStream(java.io.BufferedOutputStream(tmp.outputStream(), 256 * 1024)).use { out ->
+                fun opt(v: String?) { out.writeBoolean(v != null); if (v != null) out.writeUTF(v) }
+                out.writeUTF(fingerprint)
+                out.writeInt(embeddedEpgUrls.size)
+                embeddedEpgUrls.forEach { (eid, urls) -> out.writeUTF(eid); out.writeInt(urls.size); urls.forEach { out.writeUTF(it) } }
+                out.writeInt(index.size)
+                index.keys.forEach { out.writeUTF(it) }
+                out.writeInt(list.size)
+                list.forEach { c ->
+                    out.writeUTF(c.key)
+                    out.writeInt(index.getValue(c.sourceId)); out.writeInt(index.getValue(c.sourceName))
+                    out.writeUTF(c.name)
+                    opt(c.tvgId); opt(c.tvgName); opt(c.logo)
+                    out.writeInt(index.getValue(c.groupId)); out.writeInt(index.getValue(c.group))
+                    out.writeInt(c.number)
+                    out.writeBoolean(c.autoNumber)
+                    out.writeUTF(c.url)
+                    out.writeInt(c.headers.size)
+                    c.headers.forEach { (k, v) -> out.writeInt(index.getValue(k)); out.writeUTF(v) }
+                    out.writeBoolean(c.catchup != null)
+                    c.catchup?.let { cu -> out.writeInt(index.getValue(cu.type)); opt(cu.source); out.writeInt(cu.days); out.writeDouble(cu.correctionHours) }
+                    out.writeBoolean(c.drm != null)
+                    c.drm?.let { d ->
+                        out.writeInt(index.getValue(d.scheme)); out.writeUTF(d.license)
+                        out.writeInt(d.licenseHeaders.size); d.licenseHeaders.forEach { (k, v) -> out.writeUTF(k); out.writeUTF(v) }
+                        opt(d.manifestType)
+                    }
+                    out.writeInt(c.tvgShiftMinutes)
+                    opt(c.stalkerRef?.encode())
+                }
+            }
+            if (!tmp.renameTo(savedChannelsFile)) { tmp.copyTo(savedChannelsFile, overwrite = true); tmp.delete() }
+        }.onFailure { Log.w(TAG, "Couldn't save the channel list", it) }
+    }
+
+    // ---------------------------------------------------------------- saved guide
+
+    /** Assign EPG needs the full guide-channel lists, which the saved guide skips. */
+    @Volatile private var epgDetailsPending = false
+
+    // ---------------------------------------------------------------- hidden channels
+
+    /** The channels the stored guide left out (hidden in every profile), as last stored. */
+    private val skippedFile get() = File(baseDir, "guide_skipped.txt")
+    @Volatile private var guideSkipped: Set<String>? = null
+
+    private fun saveSkipped(keys: Set<String>) {
+        guideSkipped = keys
+        runCatching {
+            val tmp = File(baseDir, skippedFile.name + ".tmp")
+            java.io.DataOutputStream(java.io.BufferedOutputStream(java.util.zip.GZIPOutputStream(tmp.outputStream()))).use { out ->
+                out.writeInt(keys.size)
+                keys.forEach { out.writeUTF(it) }
+            }
+            if (!tmp.renameTo(skippedFile)) { tmp.copyTo(skippedFile, overwrite = true); tmp.delete() }
+        }
+    }
+
+    /** Null for a guide stored before channels were left out (it has everything). */
+    private fun loadSkipped(): Set<String>? = guideSkipped ?: runCatching {
+        if (!skippedFile.exists()) return@runCatching null
+        java.io.DataInputStream(java.io.BufferedInputStream(java.util.zip.GZIPInputStream(skippedFile.inputStream()))).use { input ->
+            HashSet<String>().apply { repeat(input.readInt()) { add(input.readUTF()) } }
+        }
+    }.getOrNull()?.also { guideSkipped = it }
+
+    private var hiddenWatch: kotlinx.coroutines.Job? = null
+
+    /** Follows hiding and showing groups and channels (in any profile) once the guide is loaded. */
+    private fun watchHidden() {
+        if (hiddenWatch != null) return
+        hiddenWatch = scope.launch {
+            prefs.hiddenEverywhere.collectLatest {
+                delay(2_000) // a few changes in a row are handled together
+                // Once started, finished (a newer change waits its turn instead of cutting it short).
+                withContext(kotlinx.coroutines.NonCancellable) { mutex.withLock { syncHidden() } }
+            }
+        }
+    }
+
+    /**
+     * Keeps the stored guide in step with what's hidden everywhere:
+     *  - newly hidden channels: their listings are deleted (nothing is read);
+     *  - channels shown again: the guide is read from the saved guide files, so they get listings.
+     */
+    private suspend fun syncHidden() = withContext(Dispatchers.IO) {
+        if (!guideInDb) return@withContext
+        val channels = _channels.value
+        if (channels.isEmpty()) return@withContext
+        val hidden = prefs.currentHiddenEverywhere()
+        val nowHidden = channels.filter { hidden.hides(it.key, it.groupId) }.mapTo(HashSet()) { it.key }
+        val skipped = loadSkipped() ?: emptySet() // older guides stored every channel
+        val keys = channels.mapTo(HashSet()) { it.key }
+        val shownAgain = skipped.filter { it in keys && it !in nowHidden }
+        if (shownAgain.isNotEmpty()) {
+            LIVE_REPORT.add("Guide: ${shownAgain.size} channels shown again, reading their listings")
+            setStatus(loading = true, message = statusText(R.string.iptv_repository_status_updating_guide))
+            buildPrograms(prefs.currentSettings(), collectEpgTargets())
+            _status.value = LiveTvStatus(loading = false, loadedOnce = true)
+            return@withContext
+        }
+        val newlyHidden = nowHidden - skipped
+        if (newlyHidden.isEmpty()) return@withContext
+        runCatching { guideDb.deleteChannels(newlyHidden) }.onFailure { Log.w(TAG, "Couldn't drop hidden listings", it) }
+        _programs.value = _programs.value - newlyHidden
+        saveSkipped(skipped.filterTo(HashSet()) { it in keys } + newlyHidden)
+        scheduleCompact()
+    }
+
+    private var compactJob: kotlinx.coroutines.Job? = null
+
+    /** Gives the guide database's empty space back, a little after a big change, out of the way. */
+    private fun scheduleCompact() {
+        compactJob?.cancel()
+        compactJob = scope.launch {
+            delay(30_000)
+            BackgroundWork.awaitIdle()
+            mutex.withLock { withContext(Dispatchers.IO) { guideDb.compact() } }
+        }
+    }
+
+    /**
+     * What Assign EPG needs when the stored guide was used: only the guides' channel lists. It
+     * used to read every guide again here (minutes on big guides, "Reading guide…" as soon as
+     * Assign EPG opened), but the automatic matches come from the stored guide and the channel
+     * lists are saved or read on their own, which is all Assign EPG uses.
+     */
+    fun ensureEpgDetails() {
+        if (!epgDetailsPending) return
+        epgDetailsPending = false
+        ensureSourceLists()
+    }
+
+    private val savedGuideFile get() = File(baseDir, "guide_cache.bin")
+
+    // ---------------------------------------------------------------- guide database
+
+    /** The time span currently loaded from the guide database (all of it if the database isn't used). */
+    @Volatile private var loadedFrom = Long.MAX_VALUE
+    @Volatile private var loadedTo = Long.MIN_VALUE
+    @Volatile private var guideInDb = false
+    /** The stored guide turned out to have no listings around now: match the guides again. */
+    @Volatile private var storedGuideEmpty = false
+
+    /** The stored guide is missing listings for many channels that were matched (it ran out for them). */
+    @Volatile private var guideHoles = false
+    @Volatile private var holeRefreshTried = false
+    private val rangeMutex = Mutex()
+
+    private fun defaultWindow(now: Long = System.currentTimeMillis()) = (now - 3 * HOUR) to (now + 12 * HOUR + RANGE_SLACK_MS)
+
+    /**
+     * Opening Live TV: if the guide database matches the current guide and channels, read just
+     * the hours around now. Instant, however big the guide is.
+     */
+    /** What [preReadGuide] read ahead: the stored fingerprint, and the priority channels' listings. */
+    private class GuidePreRead(val fingerprint: String?, val from: Long, val to: Long, val window: Map<String, List<EpgProgram>>)
+
+    /** Channels to fill in first: the group you were last looking at, and your Favorites. */
+    private val priorityFile get() = File(baseDir, "guide_priority.txt")
+
+    private fun priorityKeys(): List<String> =
+        runCatching { priorityFile.readLines().filter { it.isNotBlank() } }.getOrDefault(emptyList())
+
+    /** Optional browsing reads release their cursor if a movie starts, then retry on return. */
+    private suspend fun browsingRange(
+        fromMs: Long,
+        toMs: Long,
+        light: Boolean,
+        channels: Collection<String>? = null
+    ): Map<String, List<EpgProgram>>? = try {
+        BackgroundWork.browsingRead { checkpoint ->
+            guideDb.range(fromMs, toMs, light = light, channels = channels, checkpoint = checkpoint)
+        }
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        Log.w(TAG, "Couldn't read browsing listings", failure)
+        null
+    }
+
+    /** Loads these channels' listings straight away if they aren't loaded yet (the group you open). */
+    fun loadChannelsNow(keys: List<String>) {
+        if (!guideInDb || keys.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            val missing = keys.distinct().filter { it !in _programs.value }
+            if (missing.isEmpty()) return@launch
+            val got = browsingRange(loadedFrom, loadedTo, light = true, channels = missing) ?: return@launch
+            rangeMutex.withLock {
+                val cur = _programs.value
+                _programs.value = cur + got.filterKeys { it !in cur }
+            }
+        }
+    }
+
+    /** Remembers which channels to load first next time, and loads them now if needed. */
+    fun rememberPriority(keys: List<String>) {
+        val list = keys.distinct().take(600)
+        if (list.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            runCatching { priorityFile.writeText(list.joinToString("\n")) }
+            if (!guideInDb) return@launch
+            val missing = list.filter { it !in _programs.value }
+            if (missing.isEmpty()) return@launch
+            val got = browsingRange(loadedFrom, loadedTo, light = true, channels = missing) ?: return@launch
+            rangeMutex.withLock { _programs.value = _programs.value + got }
+        }
+    }
+
+    private fun preReadGuide(): GuidePreRead? = runCatching {
+        val now = System.currentTimeMillis()
+        val from = now - 60 * 60 * 1000L
+        val to = now + 4 * HOUR
+        val fp = guideDb.fingerprint() ?: return@runCatching null
+        val keys = priorityKeys()
+        val window = if (keys.isEmpty()) emptyMap() else guideDb.range(from, to, light = true, channels = keys)
+        GuidePreRead(fp, from, to, window)
+    }.getOrNull()
+
+    /**
+     * Opening Live TV: if the guide database matches the current guide and channels, show the
+     * channels you were last looking at straight away (read ahead, short form), then fill in all
+     * the others in the background. Instant, however big the guide is.
+     *
+     * When it doesn't match (a guide file or playlist changed since it was stored, often an update
+     * cut short when the app was closed), the stored guide is still shown as it was, and false
+     * tells the caller to bring it up to date in the background. It used to be left out until
+     * then, so the guide stayed empty for minutes and every start looked like a full reload.
+     * [alreadyShown]: the stored guide is on screen already (see [rebuildLocked]).
+     */
+    private suspend fun loadGuideFromDb(settings: LiveTvSettings, targets: List<EpgTarget>, pre: GuidePreRead?, alreadyShown: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+        if (_channels.value.isEmpty()) return@withContext false
+        runCatching { savedGuideFile.delete() } // the old single-file copy isn't used any more
+        val expected = guideFingerprint(settings, targets)
+        val stored = pre?.fingerprint ?: runCatching { guideDb.fingerprint() }.getOrNull()
+        if (stored != expected) {
+            LIVE_REPORT.add(if (stored == null) "No stored guide yet" else "Stored guide out of date: ${fingerprintDiff(stored, expected)}")
+            if (stored != null && !alreadyShown && showStoredGuide(pre, checkGaps = false, targets = targets)) {
+                LIVE_REPORT.add("Stored guide shown as it was while it's brought up to date")
+            }
+            return@withContext false
+        }
+        if (!alreadyShown) showStoredGuide(pre, checkGaps = true, targets = targets)
+        true
+    }
+
+    /** Bumped each time a different guide goes on screen, so a slower read of the one before is dropped. */
+    private val guideShowing = java.util.concurrent.atomic.AtomicInteger()
+
+    /**
+     * Puts the stored guide on screen: the channels you were last looking at first, then every
+     * channel's hours around now, then the usual hours, each in the background. [checkGaps]: the
+     * stored guide is up to date, so look out for one that ran out (see below).
+     */
+    private suspend fun showStoredGuide(pre: GuidePreRead?, checkGaps: Boolean, targets: List<EpgTarget>): Boolean = withContext(Dispatchers.IO) {
+        if (_channels.value.isEmpty()) return@withContext false
+        val now = System.currentTimeMillis()
+        val from = pre?.from ?: (now - 60 * 60 * 1000L)
+        val to = pre?.to ?: (now + 4 * HOUR)
+        // A guide already on screen (shown out of date a moment ago) stays until the new one is
+        // read, rather than dropping to just the first channels for a moment.
+        val replacing = _programs.value.isNotEmpty()
+        val first = pre?.window.orEmpty()
+        val token = guideShowing.incrementAndGet()
+        if (!replacing) _programs.value = first
+        fullRangeChannels.clear(); _guideGeneration.value++
+        _autoMatches.value = runCatching { guideDb.autoMatches() }.getOrDefault(_autoMatches.value)
+        loadedFrom = from
+        loadedTo = to
+        guideInDb = true
+        lightPrograms = true
+        epgDetailsPending = true
+        LIVE_REPORT.add("First channels' listings ready: ${first.size} channels")
+        // Everything else (short form), in the background.
+        rangeBusy.set(true)
+        scope.launch(BackgroundWork.reads) {
+          try {
+            val t0 = System.currentTimeMillis()
+            /** Puts [got] on screen, keeping anything longer read for this guide meanwhile. */
+            suspend fun publish(got: Map<String, List<EpgProgram>>, gotFrom: Long, gotTo: Long): Boolean = rangeMutex.withLock {
+                // A newer guide went on screen meanwhile (an update finished): this read is old.
+                if (token != guideShowing.get()) return@withLock false
+                val merged = HashMap<String, List<EpgProgram>>(got)
+                // Replacing an out-of-date guide: only what was read from this one is kept.
+                val keep = if (replacing) first else _programs.value
+                keep.forEach { (k, v) -> if ((merged[k]?.size ?: 0) < v.size) merged[k] = v }
+                _programs.value = merged
+                loadedFrom = minOf(loadedFrom, gotFrom)
+                loadedTo = maxOf(loadedTo, gotTo)
+                true
+            }
+            // Every channel's hours around now first (what the guide shows when it opens), so a
+            // group you didn't have open last time isn't "No information" while the rest is read.
+            val near = browsingRange(from, to, light = true)
+            if (near != null && !publish(near, from, to)) return@launch
+            LIVE_REPORT.add("Listings around now ready for all channels: ${near?.size ?: 0} in ${System.currentTimeMillis() - t0} ms")
+            val (fullFrom, fullTo) = defaultWindow()
+            val rest = browsingRange(fullFrom, fullTo, light = true)
+            if (rest != null && !publish(rest, fullFrom, fullTo)) return@launch
+            LIVE_REPORT.add("All channels' listings ready: ${_programs.value.size} channels in ${System.currentTimeMillis() - t0} ms")
+            if (!checkGaps) return@launch
+            // The stored guide has nothing for now or the next hours (it was stored empty, or
+            // all of it has run out): it was still taken as up to date, so the guide stayed
+            // empty until a playlist or guide changed. Match the guide files again now (and
+            // download them again if they're old too).
+            // Same when it only ran out for many of the channels (not all of them): the guide
+            // was used as up to date and those channels stayed empty until Update was pressed.
+            val matched = _autoMatches.value.keys
+            val missing = matched.count { _programs.value[it].isNullOrEmpty() }
+            // At most once every 3 hours (a download, even an unchanged one, resets the file's
+            // date), so a guide that simply has no listings for many channels isn't fetched at every start.
+            val checkedRecently = targets.none { System.currentTimeMillis() - epgFile(it.fileId).lastModified() > 3 * HOUR }
+            // And once per run of the app: a provider whose guide simply lacks many channels would
+            // otherwise have the whole guide downloaded and read again every few hours, which
+            // makes the app crawl while it works.
+            if (!holeRefreshTried && !checkedRecently && _programs.value.isNotEmpty() && matched.size >= 20 && missing * 100 > matched.size * 15 && targets.isNotEmpty()) {
+                holeRefreshTried = true
+                guideHoles = true
+                LIVE_REPORT.add("Stored guide has no listings now for $missing of ${matched.size} matched channels: updating the guides")
+                scope.launch { runCatching { refreshStale() } }
+            }
+            if (_programs.value.isEmpty() && _channels.value.isNotEmpty() && targets.isNotEmpty()) {
+                storedGuideEmpty = true
+                // Also download the guides whole (not "only if changed"): a guide file that stopped
+                // refreshing kept being matched again and again, still empty. At most every 3 hours.
+                guideHoles = !checkedRecently
+                LIVE_REPORT.add("Stored guide has no listings for now: reading the guides again")
+                scope.launch { runCatching { refreshStale() } }
+            }
+          } finally {
+            rangeBusy.set(false)
+            pendingRange?.let { (f, t) -> pendingRange = null; ensureRange(f, t) }
+          }
+        }
+        true
+    }
+
+    /** Programs in memory may be the short form (no descriptions): see [programDetails]. */
+    @Volatile var lightPrograms = false
+        private set
+
+    /** One show's full details (description, cast…), from the stored guide. */
+    suspend fun programDetails(channelKey: String, startMs: Long): EpgProgram? = withContext(Dispatchers.IO) {
+        if (!guideInDb) null else runCatching { guideDb.program(channelKey, startMs) }.getOrNull()
+    }
+
+    /**
+     * Makes sure listings for [fromMs]..[toMs] are loaded (scrolling the guide ahead or back,
+     * catch-up). Reads only what's missing; does nothing when the database isn't in use.
+     */
+    /** A big read is running: further requests wait for it instead of starting another. */
+    private val rangeBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** True while the guide is being read in bulk (start-up): other big guide searches wait for it. */
+    fun guideReadBusy(): Boolean = rangeBusy.get()
+    @Volatile private var pendingRange: Pair<Long, Long>? = null
+
+    fun ensureRange(fromMs: Long, toMs: Long) {
+        dropOldHours(fromMs)
+        if (!guideInDb || (fromMs >= loadedFrom && toMs <= loadedTo)) return
+        if (!rangeBusy.compareAndSet(false, true)) {
+            // One read at a time (each covers every channel): remember the widest request.
+            val p = pendingRange
+            pendingRange = if (p == null) fromMs to toMs else minOf(p.first, fromMs) to maxOf(p.second, toMs)
+            return
+        }
+        scope.launch(BackgroundWork.reads) {
+          try {
+            // Read without holding the lock (a big read used to make everything else wait for it,
+            // like a group you just opened); only the merge is locked.
+            val from = minOf(fromMs, loadedFrom)
+            // A few hours extra ahead: the guide asks for "12 hours from now" every 30 seconds,
+            // and without slack each ask went past what was loaded by 30 seconds.
+            val to = maxOf(toMs + RANGE_SLACK_MS, loadedTo)
+            // Only the hours not loaded yet. It used to read everything from the earliest hour
+            // loaded to the latest again, for every channel, each time the guide was scrolled
+            // further ahead: the further you went, the longer each read took, so new listings
+            // took up to a minute to appear at the end of what was shown.
+            val haveSome = loadedFrom != Long.MAX_VALUE && loadedTo != Long.MIN_VALUE && loadedFrom < loadedTo
+            val parts = if (!haveSome || to <= loadedFrom || from >= loadedTo) listOf(from to to)
+            else buildList {
+                if (from < loadedFrom) add(from to loadedFrom)
+                if (to > loadedTo) add(loadedTo to to)
+            }
+            val reads = parts.map { (f, t) ->
+                browsingRange(f, t, light = lightPrograms) ?: return@launch
+            }
+            rangeMutex.withLock {
+                if (fromMs >= loadedFrom && toMs <= loadedTo) return@withLock
+                val merged = HashMap(_programs.value)
+                reads.forEach { got ->
+                    // Shows running across the edge come back in both reads: once each.
+                    got.forEach { (ch, list) -> merged[ch] = addShows(merged[ch], list) }
+                }
+                _programs.value = merged
+                loadedFrom = minOf(from, loadedFrom)
+                loadedTo = maxOf(to, loadedTo)
+            }
+          } finally {
+            rangeBusy.set(false)
+            pendingRange?.let { (f, t) -> pendingRange = null; ensureRange(f, t) }
+          }
+        }
+    }
+
+    @Volatile private var lastDropAt = 0L
+
+    /**
+     * Lets go of listings that ended long ago. New hours were added as time passed but old ones
+     * were never dropped, and TV boxes keep the app open for days: memory slowly filled with
+     * days of past listings for every channel, and the app got slower the longer the box stayed
+     * on. Anything older than a day before what the guide asks for goes (at most every 30
+     * minutes); scrolling back for catch-up reads those hours from the guide database again.
+     * Only when the guide is kept in the database, so nothing is ever lost.
+     */
+    private fun dropOldHours(fromMs: Long) {
+        if (!guideInDb || loadedFrom == Long.MAX_VALUE) return
+        val now = System.currentTimeMillis()
+        if (now - lastDropAt < 30 * 60_000L) return
+        val cutoff = minOf(fromMs - RANGE_SLACK_MS, now - 24 * HOUR)
+        if (loadedFrom >= cutoff) return
+        lastDropAt = now
+        scope.launch(BackgroundWork.quiet) {
+            rangeMutex.withLock {
+                if (loadedFrom >= cutoff) return@withLock
+                val cur = _programs.value
+                var changed = false
+                val next = HashMap<String, List<EpgProgram>>(cur.size)
+                cur.forEach { (key, list) ->
+                    // Lists are in start order: only ones that begin before the cutoff change
+                    // (the others are kept as they are, so their guide rows needn't redraw).
+                    if (list.isNotEmpty() && list[0].stopMs <= cutoff) {
+                        changed = true
+                        val kept = list.filter { it.stopMs > cutoff }
+                        if (kept.isNotEmpty()) next[key] = kept
+                    } else next[key] = list
+                }
+                if (changed) _programs.value = next
+                loadedFrom = cutoff
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- a group's full guide
+
+    /** Channels whose listings are loaded for the whole guide (as many days ahead as set). */
+    private val fullRangeChannels = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /**
+     * Goes up each time the guide in memory is replaced with just the hours around now (a guide
+     * update, a rebuild after changing Guide Days Ahead…). The guide screen then asks for its
+     * group's days ahead again: before, they were only asked for when you changed group, so
+     * after an update the guide ran out "tomorrow" whatever Guide Days Ahead was set to.
+     */
+    private val _guideGeneration = MutableStateFlow(0)
+    val guideGeneration: StateFlow<Int> = _guideGeneration.asStateFlow()
+    private var fullRangeJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * The group on screen: its channels' listings for every day the guide keeps (Guide Days
+     * Ahead), read in the background, so scrolling ahead in it never runs into the end of
+     * what's loaded. Only the group's channels (at most [MAX_FULL_RANGE_CHANNELS], from the
+     * top): all days for every channel of every playlist would be too much for smaller boxes.
+     */
+    fun ensureFullRange(channelKeys: List<String>) {
+        if (!guideInDb || channelKeys.isEmpty()) return
+        val todo = channelKeys.take(MAX_FULL_RANGE_CHANNELS).filter { it !in fullRangeChannels }
+        if (todo.isEmpty()) return
+        fullRangeJob?.cancel()
+        fullRangeJob = scope.launch(BackgroundWork.reads) {
+            val settings = prefs.currentSettings()
+            val now = System.currentTimeMillis()
+            val from = now - HOUR
+            val to = now + settings.epgFutureDays.coerceAtLeast(1) * 24 * HOUR
+            // A batch at a time, so the first channels fill in quickly and a group change
+            // stops the rest.
+            for (batch in todo.chunked(60)) {
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val got = browsingRange(from, to, light = lightPrograms, channels = batch) ?: return@launch
+                rangeMutex.withLock {
+                    val merged = HashMap(_programs.value)
+                    batch.forEach { ch ->
+                        val list = got[ch].orEmpty()
+                        val cur = merged[ch]
+                        merged[ch] = if (list.isEmpty()) cur ?: return@forEach else addShows(cur, list)
+                    }
+                    _programs.value = merged
+                }
+                fullRangeChannels += batch
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Xtream catch-up archive
+
+    /** Channels whose archive listings were already fetched this session. */
+    private val archiveFetched = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val archivePermits = kotlinx.coroutines.sync.Semaphore(3)
+    @Volatile private var archivePausedUntil = 0L
+    @Volatile private var apiFillReported = false
+
+    /**
+     * Past listings for Xtream catch-up channels, the way TiviMate gets them: many providers'
+     * guide file only covers about a day back, while the Xtream API keeps the full catch-up
+     * archive (up to 7 days or more) per channel. Fetched for the channels you're looking at,
+     * once per session, and stored with the rest of the guide.
+     */
+    fun loadXtreamArchive(channels: List<LiveChannel>, missingOnly: Boolean = false) {
+        // missingOnly: channels the guide file has nothing for. Most Xtream apps read each
+        // channel's listings from the provider's API by stream number, so they show a guide
+        // even when the guide file's ids don't line up with the channel list; this does the same.
+        val wanted = channels.filter { ch ->
+            ch.key !in archiveFetched && (!missingOnly || ch.stalkerRef == null) &&
+                (if (missingOnly) _programs.value[ch.key].isNullOrEmpty() else ch.catchup != null)
+        }
+        if (wanted.isEmpty()) return
+
+        wanted.forEach { archiveFetched += it.key }
+        if (System.currentTimeMillis() < archivePausedUntil) {
+            wanted.forEach { archiveFetched -= it.key }
+            return
+        }
+        scope.launch {
+            val playlists = prefs.currentPlaylists().associateBy { it.id }
+            val settings = prefs.currentSettings()
+            val overrides = runCatching { prefs.userState.first().epgOverrides }.getOrDefault(emptyMap())
+            wanted.forEach { ch ->
+                val pl = playlists[ch.sourceId]?.takeIf { it.hasCatalog } ?: return@forEach
+                if (pl.isStalker) {
+                    // Bulk guide loading stays one streaming request. Archive dates are fetched only
+                    // when the existing guide UI asks for a channel's catch-up, never during import.
+                    if (!missingOnly && ch.stalkerRef != null && ch.catchup != null) archivePermits.withPermit {
+                        try { loadStalkerArchive(pl, ch, overrides) }
+                        catch (cancelled: kotlinx.coroutines.CancellationException) { archiveFetched -= ch.key; throw cancelled }
+                        catch (_: Exception) { archiveFetched -= ch.key; Log.w(TAG, "Stalker archive is unavailable") }
+                    }
+                    return@forEach
+                }
+                val streamId = Regex("""/(\d+)(?:\.[a-z0-9]+)?(?:\?.*)?$""", RegexOption.IGNORE_CASE)
+                    .find(ch.url)?.groupValues?.get(1) ?: return@forEach
+                archivePermits.withPermit {
+                    // The provider said "too many requests": leave it alone for a few minutes, so
+                    // these lookups never stand between you and playing something.
+                    if (System.currentTimeMillis() < archivePausedUntil) { archiveFetched -= ch.key; return@withPermit }
+                    runCatching {
+                        val url = "${pl.xtreamBase()}/player_api.php?username=" +
+                            java.net.URLEncoder.encode(pl.xtreamUsername.trim(), "UTF-8") +
+                            "&password=" + java.net.URLEncoder.encode(pl.xtreamPassword.trim(), "UTF-8") +
+                            "&action=get_simple_data_table&stream_id=$streamId"
+                        val json = JSONObject(getText(url, pl.userAgent.ifBlank { DEFAULT_UA }))
+                        val arr = json.optJSONArray("epg_listings") ?: return@runCatching
+                        fun b64(v: String): String = runCatching {
+                            String(android.util.Base64.decode(v, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                        }.getOrDefault(v)
+                        val list = ArrayList<EpgProgram>()
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            val start = o.optString("start_timestamp").toLongOrNull()?.times(1000) ?: continue
+                            val stop = o.optString("stop_timestamp").toLongOrNull()?.times(1000)
+                                ?: o.optString("end_timestamp").toLongOrNull()?.times(1000) ?: continue
+                            if (stop <= start) continue
+                            val title = b64(o.optString("title")).trim()
+                            if (title.isEmpty()) continue
+                            list += EpgProgram(
+                                startMs = start,
+                                stopMs = stop,
+                                title = title,
+                                description = b64(o.optString("description")).trim().takeIf { it.isNotEmpty() }
+                            )
+                        }
+                        if (list.isEmpty()) return@runCatching
+                        list.sortBy { it.startMs }
+                        // Moved like the rest of this channel's listings (its guide's time shift).
+                        val shift = guideShiftMs(ch, overrides)
+                        if (shift != 0L) for (i in list.indices) list[i] = list[i].let { it.copy(startMs = it.startMs + shift, stopMs = it.stopMs + shift) }
+                        val now = System.currentTimeMillis()
+                        // Keep what the guide file already has from about now on; the archive
+                        // fills in the past.
+                        val pastEnd = minOf(now, list.last().stopMs)
+                        // Only as far back as "Past guide kept", like the guide file's listings
+                        // (the provider's list went back its whole catch-up, whatever the setting).
+                        val keptFrom = now - settings.epgPastHours.coerceAtLeast(1) * HOUR
+                        val past = list.filter { it.startMs < pastEnd && it.stopMs > keptFrom }
+                        val existing = _programs.value[ch.key].orEmpty()
+                        // Beyond the end of the guide file's listings, the archive's later
+                        // shows are used too (some guide files only cover a day ahead).
+                        val existingEnd = existing.maxOfOrNull { it.stopMs } ?: now
+                        val later = list.filter { it.startMs >= maxOf(existingEnd, now) }
+                        if (past.isEmpty() && later.isEmpty()) return@runCatching
+                        val from = past.firstOrNull()?.startMs ?: pastEnd
+                        val keep = existing.filter { it.startMs >= pastEnd || it.startMs < from }
+                        val merged = (past + keep + later).sortedBy { it.startMs }
+                            .fold(ArrayList<EpgProgram>()) { acc, p -> if (acc.isEmpty() || p.startMs >= acc.last().stopMs - 60_000) acc += p; acc }
+                        if (guideInDb) runCatching {
+                            if (past.isNotEmpty()) guideDb.putChannelRange(ch.key, from, pastEnd, past)
+                            if (later.isNotEmpty()) guideDb.putChannelRange(ch.key, later.first().startMs, later.last().stopMs, later)
+                        }
+                        _programs.value = _programs.value + (ch.key to merged)
+                        loadedFrom = minOf(loadedFrom, from)
+                        if (missingOnly && !apiFillReported) {
+                            apiFillReported = true
+                            LIVE_REPORT.add("Guide: listings for channels the guide file doesn't cover are coming from the Xtream API (first: ${ch.name})")
+                        }
+                    }.onFailure {
+                        Log.w(TAG, "Catch-up archive for ${ch.name} unavailable", it)
+                        if (it.message?.contains("429") == true) {
+                            archivePausedUntil = System.currentTimeMillis() + 5 * 60_000L
+                            archiveFetched -= ch.key
+                            LIVE_REPORT.add("Provider said too many requests (HTTP 429): catch-up lookups paused for 5 minutes")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun loadStalkerArchive(pl: PlaylistSource, ch: LiveChannel, overrides: Map<String, EpgAssignment>) {
+        val ref = ch.stalkerRef ?: return
+        if (ref.sourceIdentity != com.nuvio.tv.livetv.stalker.StalkerGateway.identity(pl))
+            throw com.nuvio.stalker.StalkerException(com.nuvio.stalker.StalkerError.STALE_SESSION)
+        val days = ch.catchup?.days?.takeIf { it > 0 } ?: return
+        val client = stalker.client(pl)
+        val zone = runCatching { java.time.ZoneId.of(pl.stalkerConfig?.timezone ?: "UTC") }.getOrElse {
+            throw com.nuvio.stalker.StalkerException(com.nuvio.stalker.StalkerError.GUIDE_TIMEZONE_UNSUPPORTED)
+        }
+        val today = java.time.Instant.ofEpochMilli(System.currentTimeMillis()).atZone(zone).toLocalDate()
+        val shift = guideShiftMs(ch, overrides)
+        val imported = ArrayList<EpgProgram>()
+        // Do not assume the bulk EPG contains past shows: portals expose their archive by date.
+        for (offset in 0..days) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            for (p in client.archiveGuide(ref.providerId, today.minusDays(offset.toLong()).toString())) {
+                imported += EpgProgram(p.startMillis + shift, p.stopMillis + shift, p.title,
+                    description = p.description, category = p.category,
+                    providerProgramId = p.archiveProgramId,
+                    providerSourceIdentity = ref.sourceIdentity.takeIf { p.archiveProgramId != null })
+            }
+        }
+        // Only as far back as "Past guide kept", like the guide file's listings.
+        val keptFrom = System.currentTimeMillis() - prefs.currentSettings().epgPastHours.coerceAtLeast(1) * HOUR
+        imported.removeAll { it.stopMs <= keptFrom }
+        if (imported.isEmpty()) return
+        stalker.assertCurrent(pl)
+        val from = imported.minOf { it.startMs }
+        val to = imported.maxOf { it.stopMs }
+        // Preserve any guide rows the archive omits, and let an archive row add its replay id.
+        val existing = if (guideInDb) guideDb.channelRange(ch.key, from, to) else _programs.value[ch.key].orEmpty()
+        val merged = (existing + imported).associateBy { it.startMs }.values.sortedBy { it.startMs }
+        stalker.assertCurrent(pl)
+        rangeMutex.withLock {
+            prefs.withCurrentPlaylist(pl) {
+                if (guideInDb) guideDb.putChannelRange(ch.key, from, to, merged)
+                val current = _programs.value[ch.key].orEmpty()
+                val all = (current + merged).associateBy { it.startMs }.values.sortedBy { it.startMs }
+                _programs.value = _programs.value + (ch.key to all)
+                loadedFrom = minOf(loadedFrom, from)
+            }
+        }
+    }
+
+    /** One channel's whole schedule (overlay mode's days, catch-up following into later shows). */
+    /** A channel's listings from an hour ago to [days] ahead (series recordings look through these). */
+    suspend fun upcomingListings(channelKey: String, days: Int): List<EpgProgram> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (!guideInDb) return@withContext _programs.value[channelKey].orEmpty()
+        runCatching { guideDb.channelRange(channelKey, now - HOUR, now + days * 24 * HOUR) }
+            .getOrNull()?.takeIf { it.isNotEmpty() } ?: _programs.value[channelKey].orEmpty()
+    }
+
+    fun ensureChannelSchedule(channelKey: String) {
+        if (!guideInDb) return
+        scope.launch {
+            val now = System.currentTimeMillis()
+            val settings = prefs.currentSettings()
+            val list = runCatching {
+                guideDb.channelRange(channelKey, now - settings.epgPastHours.coerceAtLeast(1) * HOUR,
+                    now + settings.epgFutureDays.coerceAtLeast(1) * 24 * HOUR)
+            }.getOrNull() ?: return@launch
+            if (list.isEmpty()) return@launch
+            // Added to what's loaded, the same way the guide adds what it reads (it used to
+            // replace the channel's list when it had more shows, or be dropped when it had fewer:
+            // either the provider's catch-up shows or the later days went missing).
+            rangeMutex.withLock {
+                val cur = _programs.value
+                val merged = addShows(cur[channelKey], list)
+                if (merged !== cur[channelKey]) _programs.value = cur + (channelKey to merged)
+            }
+        }
+    }
+
+    /**
+     * [list] added to a channel's loaded listings [cur]: shows already there (by start time) are
+     * kept as they are, the rest go in, in start order. The one way every read adds listings,
+     * so the guide and overlay mode always have the same shows.
+     */
+    private fun addShows(cur: List<EpgProgram>?, list: List<EpgProgram>): List<EpgProgram> {
+        if (cur.isNullOrEmpty()) return list
+        val starts = cur.mapTo(HashSet()) { it.startMs }
+        val extra = list.filter { it.startMs !in starts }
+        return if (extra.isEmpty()) cur else (cur + extra).sortedBy { it.startMs }
+    }
+
+    /** Everything the matched guide depends on; a different value means the cache is stale. */
+    private suspend fun guideFingerprint(settings: LiveTvSettings, targets: List<EpgTarget>): String {
+        val overrides = prefs.userState.first().epgOverrides
+        val sb = StringBuilder()
+        sb.append(GUIDE_CACHE_VERSION).append('|')
+        sb.append(settings.epgPastHours).append('|').append(settings.epgFutureDays).append('|')
+        targets.forEach { t ->
+            val f = epgFile(t.fileId)
+            sb.append(t.fileId).append(':').append(f.length()).append(':').append(contentStamp(f))
+            if (t.shiftMs != 0L) sb.append(":s=").append(t.shiftMs / 60_000L)
+            sb.append(',')
+        }
+        sb.append('|').append(overrides.hashCode())
+        sb.append('|').append(_channels.value.size).append(':').append(_channels.value.sumOf { it.key.hashCode().toLong() })
+        tvgShiftStamp()?.let { sb.append("|tvg=").append(it) }
+        guideUsersStamp()?.let { sb.append("|gu=").append(it) }
+        return sb.toString()
+    }
+
+    /** One guide file as the fingerprint sees it (also the format of the Assign EPG lists' stamp). */
+    private fun targetStamp(t: EpgTarget): String {
+        val f = epgFile(t.fileId)
+        return t.fileId + ":" + f.length() + ":" + contentStamp(f) + (if (t.shiftMs != 0L) ":s=${t.shiftMs / 60_000L}" else "")
+    }
+
+    /** The channels' tvg-shifts as the fingerprint sees them (null when no channel has one: older stamps stay valid). */
+    private fun tvgShiftStamp(): String? {
+        var h = 0L
+        var any = false
+        for (c in _channels.value) if (c.tvgShiftMinutes != 0) { any = true; h = h * 31 + c.key.hashCode() * 7L + c.tvgShiftMinutes }
+        return if (any) h.toString() else null
+    }
+
+    /**
+     * The fingerprint's parts, stored next to it: settings and hand-picked guides ("base"), each
+     * guide file in order ("targets"), and each playlist's channels ("playlists"). With these, a
+     * playlist turned off or removed can be told apart from any other change (see
+     * [dropRemovedPlaylistsFromGuide]).
+     */
+    private suspend fun guideParts(settings: LiveTvSettings, targets: List<EpgTarget>, fingerprint: String): String {
+        val overrides = prefs.userState.first().epgOverrides
+        val playlists = JSONObject()
+        _channels.value.groupBy { it.sourceId }.forEach { (id, list) ->
+            // Guides switched off for this playlist go with it (a playlist taken away takes its switches along).
+            val off = targets.filter { !guideFor(it.fileId, id) }.map { it.fileId }.sorted()
+            playlists.put(id, "${list.size}:${list.sumOf { it.key.hashCode().toLong() }}" + (if (off.isEmpty()) "" else "|off=" + off.joinToString(",")))
+        }
+        return JSONObject()
+            .put("fp", fingerprint)
+            .put("base", "$GUIDE_CACHE_VERSION|${settings.epgPastHours}|${settings.epgFutureDays}|${overrides.hashCode()}" +
+                (tvgShiftStamp()?.let { "|tvg=$it" } ?: ""))
+            .put("targets", org.json.JSONArray(targets.map { targetStamp(it) }))
+            .put("playlists", playlists)
+            .toString()
+    }
+
+    /**
+     * A playlist turned off or removed changes the guide's fingerprint, which used to mean reading
+     * every other guide file again from start to finish. But each channel's guide match only
+     * depends on that channel and the guides, so taking a playlist away changes nothing for the
+     * others: its channels' listings are simply deleted from the stored guide.
+     *
+     * Only when nothing else changed: same settings and hand-picked guides, every other playlist
+     * with exactly the channels it had, and the remaining guide files unchanged and in the same
+     * order (a playlist's built-in guide may go with it, as long as no remaining channel was
+     * matched to it). Otherwise (or for a guide stored by an older version) false: read it all.
+     */
+    private suspend fun dropRemovedPlaylistsFromGuide(settings: LiveTvSettings, targets: List<EpgTarget>): Boolean = withContext(Dispatchers.IO) {
+        val channels = _channels.value
+        if (channels.isEmpty()) return@withContext false
+        val stored = runCatching { guideDb.fingerprint() }.getOrNull() ?: return@withContext false
+        val old = runCatching { guideDb.parts()?.let { JSONObject(it) } }.getOrNull() ?: return@withContext false
+        if (old.optString("fp") != stored) return@withContext false
+        val fingerprint = guideFingerprint(settings, targets)
+        val partsText = guideParts(settings, targets, fingerprint)
+        val now = JSONObject(partsText)
+        if (old.optString("base") != now.optString("base")) return@withContext false
+
+        // Guide files: the remaining ones unchanged and in the same order, the rest only taken away.
+        fun list(o: JSONObject): List<String> {
+            val a = o.optJSONArray("targets") ?: return emptyList()
+            return List(a.length()) { a.getString(it) }
+        }
+        val oldTargets = list(old)
+        val newTargets = list(now)
+        var i = 0
+        for (t in oldTargets) if (i < newTargets.size && newTargets[i] == t) i++
+        if (i != newTargets.size) return@withContext false
+        val keptTargetIds = targets.mapTo(HashSet()) { it.fileId }
+        val removedTargets = oldTargets.map { it.substringBefore(':') }.filterTo(HashSet()) { it !in keptTargetIds }
+
+        // Playlists: every one still on has exactly the channels it had.
+        val oldPl = old.optJSONObject("playlists") ?: return@withContext false
+        val newPl = now.getJSONObject("playlists")
+        for (id in newPl.keys()) if (oldPl.optString(id) != newPl.getString(id)) return@withContext false
+        val removedPlaylists = oldPl.keys().asSequence().filterTo(HashSet()) { !newPl.has(it) }
+        if (removedPlaylists.isEmpty()) return@withContext false
+
+        val keys = channels.mapTo(HashSet()) { it.key }
+        // A remaining channel matched to a guide that went away would need another match: read it all.
+        val auto = runCatching { guideDb.autoMatches() }.getOrNull() ?: return@withContext false
+        if (auto.any { (key, a) -> key in keys && a.sourceId in removedTargets }) return@withContext false
+
+        // Hidden channels: group ids can change with the number of playlists ("playlist::group"
+        // with several, just "group" with one), so check what's hidden against the stored guide.
+        val hidden = prefs.currentHiddenEverywhere()
+        val nowHidden = channels.filter { hidden.hides(it.key, it.groupId) }.mapTo(HashSet()) { it.key }
+        val skipped = (loadSkipped() ?: emptySet()).filterTo(HashSet()) { it in keys }
+        if (keys.any { it in skipped && it !in nowHidden }) return@withContext false // shown again: needs listings
+        val newlyHidden = nowHidden - skipped
+        // Remaining channels hand-assigned to a guide that went away have no listings any more.
+        val overrides = prefs.userState.first().epgOverrides
+        val lostPinned = overrides.filter { (key, a) -> key in keys && a.sourceId in removedTargets }.keys
+
+        runCatching { guideDb.dropPlaylists(removedPlaylists, newlyHidden + lostPinned, fingerprint, partsText, removedTargets) }
+            .onFailure { Log.w(TAG, "Couldn't take turned-off playlists out of the guide", it); return@withContext false }
+        saveSkipped(skipped + newlyHidden)
+        val logos = _epgLogos.value.filterKeys { it in keys && it !in lostPinned }
+        if (logos.size != _epgLogos.value.size) { _epgLogos.value = logos; saveEpgLogos(logos) }
+        if (_epgSources.value.isNotEmpty()) _epgSources.value = _epgSources.value.filter { it.sourceId !in removedTargets }
+        LIVE_REPORT.add("Guide: ${removedPlaylists.size} playlist(s) taken out without re-reading the guides")
+        scheduleCompact()
+        // The guide now matches its fingerprint: load it the usual way.
+        loadGuideFromDb(settings, targets, preReadGuide())
+    }
+
+    private suspend fun loadSavedGuide(settings: LiveTvSettings, targets: List<EpgTarget>): Boolean = withContext(Dispatchers.IO) {
+        val file = savedGuideFile
+        if (!file.exists() || _channels.value.isEmpty()) return@withContext false
+        val expected = guideFingerprint(settings, targets)
+        runCatching {
+            java.io.DataInputStream(java.io.BufferedInputStream(java.util.zip.GZIPInputStream(file.inputStream()), 64 * 1024)).use { input ->
+                val storedFingerprint = input.readUTF()
+                val hasProviderIdentity = storedFingerprint.startsWith("stalker2|")
+                val hasProviderIds = hasProviderIdentity || storedFingerprint.startsWith("stalker1|")
+                if (storedFingerprint.removePrefix("stalker1|").removePrefix("stalker2|") != expected) return@withContext false
+                val programs = HashMap<String, List<EpgProgram>>()
+                val providerIdentities = ProgrammeIdentityPool()
+                repeat(input.readInt()) {
+                    val key = input.readUTF()
+                    val list = ArrayList<EpgProgram>()
+                    repeat(input.readInt()) {
+                        val start = input.readLong()
+                        val stop = input.readLong()
+                        val title = input.readUTF()
+                        val desc = readOpt(input)
+                        val category = readOpt(input)
+                        val episode = XmltvParser.cleanEpisode(readOpt(input))
+                        val icon = readOpt(input)
+                        val year = input.readInt().takeIf { it > 0 }
+                        val people = List(input.readInt()) { input.readUTF() }
+                        val providerId = if (hasProviderIds) readOpt(input) else null
+                        val providerIdentity = if (hasProviderIdentity) providerIdentities.share(readOpt(input)) else null
+                        list += EpgProgram(start, stop, title, desc, category, episode, icon, year, people, providerId, providerIdentity)
+                    }
+                    programs[key] = list
+                }
+                val auto = HashMap<String, EpgAssignment>()
+                repeat(input.readInt()) {
+                    auto[input.readUTF()] = EpgAssignment(input.readUTF(), input.readUTF())
+                }
+                // Drop shows that have ended since the cache was saved (outside the window).
+                val windowStart = System.currentTimeMillis() - settings.epgPastHours.coerceAtLeast(1) * HOUR
+                _programs.value = programs.mapValues { (_, l) -> l.filter { it.stopMs > windowStart } }
+                _autoMatches.value = auto
+                epgDetailsPending = true
+                true
+            }
+        }.getOrElse {
+            Log.w(TAG, "Saved guide unreadable", it)
+            false
+        }
+    }
+
+    private fun saveGuide(fingerprint: String, programs: Map<String, List<EpgProgram>>, auto: Map<String, EpgAssignment>) {
+        // Huge guides (hundreds of thousands of listings) would make a very large file that's
+        // slow to write and read; those are simply re-matched at start as before.
+        if (programs.values.sumOf { it.size } > MAX_SAVED_LISTINGS) {
+            savedGuideFile.delete()
+            return
+        }
+        runCatching {
+            val tmp = File(baseDir, "guide_cache.tmp")
+            java.io.DataOutputStream(java.io.BufferedOutputStream(java.util.zip.GZIPOutputStream(tmp.outputStream()), 64 * 1024)).use { out ->
+                out.writeUTF("stalker2|" + fingerprint)
+                out.writeInt(programs.size)
+                programs.forEach { (key, list) ->
+                    out.writeUTF(key)
+                    out.writeInt(list.size)
+                    list.forEach { p ->
+                        out.writeLong(p.startMs)
+                        out.writeLong(p.stopMs)
+                        out.writeUTF(p.title.take(500))
+                        writeOpt(out, p.description?.take(4000))
+                        writeOpt(out, p.category?.take(200))
+                        writeOpt(out, p.episode?.take(200))
+                        writeOpt(out, p.icon?.take(1000))
+                        out.writeInt(p.year ?: 0)
+                        out.writeInt(p.people.size.coerceAtMost(20))
+                        p.people.take(20).forEach { out.writeUTF(it.take(200)) }
+                        writeOpt(out, p.providerProgramId)
+                        writeOpt(out, p.providerSourceIdentity)
+                    }
+                }
+                out.writeInt(auto.size)
+                auto.forEach { (key, a) -> out.writeUTF(key); out.writeUTF(a.sourceId); out.writeUTF(a.xmltvId) }
+            }
+            if (!tmp.renameTo(savedGuideFile)) { tmp.copyTo(savedGuideFile, overwrite = true); tmp.delete() }
+        }.onFailure { Log.w(TAG, "Couldn't save the guide", it) }
+    }
+
+    private fun readOpt(input: java.io.DataInputStream): String? = if (input.readBoolean()) input.readUTF() else null
+
+    private fun writeOpt(out: java.io.DataOutputStream, value: String?) {
+        out.writeBoolean(value != null)
+        if (value != null) out.writeUTF(value)
+    }
+
+    /** True while a routine update runs (see [refreshLocked], [rebuildLocked]): its progress isn't announced. */
+    @Volatile private var routineRun = false
+
+    private fun setStatus(loading: Boolean, message: String?, quiet: Boolean = false, loud: Boolean = false) {
+        _status.value = _status.value.copy(loading = loading, message = message, quiet = quiet, silent = routineRun && !loud)
+    }
+
+    /** Resolve UI text at emission, against the app setting rather than the system locale. */
+    private fun statusText(id: Int, vararg args: Any): String =
+        context.withAppLocale().getString(id, *args)
+
+    private fun readingChannelsMessage(name: String, current: Int, total: Int): String =
+        if (total > 1) statusText(R.string.iptv_repository_status_reading_channels_from_numbered, name, current, total)
+        else statusText(R.string.iptv_repository_status_reading_channels_from, name)
+
+    private fun readingGuideMessage(name: String, current: Int = 1, total: Int = 1, percent: Long? = null): String {
+        val localized = context.withAppLocale()
+        return when {
+            percent != null && total > 1 -> localized.getString(R.string.iptv_repository_status_reading_guide_progress_numbered, name, current, total, percent)
+            percent != null -> localized.getString(R.string.iptv_repository_status_reading_guide_progress, name, percent)
+            total > 1 -> localized.getString(R.string.iptv_repository_status_reading_guide_numbered, name, current, total)
+            else -> localized.getString(R.string.iptv_repository_status_reading_guide, name)
+        }
+    }
+
+    private fun matchingGuideMessage(name: String, current: Int, total: Int): String =
+        if (total > 1) statusText(R.string.iptv_repository_status_matching_guide_numbered, name, current, total)
+        else statusText(R.string.iptv_repository_status_matching_guide, name)
+
+    private fun downloadProgressMessage(label: (Context) -> String, read: Long, total: Long?): String {
+        val localized = context.withAppLocale()
+        return if (total != null) localized.getString(R.string.iptv_repository_status_download_progress_total,
+            label(localized), statusSizeLabel(localized, read), statusSizeLabel(localized, total))
+        else localized.getString(R.string.iptv_repository_status_download_progress,
+            label(localized), statusSizeLabel(localized, read))
+    }
+
+    /** UI-only sizes: leave [sizeLabel] unchanged for logs and reports. */
+    private fun statusSizeLabel(localized: Context, bytes: Long): String = when {
+        bytes >= 1024L * 1024 * 1024 -> localized.getString(R.string.iptv_repository_status_size_gb, bytes / (1024.0 * 1024 * 1024))
+        bytes >= 1024L * 1024 -> localized.getString(R.string.iptv_repository_status_size_mb, bytes / (1024.0 * 1024))
+        else -> localized.getString(R.string.iptv_repository_status_size_kb, bytes / 1024)
+    }
+
+    /** The detailed notice only; the persisted/diagnostic error above stays unchanged. */
+    private fun playlistNoticeError(e: Throwable): String = when (e) {
+        is java.net.UnknownHostException -> statusText(R.string.iptv_repository_status_unknown_host_address,
+            e.message?.substringAfter("\"")?.substringBefore("\"") ?: statusText(R.string.iptv_repository_status_address))
+        is java.net.SocketTimeoutException -> statusText(R.string.iptv_repository_status_provider_timeout)
+        else -> e.message ?: e.javaClass.simpleName
+    }
+
+    /** What went wrong with a download, in plain words (for the pill). */
+    private fun plainDownloadError(e: Throwable): String = when {
+        isStorageFull(e) -> statusText(R.string.iptv_repository_status_storage_full_short)
+        else -> plainNetworkError(e)
+    }
+
+    private fun plainNetworkError(e: Throwable): String = when (e) {
+        is java.net.UnknownHostException -> statusText(R.string.iptv_repository_status_unknown_host_short)
+        is java.net.SocketTimeoutException -> statusText(R.string.iptv_repository_status_timeout_short)
+        else -> e.message?.takeIf { it.isNotBlank() } ?: statusText(R.string.iptv_repository_status_generic_error)
+    }
+
+    /** The device ran out of storage (the database or a file couldn't be written). */
+    private fun isStorageFull(e: Throwable): Boolean {
+        var t: Throwable? = e
+        var depth = 0
+        while (t != null && depth++ < 8) {
+            if (t is android.database.sqlite.SQLiteFullException) return true
+            val m = t.message.orEmpty()
+            if ("ENOSPC" in m || "No space left" in m || "SQLITE_FULL" in m || "database or disk is full" in m) return true
+            t = t.cause
+        }
+        return false
+    }
+
+    private data class EpgTarget(
+        val fileId: String,
+        val sourceId: String?,
+        val name: String,
+        val url: String,
+        val userAgent: String,
+        /** A playlist's own (built-in) guide: that playlist. */
+        val playlistId: String? = null,
+        /** How far this guide's listings are moved (its own time shift), in ms. */
+        val shiftMs: Long = 0L,
+        /** No user agent typed in for it (or its playlist): turned away, it's asked again as a media player. */
+        val autoAgent: Boolean = false
+    )
+
+    /** Each guide file's time shift (ms), and each playlist's built-in guide shift, as last collected. */
+    @Volatile private var targetShifts: Map<String, Long> = emptyMap()
+    @Volatile private var playlistGuideShifts: Map<String, Long> = emptyMap()
+
+    /**
+     * How far a channel's stored listings were moved: the time shift of the guide it's matched to
+     * (or given in Assign EPG; its playlist's own guide when it has none) plus the playlist's
+     * tvg-shift for it. Catch-up takes this back off: the archive goes by the guide's own times.
+     */
+    fun guideShiftMs(channel: LiveChannel, overrides: Map<String, EpgAssignment>): Long {
+        val a = overrides[channel.key]?.takeUnless { it.isNone } ?: _autoMatches.value[channel.key]
+        val source = a?.let { targetShifts[it.sourceId] } ?: playlistGuideShifts[channel.sourceId] ?: 0L
+        return source + channel.tvgShiftMinutes * 60_000L
+    }
+
+    private fun List<EpgProgram>.shiftedBy(ms: Long): List<EpgProgram> =
+        if (ms == 0L || isEmpty()) this else map { it.copy(startMs = it.startMs + ms, stopMs = it.stopMs + ms) }
+
+    /** Named EPG sources first (they win on conflicts), then EPG URLs embedded in playlists. */
+    private suspend fun collectEpgTargets(): List<EpgTarget> {
+        // The old one-for-everything time shifts, moved onto each playlist and guide (once).
+        if (runCatching { prefs.moveTimeShiftsToSources() }.getOrDefault(false)) {
+            LIVE_REPORT.add("Time shifts: the old Guide / Catch-Up Time Shift moved onto each playlist and guide")
+        }
+        val targets = mutableListOf<EpgTarget>()
+        // Guide link -> the playlists that bring it as their own (built-in) guide.
+        val ownersByUrl = HashMap<String, MutableSet<String>>()
+        // A guide added on its own from the same server as a playlist (often that playlist's own
+        // guide link) is asked for with that playlist's user agent, like the playlist itself:
+        // some servers answer a different user agent with a different (or empty) guide.
+        val allPlaylists = prefs.currentPlaylists()
+        fun hostOf(u: String) = runCatching { java.net.URI(u.trim()).host?.lowercase() }.getOrNull()
+        prefs.currentEpgSources().filter { it.enabled && it.url.isNotBlank() }.forEach { src ->
+            val host = hostOf(src.url)
+            val borrowed = if (src.userAgent.isNotBlank()) "" else allPlaylists.firstOrNull { pl ->
+                pl.effectiveUserAgent.isNotBlank() && host != null &&
+                    hostOf(if (pl.isXtream) pl.xtreamBase() else pl.url) == host
+            }?.effectiveUserAgent.orEmpty()
+            // Its own user agent first, then its playlist's, then the one that worked last time.
+            val ua = src.userAgent.ifBlank { borrowed }.ifBlank { src.fallbackUserAgent }
+            targets += EpgTarget(src.id, src.id, src.name, src.url, ua, shiftMs = src.shiftMinutes * 60_000L,
+                autoAgent = src.userAgent.isBlank() && borrowed.isBlank())
+        }
+        val playlists = prefs.currentPlaylists().filter { it.liveEnabled && it.useEmbeddedEpg }
+        for (pl in playlists) {
+            if (pl.isStalker) {
+                val identity = pl.stalkerConfig?.let { com.nuvio.tv.livetv.stalker.StalkerGateway.configIdentity(it) } ?: "invalid"
+                targets += EpgTarget("auto_stalker_${pl.id}_$identity", null, "${pl.name} (built-in)", "stalker:${pl.id}", "",
+                    playlistId = pl.id, shiftMs = pl.guideShiftMinutes * 60_000L)
+                continue
+            }
+            val urls = mutableListOf<String>()
+            pl.xtreamEpgUrl()?.let { urls += it }
+            urls += embeddedEpgUrls[pl.id].orEmpty()
+            urls.distinct().forEach { url ->
+                // The same link as a guide already in the list: that one is this playlist's built-in guide too.
+                ownersByUrl.getOrPut(url) { HashSet() } += pl.id
+                if (targets.none { it.url == url }) {
+                    targets += EpgTarget(
+                        "auto_" + sha1(url), null, "${pl.name} (built-in)", url, pl.effectiveUserAgent,
+                        playlistId = pl.id, shiftMs = pl.guideShiftMinutes * 60_000L,
+                        autoAgent = pl.userAgent.isBlank()
+                    )
+                }
+            }
+        }
+        // Which playlists each guide is for (each playlist's Guides switches). A playlist's own
+        // built-in guide is always on for it (its "Load built-in guide" switch decides that).
+        val live = allPlaylists.filter { it.liveEnabled }
+        val users = HashMap<String, Set<String>>()
+        for (t in targets) {
+            val owners = if (t.url.startsWith("stalker:")) setOfNotNull(t.playlistId) else ownersByUrl[t.url].orEmpty()
+            val key = t.sourceId ?: t.playlistId?.let { PlaylistSource.builtInGuideKey(it) }
+            users[t.fileId] = live.filter { it.id in owners || key == null || key !in it.guidesOff }.mapTo(HashSet()) { it.id }
+        }
+        // A guide no playlist uses isn't downloaded or read (only when there are playlists to use one).
+        if (live.isNotEmpty()) targets.removeAll { users[it.fileId].isNullOrEmpty() }
+        val everyone = live.mapTo(HashSet()) { it.id }
+        guideUsers = users.filter { (id, set) -> set != everyone && targets.any { it.fileId == id } }
+        targetShifts = targets.associate { it.fileId to it.shiftMs }
+        playlistGuideShifts = allPlaylists.associate { it.id to it.guideShiftMinutes * 60_000L }
+        return targets
+    }
+
+    /**
+     * Guide file id -> the playlists it's switched on for, for guides that aren't on for every
+     * playlist (as last collected). A guide not listed here is used by every playlist.
+     */
+    @Volatile private var guideUsers: Map<String, Set<String>> = emptyMap()
+
+    /** Whether channels of playlist [playlistId] may get their listings from guide file [fileId]. */
+    private fun guideFor(fileId: String, playlistId: String): Boolean =
+        guideUsers[fileId]?.let { playlistId in it } ?: true
+
+    /** The guides' per-playlist switches as the fingerprint sees them (null when every guide is on for every playlist: older stamps stay valid). */
+    private fun guideUsersStamp(): String? {
+        val g = guideUsers
+        if (g.isEmpty()) return null
+        return g.toSortedMap().entries.joinToString(";") { (id, set) -> id + "=" + set.sorted().joinToString(",") }.hashCode().toString()
+    }
+
+    private val embeddedEpgUrls = HashMap<String, List<String>>()
+
+    /** Playlists that bring a guide of their own (Xtream and Stalker logins, M3U links whose header names one). */
+    fun playlistsWithOwnGuide(playlists: List<PlaylistSource>): Set<String> =
+        playlists.filter { it.isXtream || it.isStalker || !embeddedEpgUrls[it.id].isNullOrEmpty() }.mapTo(HashSet()) { it.id }
+
+    /** Channel key → stream link from an out-of-date saved channel list (see [loadSavedChannels]). */
+    private var previousLinks: Map<String, String> = emptyMap()
+
+    /**
+     * A channel renamed in the playlist (by the provider or a playlist editor) gets a new key.
+     * This moves favorites, hidden channels, groups you made, renames, guide choices and so on
+     * over to it (see [RenamedChannels]). [before]: each channel's stream link before the
+     * playlists were read again, null when there's no earlier list. Without one, any channel can
+     * be the match, so that's only done once per TV (for channels renamed before this existed).
+     */
+    private suspend fun carryOverRenamedChannels(before: Map<String, String>?, now: List<LiveChannel>) {
+        runCatching {
+            if (now.isEmpty()) return
+            val firstTime = !prefs.renamedChannelsChecked()
+            if (before == null && !firstTime) return
+            val current = now.mapTo(HashSet(now.size * 2)) { it.key }
+            val lost = prefs.channelKeysInUse().filter { it !in current }
+            val moves = RenamedChannels.match(lost, now, before.orEmpty(), onlyNew = !firstTime)
+            if (moves.isNotEmpty()) {
+                prefs.moveChannelKeys(moves)
+                LIVE_REPORT.add("Renamed channels: settings moved over for ${moves.size}")
+            }
+            if (firstTime) prefs.setRenamedChannelsChecked()
+        }.onFailure { Log.w(TAG, "Carrying settings over to renamed channels failed", it) }
+    }
+
+    /** "Adding channels from …" for playlists just added, or null when none were. */
+    private fun addingMessage(names: List<String>): String? = when (names.size) {
+        0 -> null
+        1 -> statusText(R.string.iptv_repository_status_adding_playlist, names[0])
+        else -> context.withAppLocale().resources.getQuantityString(R.plurals.iptv_repository_status_adding_playlists, names.size, names.size)
+    }
+
+    /**
+     * Makes one channel list from every playlist that's on (numbers carry on from one playlist
+     * to the next). Only playlists that changed are read again: the others' channels are taken
+     * from the list already there (or the saved one), so turning a playlist off reads nothing
+     * and turning one on reads just that one. [fixedMessage]: shown for the whole read instead
+     * of naming each playlist, so adding a playlist doesn't look like the others are loading again.
+     */
+    private suspend fun buildChannels(fixedMessage: String? = null) = withContext(BackgroundWork.cpu()) {
+        val saved = reusable
+        reusable = null
+        val oldChannels = _channels.value.takeIf { it.isNotEmpty() } ?: saved?.channels.orEmpty()
+        val before = (oldChannels.takeIf { it.isNotEmpty() }?.associate { it.key to it.url } ?: previousLinks)
+            .takeIf { it.isNotEmpty() }
+        previousLinks = emptyMap()
+        // What can be reused: channels by playlist, with the fingerprint part they were read with.
+        val (reuseFrom, reuseSegments) = if (_channels.value.isNotEmpty()) _channels.value to builtSegments
+        else (saved?.channels.orEmpty()) to (saved?.segments.orEmpty())
+        val oldBySource = reuseFrom.groupBy { it.sourceId }
+        val playlists = prefs.currentPlaylists().filter { it.liveEnabled }
+        val multi = playlists.size > 1
+        val out = ArrayList<LiveChannel>()
+        val usedKeys = HashSet<String>()
+        // In playlist order, like [channelsFingerprint], so the saved list matches it next time.
+        val segments = LinkedHashMap<String, String>()
+        playlists.forEach { segments[it.id] = playlistSegment(it) }
+        var counter = 1
+        var read = 0
+        val toRead = playlists.count { reuseSegments[it.id] != segments[it.id] || oldBySource[it.id] == null }
+        for (pl in playlists) {
+            val file = playlistFile(pl.id)
+            if (!file.exists()) continue
+            if (pl.isStalker) {
+                val expectedIdentity = pl.stalkerConfig?.let { com.nuvio.tv.livetv.stalker.StalkerGateway.configIdentity(it) }
+                val savedIdentity = runCatching { openMaybeGzip(file).bufferedReader().use { reader ->
+                    reader.readLine(); reader.readLine()?.removePrefix("#NUVIO-STALKER-CONFIG:")
+                } }.getOrNull()
+                if (expectedIdentity == null || savedIdentity != expectedIdentity) continue
+            }
+            val segment = segments.getValue(pl.id)
+            val old = oldBySource[pl.id]
+            if (reuseSegments[pl.id] == segment && old != null) {
+                // Unchanged: same channels; only numbers (they carry on from the playlists
+                // before it) and group ids (prefixed when there's more than one playlist) follow.
+                for (c in old) {
+                    val number = if (c.autoNumber) counter else c.number
+                    counter = maxOf(counter, number) + 1
+                    usedKeys += c.key
+                    val groupId = if (multi) "${pl.id}::${c.group}" else c.group
+                    out += if (number == c.number && groupId == c.groupId) c else c.copy(number = number, groupId = groupId)
+                }
+                continue
+            }
+            read++
+            if (fixedMessage == null) setStatus(loading = true, message = readingChannelsMessage(pl.name, read, toRead))
+            // Movies and episodes are left out while reading (see the check below), counted for
+            // the stray-entry check.
+            var vodLinks = 0
+            val skipVod: ((String) -> Boolean)? = if (pl.isStalker) null else { url -> isVodEntry(url).also { if (it) vodLinks++ } }
+            val parsed = runCatching { openMaybeGzip(file).reader(Charsets.UTF_8).buffered(64 * 1024).use { M3uParser.parse(it, skipVod) } }
+                .onFailure { Log.w(TAG, "Parse ${pl.name} failed", it) }
+                .getOrNull() ?: continue
+            embeddedEpgUrls[pl.id] = parsed.epgUrls
+            // The playlist's own User-Agent: one shared copy for every channel with no headers of its own.
+            val playlistAgent = pl.effectiveUserAgent
+            val agentOnly = if (playlistAgent.isNotBlank()) mapOf("User-Agent" to playlistAgent) else emptyMap()
+            val hideStrays = !pl.isStalker && prefs.currentSettings().hideStrayEntries &&
+                isMarkedPlaylist(parsed.entries.count { LIVE_PATH.containsMatchIn(it.url) } + vodLinks, parsed.entries.count { !LIVE_PATH.containsMatchIn(it.url) })
+            var strays = 0
+            for (e in parsed.entries) {
+                if (hideStrays && isStrayEntry(e)) { strays++; continue }
+                // Many providers' M3U links ("m3u_plus") also list every movie and episode,
+                // often 100,000+ entries. Those aren't TV channels, and loading them all into the
+                // guide used enough memory to crash Live TV on some devices.
+                if (!pl.isStalker && isVodEntry(e.url)) continue
+                val portalRef = if (pl.isStalker) decodeStalkerEntry(e.url) ?: continue else null
+                val groupTitle = if (portalRef != null && e.group?.startsWith("stalker-group:") == true) {
+                    runCatching { String(android.util.Base64.decode(e.group.removePrefix("stalker-group:"), android.util.Base64.NO_WRAP), Charsets.UTF_8) }.getOrDefault("Uncategorized")
+                } else e.group?.ifBlank { null } ?: "Uncategorized"
+                val baseKey = if (portalRef != null) "${pl.id}|stalker|${portalRef.providerId.encodeURLParameter()}" else "${pl.id}|${e.tvgId ?: ""}|${e.name}"
+                var key = baseKey
+                var n = 2
+                while (!usedKeys.add(key)) { key = "$baseKey#${n++}" }
+                val number = e.chno ?: counter
+                counter = maxOf(counter, number) + 1
+                val headers = if (playlistAgent.isNotBlank() && "User-Agent" !in e.headers) {
+                    if (e.headers.isEmpty()) agentOnly else e.headers + ("User-Agent" to playlistAgent)
+                } else e.headers
+                out += LiveChannel(
+                    key = key,
+                    sourceId = pl.id,
+                    sourceName = pl.name,
+                    name = e.name,
+                    tvgId = portalRef?.providerId ?: e.tvgId,
+                    tvgName = if (portalRef != null) e.name else e.tvgName,
+                    logo = e.logo,
+                    groupId = if (multi) "${pl.id}::$groupTitle" else groupTitle,
+                    // Names stay exactly as the playlist has them (the playlist is shown, if you want
+                    // it, with "Group by playlist").
+                    group = groupTitle,
+                    number = number,
+                    url = if (portalRef != null) "stalker:${pl.id}:${portalRef.providerId}" else pl.m3uStreamLink(e.url),
+                    headers = headers,
+                    catchup = e.catchup,
+                    drm = e.drm,
+                    tvgShiftMinutes = e.tvgShiftMinutes,
+                    autoNumber = e.chno == null,
+                    stalkerRef = portalRef
+                )
+            }
+            if (strays > 0) LIVE_REPORT.add("${pl.name}: left out $strays stray entr${if (strays == 1) "y" else "ies"} (episode-named, no live/movie/series link)")
+            prefs.updatePlaylists { list -> list.map { if (it.id == pl.id) it.copy(channelCount = parsed.entries.size - strays) else it } }
+        }
+        loadGroupOrder()
+        builtSegments = segments
+        if (read < playlists.size) LIVE_REPORT.add("Channel list: read $read playlist(s), kept ${playlists.size - read} unchanged")
+        // A playlist switched off while the channels were being read: leave its channels out
+        // (it was already taken out of the guide, and this would have put it back).
+        val stillOn = prefs.currentPlaylists().filter { it.liveEnabled }.mapTo(HashSet()) { it.id }
+        val kept = if (out.all { it.sourceId in stillOn }) out else out.filter { it.sourceId in stillOn }
+        _channels.value = kept
+        carryOverRenamedChannels(before, kept)
+    }
+
+    private suspend fun buildPrograms(settings: LiveTvSettings, targets: List<EpgTarget>, forceRead: Boolean = false) {
+        val t0 = System.currentTimeMillis()
+        guideSkippedForMemory = false
+        BackgroundWork.guideBuilding.value = true
+        try { BackgroundWork.heavy { buildProgramsInner(settings, targets, forceRead) } } finally { BackgroundWork.guideBuilding.value = false }
+        LIVE_REPORT.add("Guide matched and stored: ${_programs.value.size} channels in ${System.currentTimeMillis() - t0} ms")
+        if (guideSkippedForMemory) scheduleSkippedGuideRetry()
+    }
+
+    /** A guide was left out because memory was nearly full (its earlier listings stay in use). */
+    @Volatile private var guideSkippedForMemory = false
+    private var skippedGuideRetry: kotlinx.coroutines.Job? = null
+
+    /**
+     * Tries the left-out guide again a little later, quietly, instead of waiting for the next
+     * scheduled update: memory is usually free again once the update that ran short has finished.
+     * Waits while something plays and while other heavy work runs; gives up after three tries.
+     */
+    private fun scheduleSkippedGuideRetry() {
+        if (skippedGuideRetry?.isActive == true) return
+        skippedGuideRetry = scope.launch(BackgroundWork.quietUpdate) {
+            var tries = 0
+            while (guideSkippedForMemory && tries++ < 3) {
+                delay(2 * 60_000L)
+                BackgroundWork.awaitIdle()
+                BackgroundWork.awaitNoHeavy()
+                mutex.withLock {
+                    if (!guideSkippedForMemory) return@withLock
+                    LIVE_REPORT.add("Guide: trying the guide left out for memory again (try $tries of 3)")
+                    routineRun = true
+                    try { buildPrograms(prefs.currentSettings(), collectEpgTargets()) }
+                    finally {
+                        routineRun = false
+                        _status.value = _status.value.copy(loading = false, message = null)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Matches the guides to the channels and stores the result.
+     *
+     * Each guide file's listings are kept in the guide database under the guide channel they
+     * belong to, and playlist channels only point at a guide channel. So a guide file that hasn't
+     * changed since it was last read isn't read again (only the matching is done again, which
+     * takes moments), and nothing is copied: before, every update read every guide file from
+     * start to finish, stored it, copied it out per playlist channel and deleted the first copy,
+     * even when only one playlist or one guide had changed.
+     * [forceRead]: read every guide file again anyway ("Update now", Full EPG Scan).
+     */
+    private suspend fun buildProgramsInner(settings: LiveTvSettings, targets: List<EpgTarget>, forceRead: Boolean = false) = withContext(BackgroundWork.cpu()) {
+        val all = _channels.value
+        if (all.isEmpty()) {
+            _programs.value = emptyMap()
+            return@withContext
+        }
+        // Channels no profile shows (hidden, or in a hidden group, in every profile) get no
+        // listings: nobody sees them, and big providers' hidden groups made the guide database
+        // many times bigger than what's watched. Showing them again reads their listings back.
+        val hidden = prefs.currentHiddenEverywhere()
+        val skipped = HashSet<String>()
+        val channels = all.filter { c -> (!hidden.hides(c.key, c.groupId)).also { shown -> if (!shown) skipped += c.key } }
+        LIVE_REPORT.add(
+            "Guide matching: ${channels.size} of ${all.size} channels shown somewhere" +
+                " (${channels.count { !it.tvgId.isNullOrBlank() }} with a tvg-id)"
+        )
+        // Which playlist the channels come from (so "171,518 channels" can be told apart: one huge
+        // playlist, or several), and how full the app's memory is to begin with.
+        run {
+            val counts = all.groupingBy { it.sourceId }.eachCount()
+            LIVE_REPORT.add("Playlists: " + counts.entries.sortedByDescending { it.value }.joinToString { "${it.key.take(12)} ${it.value}" })
+            val rt = Runtime.getRuntime()
+            LIVE_REPORT.add("Memory before matching: ${(rt.totalMemory() - rt.freeMemory()) / 1048576} of ${rt.maxMemory() / 1048576} MB")
+        }
+        val now = System.currentTimeMillis()
+        val windowStart = now - settings.epgPastHours.coerceAtLeast(1) * HOUR
+        val futureMs = settings.epgFutureDays.coerceAtLeast(1) * 24 * HOUR
+        val windowEnd = now + futureMs
+
+        // Hand-picked guides (long-press > Change EPG) win over automatic matching.
+        val channelKeys = channels.mapTo(HashSet()) { it.key }
+        val overrides = prefs.userState.first().epgOverrides.filterKeys { it in channelKeys }
+
+        val byTvgId = HashMap<String, MutableList<LiveChannel>>()
+        val byName = HashMap<String, MutableList<LiveChannel>>()
+        channels.forEach { c ->
+            if (c.key in overrides) return@forEach
+            c.tvgId?.lowercase()?.let { byTvgId.getOrPut(it) { ArrayList() }.add(c) }
+            normalize(c.tvgName ?: "").takeIf { it.isNotEmpty() }?.let { byName.getOrPut(it) { ArrayList() }.add(c) }
+            normalize(c.name).takeIf { it.isNotEmpty() }?.let { byName.getOrPut(it) { ArrayList() }.add(c) }
+            // The tvg-id read as a name ("GloboSP.br" ~ a guide channel called "Globo SP").
+            c.tvgId?.let { idName(it) }?.takeIf { it.length >= 3 }?.let { k ->
+                val l = byName.getOrPut(k) { ArrayList() }
+                if (c !in l) l.add(c)
+            }
+        }
+
+        // Clearing up an earlier run was interrupted in (the app closed mid-update) is finished first.
+        guideDb.tidy()
+
+        /**
+         * One guide file as far as matching goes: its channel list, what's known about each guide
+         * channel kept from it, and which of its guide channels the playlist channels could use.
+         */
+        class GuideRead(
+            val target: EpgTarget,
+            val order: Int,
+            val entries: List<EpgChannelEntry>,
+            val meta: Map<String, EpgDatabase.StagedMeta>,
+            val idHits: Map<String, Set<LiveChannel>>,
+            val nameHits: Map<String, Set<LiveChannel>>,
+            val reused: Boolean
+        )
+        // What a guide's stored listings depend on besides the file itself: the hours kept.
+        val windowStamp = "|${settings.epgPastHours}|${settings.epgFutureDays}"
+
+        /**
+         * A guide file's listings, in the guide database: used as they are when the file was
+         * already read in and nothing it depends on has changed, otherwise read in now. Not a
+         * suspending function on purpose: a read is written in one go, on one thread.
+         * [force]: read the file even if its stored copy looks up to date.
+         */
+        fun readGuide(order: Int, target: EpgTarget, force: Boolean): GuideRead? {
+            val file = epgFile(target.fileId)
+            if (!file.exists()) { LIVE_REPORT.add("Guide \"${target.name}\": no file downloaded yet"); return null }
+            val src = target.fileId
+            val stamp = targetStamp(target) + windowStamp
+            val pinnedIds = overrides.values.filter { it.sourceId == target.fileId }.mapTo(HashSet()) { it.xmltvId }
+            val idHits = HashMap<String, MutableSet<LiveChannel>>()
+            val nameHits = HashMap<String, MutableSet<LiveChannel>>()
+            fun matchList(xmlChannels: Collection<Pair<String, List<String>>>) {
+                xmlChannels.forEach { (id, names) ->
+                    byTvgId[id.lowercase()]?.let { idHits.getOrPut(id) { LinkedHashSet() }.addAll(it) }
+                    (names.map { normalize(it) } + normalize(id) + idName(id)).distinct().forEach { k ->
+                        byName[k]?.let { nameHits.getOrPut(id) { LinkedHashSet() }.addAll(it) }
+                    }
+                }
+            }
+            // A guide with no channel list: a guide channel is wanted when a playlist channel could
+            // use it (the same id / name test the matching uses) or it's picked by hand.
+            fun wantedUnlisted(id: String): Boolean =
+                byTvgId.containsKey(id.lowercase()) || byName.containsKey(normalize(id)) || byName.containsKey(idName(id)) || id in pinnedIds
+            fun done(entries: List<EpgChannelEntry>, meta: Map<String, EpgDatabase.StagedMeta>, reused: Boolean): GuideRead {
+                if (idHits.isEmpty() && nameHits.isEmpty()) {
+                    // Guide had no <channel> list before programs: match program channel ids directly.
+                    meta.keys.forEach { id ->
+                        byTvgId[id.lowercase()]?.let { idHits.getOrPut(id) { LinkedHashSet() }.addAll(it) }
+                        (byName[normalize(id)] ?: byName[idName(id)])?.let { nameHits.getOrPut(id) { LinkedHashSet() }.addAll(it) }
+                    }
+                }
+                return GuideRead(target, order, entries, meta, idHits, nameHits, reused)
+            }
+            /**
+             * The guide channels wanted from a guide whose shows came before any channel list:
+             * every channel id it mentions that a playlist channel could use, plus hand-picked ones.
+             */
+            fun wantedUnlistedFrom(ids: Collection<String>): Set<String> = ids.filterTo(HashSet()) { wantedUnlisted(it) } + pinnedIds
+            /**
+             * The stored copy's channel list, and the guide channels wanted from it now: worked out
+             * exactly the way a read of the file works them out (from the channels it lists before
+             * its first show, which also fills in the matches; or by id alone when it lists none).
+             */
+            fun stored(state: EpgDatabase.SourceState): Pair<List<EpgChannelEntry>, Set<String>>? {
+                val list = runCatching { guideDb.sourceChannels(src) }.getOrNull() ?: return null
+                val entries = list.map { (id, names, icon) -> EpgChannelEntry(id, names, icon) }
+                idHits.clear(); nameHits.clear()
+                val wanted = if (state.listed > 0) {
+                    matchList(entries.take(state.listed).map { it.id to it.names })
+                    idHits.keys + nameHits.keys + pinnedIds
+                } else {
+                    val extra = runCatching { guideDb.sourceExtraIds(src) }.getOrNull() ?: return null
+                    wantedUnlistedFrom(entries.map { it.id } + extra)
+                }
+                return entries to wanted
+            }
+            /** Reading the file didn't work out: what was stored from it before is kept in use. */
+            fun fallBack(): GuideRead? {
+                val state = runCatching { guideDb.sourceState(src) }.getOrNull() ?: return null
+                val (entries, _) = stored(state) ?: return null
+                LIVE_REPORT.add("Guide \"${target.name}\": kept the listings stored from it before")
+                return done(entries, state.meta, reused = true)
+            }
+
+            val before = runCatching { guideDb.sourceState(src) }.getOrNull()
+            if (!force) {
+                val state = before
+                if (state != null && state.stamp == stamp) {
+                    // The file had more days than were kept, and that was a while ago: reading it
+                    // again brings the later days in (the days kept count from when it's read).
+                    val cutShort = (state.meta.values.maxOfOrNull { it.lastStop } ?: 0L) >= state.made + futureMs - HOUR
+                    val old = cutShort && now - state.made > REUSE_MAX_AGE_MS
+                    val got = if (old) null else stored(state)
+                    if (got != null) {
+                        val (entries, wanted) = got
+                        val missing = wanted.count { it !in state.meta }
+                        if (missing == 0) {
+                            LIVE_REPORT.add("Guide \"${target.name}\": file unchanged, used the listings stored before (${state.meta.count { it.value.count > 0 }} guide channels)")
+                            return done(entries, state.meta, reused = true)
+                        }
+                        LIVE_REPORT.add("Guide \"${target.name}\": file unchanged, but $missing more of its channels are needed now: reading it again")
+                    } else if (old) {
+                        LIVE_REPORT.add("Guide \"${target.name}\": file unchanged, read again for its later days")
+                    }
+                    idHits.clear(); nameHits.clear()
+                }
+            }
+
+            // Memory nearly full (a huge playlist): reading another guide would freeze the
+            // app, so it's left for later and the report says so.
+            if (order > 0) {
+                val rt = Runtime.getRuntime()
+                fun used() = rt.totalMemory() - rt.freeMemory()
+                if (used() > rt.maxMemory() * 0.85) System.gc()
+                if (used() > rt.maxMemory() * 0.85) {
+                    LIVE_REPORT.add("Guide \"${target.name}\" skipped: memory nearly full (${used() / 1048576} of ${rt.maxMemory() / 1048576} MB)")
+                    guideSkippedForMemory = true
+                    // Its listings from before stay in use: nothing to see, so nothing said during
+                    // an automatic update. With nothing kept from it, it's always said.
+                    val kept = fallBack()
+                    setStatus(loading = true, message = statusText(R.string.iptv_repository_status_guide_memory_skipped, target.name), loud = kept == null)
+                    return kept
+                }
+            }
+            // How far through each guide file it is, so a big guide doesn't look frozen.
+            val fileSize = file.length().coerceAtLeast(1L)
+            var shownAt = 0L
+            val showProgress: (Long) -> Unit = { bytes ->
+                val at = System.currentTimeMillis()
+                if (at - shownAt > 750) {
+                    shownAt = at
+                    setStatus(loading = true, message = readingGuideMessage(target.name, order + 1, targets.size, (bytes * 100 / fileSize).coerceIn(0, 99)))
+                }
+            }
+            setStatus(loading = true, message = readingGuideMessage(target.name, order + 1, targets.size))
+            val readStart = System.currentTimeMillis()
+            val writer = runCatching { guideDb.startSource(src) }
+                .onFailure { Log.w(TAG, "Couldn't start storing ${target.name}", it) }.getOrNull()
+            if (writer == null) { LIVE_REPORT.add("Guide \"${target.name}\": couldn't be stored"); return fallBack() }
+            var selected: Set<String>? = null
+            var listed = 0
+            // Guide channels no playlist channel used last time (another guide was the better
+            // pick): their shows are only counted, not stored, so they aren't written and deleted
+            // again at every update. If one becomes the pick, the file is read once more for it.
+            val countOnly: Set<String> =
+                if (force || before == null) emptySet()
+                else before.meta.filterValues { !it.hasRows && it.count > 0 }.keys - pinnedIds
+            val parsed = runCatching {
+                openMaybeGzip(file, showProgress).use { input ->
+                    XmltvParser.parse(
+                        input, windowStart, windowEnd,
+                        // No channel list in this guide: keep only shows for channels the matching
+                        // can use (the same id / name test) or picked by hand.
+                        keepUnlisted = { id -> wantedUnlisted(id) },
+                        // Each channel's shows go to the database as soon as they're read, with
+                        // this guide's own time shift applied as they're stored.
+                        onPrograms = { xid, list ->
+                            writer.add(xid, cleanListings(list).shiftedBy(target.shiftMs), { isPlaceholder(it) }, keepRows = xid !in countOnly)
+                        },
+                        selectChannels = { xmlChannels ->
+                            matchList(xmlChannels.values.map { it.id to it.displayNames })
+                            if (xmlChannels.isEmpty()) null
+                            else (idHits.keys + nameHits.keys + pinnedIds).also { selected = it; listed = xmlChannels.size }
+                        }
+                    )
+                }
+            }.onFailure {
+                writer.abort()
+                Log.w(TAG, "EPG parse ${target.name} failed", it)
+                if (isStorageFull(it)) {
+                    LIVE_REPORT.add("Guide \"${target.name}\": storage full while storing it (${runCatching { baseDir.usableSpace / 1048576 }.getOrDefault(-1)} MB free); kept the listings from before")
+                    LiveTvNotice.show(statusText(R.string.iptv_repository_status_guide_update_failed, target.name, statusText(R.string.iptv_repository_status_storage_full_short)))
+                    return fallBack()
+                }
+                val start = runCatching {
+                    openMaybeGzip(file).use { inp -> String(inp.readNBytesCompat(120), Charsets.UTF_8) }
+                }.getOrDefault("").replace(Regex("\\s+"), " ").trim()
+                LIVE_REPORT.add("Guide \"${target.name}\" couldn't be read (${it.message?.take(140) ?: it.javaClass.simpleName}); ${file.length() / 1024} KB starting \"$start\"")
+            }.getOrNull() ?: return fallBack()
+            parsed.error?.let { err ->
+                LIVE_REPORT.add("Guide \"${target.name}\" is broken at $err. Kept what was read before that.")
+            }
+            val entries = if (parsed.channels.isNotEmpty()) {
+                parsed.channels.values.map { EpgChannelEntry(it.id, it.displayNames, it.icon) }
+            } else {
+                // No channel list: every channel the shows mention (kept or not), for Change EPG.
+                parsed.programChannelIds.map { EpgChannelEntry(it, emptyList(), null) }
+            }
+            // Every guide channel this read looked for, with or without shows in the days kept: the
+            // next update works out the same list from the stored copy, so the file isn't read
+            // again just for a guide channel that has nothing.
+            val listedIds = entries.mapTo(HashSet()) { it.id }
+            val extraIds = if (selected == null) parsed.programChannelIds.filter { it !in listedIds } else emptyList()
+            val kept = selected ?: wantedUnlistedFrom(listedIds + extraIds)
+            // A guide file broken part-way (cut off, bad characters) is still used for what it has,
+            // but not when the listings stored from it before reach further ahead: a short broken
+            // copy then replaced a good one, leaving channels with empty guides for days.
+            if (parsed.error != null && before != null) {
+                val (newCount, newLast) = writer.progress()
+                val oldLast = before.meta.values.maxOfOrNull { if (it.hasRows) it.lastStop else 0L } ?: 0L
+                val oldCount = before.meta.values.sumOf { if (it.hasRows) it.count.toLong() else 0L }
+                if (oldLast > now && oldLast > newLast && newCount < oldCount) {
+                    writer.abort()
+                    LIVE_REPORT.add("Guide \"${target.name}\": the new copy is broken and has less in it ($newCount listings) than the one stored before ($oldCount); kept the stored one")
+                    return fallBack()
+                }
+            }
+            val meta = runCatching { writer.finish(stamp, entries.map { Triple(it.id, it.names, it.icon) }, kept, listed, extraIds) }
+                .onFailure {
+                    writer.abort(); Log.w(TAG, "Couldn't store ${target.name}", it)
+                    if (isStorageFull(it)) {
+                        LIVE_REPORT.add("Guide \"${target.name}\": storage full while saving it; kept the listings from before")
+                        LiveTvNotice.show(statusText(R.string.iptv_repository_status_guide_update_failed, target.name, statusText(R.string.iptv_repository_status_storage_full_short)))
+                    }
+                }
+                .getOrNull() ?: run { LIVE_REPORT.add("Guide \"${target.name}\": couldn't be stored"); return fallBack() }
+            LIVE_REPORT.add(
+                "Guide \"${target.name}\": read and stored in ${(System.currentTimeMillis() - readStart) / 1000} s " +
+                    "(${meta.values.sumOf { if (it.hasRows) it.count else 0 }} listings" +
+                    (if (countOnly.isEmpty()) ")" else ", ${meta.values.sumOf { if (it.hasRows) 0 else it.count }} more not needed)")
+            )
+            return done(entries, meta, reused = false)
+        }
+
+        val reads = LinkedHashMap<String, GuideRead>()
+        for ((order, target) in targets.withIndex()) {
+            val read = readGuide(order, target, force = forceRead) ?: continue
+            reads[target.fileId] = read
+            val meta = read.meta
+            val entries = read.entries
+            setStatus(loading = true, message = matchingGuideMessage(target.name, order + 1, targets.size))
+            // How far ahead this guide's listings actually go (the file's own last show), so a
+            // guide that stops early can be told apart from the app cutting it short.
+            run {
+                val lastStop = meta.values.maxOfOrNull { it.lastStop } ?: 0L
+                // A guide whose listings have all run out: the next download asks for the whole
+                // file (not "only if changed"), in case a cache keeps answering "not changed".
+                if (lastStop in 1 until System.currentTimeMillis()) {
+                    val file = epgFile(target.fileId)
+                    runCatching { File(file.parentFile, file.name + ".meta").delete() }
+                }
+                if (lastStop > 0) {
+                    val fmt = java.text.SimpleDateFormat("EEE d MMM, h:mm a", java.util.Locale.getDefault())
+                    val hours = ((lastStop - System.currentTimeMillis()) / HOUR).coerceAtLeast(0)
+                    LIVE_REPORT.add(
+                        "Guide \"${target.name}\": listings until ${fmt.format(java.util.Date(lastStop))} " +
+                            "(about $hours hours ahead; set to ${settings.epgFutureDays} days)"
+                    )
+                }
+            }
+            var count = 0
+            read.idHits.keys.forEach { id -> count += meta[id]?.count?.coerceAtLeast(0) ?: 0 }
+            read.nameHits.keys.forEach { id -> count += meta[id]?.count?.coerceAtLeast(0) ?: 0 }
+            // What this guide matched, and when it's nothing, a few ids from each side, so a
+            // "0 programs matched" can be told apart: ids that don't line up, a guide with no
+            // listings for these days, or no channels left to match.
+            run {
+                val rt = Runtime.getRuntime()
+                LIVE_REPORT.add("  memory after \"${target.name}\": ${(rt.totalMemory() - rt.freeMemory()) / 1048576} of ${rt.maxMemory() / 1048576} MB")
+            }
+            val matchedChannels = (read.idHits.values.flatten() + read.nameHits.values.flatten()).mapTo(HashSet()) { it.key }.size
+            LIVE_REPORT.add(
+                "Guide \"${target.name}\": ${entries.size} guide channels, ${meta.count { it.value.count > 0 }} with listings kept; " +
+                    "matched ${read.idHits.size} by id, ${read.nameHits.size} by name → $matchedChannels channels, $count listings"
+            )
+            // Most of the guide left unmatched: a few names from each side, so it's clear why.
+            if (count > 0 && entries.size >= 20 && read.idHits.size + read.nameHits.size < entries.size / 5) {
+                val hit = read.idHits.keys + read.nameHits.keys
+                val guideSide = entries.filter { it.id !in hit }.take(4).joinToString { e -> e.id + (e.names.firstOrNull()?.let { " ($it)" } ?: "") }
+                val ourSide = channels.filter { it.tvgId?.isNotBlank() == true }.take(4).joinToString { "${it.tvgId} (${it.name})" }
+                LIVE_REPORT.add("Guide \"${target.name}\" mostly unmatched: guide has [$guideSide], playlist has [$ourSide]")
+            }
+            if (count == 0) {
+                val guideIds = entries.take(3).joinToString { it.id }
+                val ourIds = channels.mapNotNull { it.tvgId?.takeIf { id -> id.isNotBlank() } }.take(3).joinToString()
+                val totalListings = meta.values.sumOf { it.count }
+                LIVE_REPORT.add(
+                    "Guide \"${target.name}\" matched nothing: guide ids like [$guideIds], playlist tvg-ids like [$ourIds], " +
+                        "$totalListings listings in the guide between ${settings.epgPastHours} h ago and ${settings.epgFutureDays} days ahead"
+                )
+            }
+            if (target.sourceId != null) {
+                prefs.updateEpgSources { l -> l.map { if (it.id == target.sourceId) it.copy(programCount = count) else it } }
+            }
+        }
+
+        // Every guide is looked at; each channel keeps its best candidate:
+        //   1. real listings beat placeholder listings ("Programming", "No information", …)
+        //   2. a tvg-id match beats a name match
+        //   3. then the one that goes further ahead, then the earlier guide in the list
+        // so a guide full of placeholders can't hide real listings from another guide.
+        data class Candidate(val score: Long, val sourceId: String, val xmltvId: String)
+        fun choose(): HashMap<String, Candidate> {
+            val best = HashMap<String, Candidate>()
+            for (read in reads.values) {
+                fun offer(xmlId: String, chans: Set<LiveChannel>, idMatch: Boolean) {
+                    val m = read.meta[xmlId] ?: return
+                    if (m.count <= 0) return
+                    val real = m.placeholders * 10 < m.count * 8
+                    // Higher is better; then more days ahead, then the guide's position.
+                    val score = guideRank(real, idMatch, m.lastStop, read.order)
+                    chans.forEach { c ->
+                        if (!guideFor(read.target.fileId, c.sourceId)) return@forEach // switched off for its playlist
+                        val cur = best[c.key]
+                        if (cur == null || score > cur.score) best[c.key] = Candidate(score, read.target.fileId, xmlId)
+                    }
+                }
+                read.idHits.forEach { (xmlId, chans) -> offer(xmlId, chans, idMatch = true) }
+                read.nameHits.forEach { (xmlId, chans) -> offer(xmlId, chans, idMatch = false) }
+            }
+            return best
+        }
+        var best = choose()
+        // A guide channel that's now the pick (or picked by hand) but whose listings weren't kept,
+        // because no channel used it last time: its guide file is read once more to get them.
+        run {
+            val picks = best.values.map { it.sourceId to it.xmltvId } + overrides.values.filter { !it.isNone }.map { it.sourceId to it.xmltvId }
+            val again = LinkedHashMap<String, Int>()
+            picks.forEach { (src, xid) ->
+                val m = reads[src]?.meta?.get(xid) ?: return@forEach
+                if (!m.hasRows && m.count > 0) again[src] = (again[src] ?: 0) + 1
+            }
+            if (again.isNotEmpty()) {
+                again.forEach { (src, n) ->
+                    val old = reads[src] ?: return@forEach
+                    LIVE_REPORT.add("Guide \"${old.target.name}\": read again, $n channel(s) use listings from it that weren't kept")
+                    readGuide(old.order, old.target, force = true)?.let { reads[src] = it }
+                }
+                best = choose()
+            }
+        }
+
+        val auto = HashMap<String, EpgAssignment>()
+        best.forEach { (key, c) -> auto[key] = EpgAssignment(c.sourceId, c.xmltvId) }
+        // Unassigned in Assign EPG: no guide for these channels, automatic match included.
+        val unassigned = overrides.filterValues { it.isNone }.keys
+        unassigned.forEach { key -> auto.remove(key) }
+        // Which guide channels ended up feeding a playlist channel (for "Unassigned" in Assign EPG).
+        val usedBySource = HashMap<String, MutableSet<String>>()
+        auto.values.forEach { usedBySource.getOrPut(it.sourceId) { HashSet() } += it.xmltvId }
+        overrides.values.forEach { usedBySource.getOrPut(it.sourceId) { HashSet() } += it.xmltvId }
+        _autoMatches.value = auto
+        // Assign EPG's lists: only kept in memory while a picker that shows them is open.
+        if (listsWanted) _epgSources.value = reads.values.map { read ->
+            EpgSourceChannels(
+                read.target.fileId, read.target.name, guideLabel(read.target),
+                read.entries.sortedBy { it.displayName.lowercase() }, usedBySource[read.target.fileId].orEmpty(),
+                guideUsers[read.target.fileId]
+            )
+        }
+        // Each channel's logo in the guide it's matched to (or assigned), for playlists that
+        // prefer the guide's logos, and for channels whose playlist has none.
+        val iconsBySource = reads.values.associate { read ->
+            read.target.fileId to read.entries.mapNotNull { e -> e.icon?.takeIf { it.isNotBlank() }?.let { e.id to it } }.toMap()
+        }
+        val logos = HashMap<String, String>()
+        (auto + overrides).forEach { (key, a) -> iconsBySource[a.sourceId]?.get(a.xmltvId)?.let { logos[key] = it } }
+        _epgLogos.value = logos
+        saveEpgLogos(logos)
+        epgDetailsPending = false
+        // The guide shown: each channel pointed at its guide channel (the automatic pick, or the
+        // hand-picked one), with the playlist's tvg-shift for it. Nothing is copied.
+        val tvgShifts = channels.filter { it.tvgShiftMinutes != 0 }.associate { it.key to it.tvgShiftMinutes * 60_000L }
+        if (tvgShifts.isNotEmpty()) LIVE_REPORT.add("Guide: ${tvgShifts.size} channels moved by the playlist's tvg-shift")
+        val links = HashMap<String, EpgDatabase.GuideLink>(auto.size + overrides.size)
+        auto.forEach { (key, a) -> links[key] = EpgDatabase.GuideLink(a.sourceId, a.xmltvId, tvgShifts[key] ?: 0L) }
+        overrides.forEach { (key, a) -> if (!a.isNone) links[key] = EpgDatabase.GuideLink(a.sourceId, a.xmltvId, tvgShifts[key] ?: 0L) }
+        val storeStart = System.currentTimeMillis()
+        val stored = runCatching {
+            val fp = guideFingerprint(settings, targets)
+            guideDb.applyGuide(fp, links, auto, guideParts(settings, targets, fp), targets.map { it.fileId })
+        }.onFailure { Log.w(TAG, "Couldn't store the guide", it) }.isSuccess
+        val reusedCount = reads.values.count { it.reused }
+        LIVE_REPORT.add(
+            "Guide: ${links.size} channels pointed at their guide in ${System.currentTimeMillis() - storeStart} ms" +
+                " ($reusedCount of ${reads.size} guide files used as stored, ${reads.size - reusedCount} read)"
+        )
+        if (stored) {
+            // The hours around now, in memory (short form: details come from the database).
+            val (winFrom, winTo) = defaultWindow()
+            val window = runCatching { guideDb.range(winFrom, winTo, light = true) }
+                .onFailure { Log.w(TAG, "Couldn't read the guide back", it) }.getOrDefault(emptyMap())
+            rangeMutex.withLock {
+                // A stored guide still being put on screen from before this update is dropped.
+                guideShowing.incrementAndGet()
+                _programs.value = window
+                loadedFrom = winFrom
+                loadedTo = winTo
+            }
+            lightPrograms = true
+            fullRangeChannels.clear(); _guideGeneration.value++
+            guideInDb = true
+            saveSkipped(skipped)
+            if (skipped.isNotEmpty()) LIVE_REPORT.add("Guide: ${skipped.size} hidden channels left out")
+            scheduleCompact()
+        } else {
+            // Not stored: what was on screen before stays until the next update.
+            LIVE_REPORT.add("Guide couldn't be stored: the guide stays as it was until the next update")
+        }
+    }
+
+    /**
+     * How good a guide's listings for a channel are, higher is better: real listings over
+     * placeholders, then a tvg-id match over a name match, then the one that goes further ahead
+     * (in half-days, so a few hours either way don't count), and only then the guide higher in
+     * the list. Before, the guide higher in the list won even with a day of listings against
+     * another guide's week, so the same provider showed "until Saturday" on one TV and "until
+     * Monday" on another depending on the order of their guides.
+     */
+    private fun guideRank(real: Boolean, idMatch: Boolean, listings: List<EpgProgram>, order: Int): Long =
+        guideRank(real, idMatch, listings.maxOfOrNull { it.stopMs } ?: 0L, order)
+
+    private fun guideRank(real: Boolean, idMatch: Boolean, lastStop: Long, order: Int): Long {
+        val halfDaysAhead = ((lastStop - System.currentTimeMillis()).coerceAtLeast(0L) / (12 * HOUR)).coerceAtMost(999L)
+        return (if (real) 4_000_000L else 0L) + (if (idMatch) 2_000_000L else 0L) + halfDaysAhead * 1_000L - order
+    }
+
+    /**
+     * Some guides add a long placeholder ("Programming", "No information") that overlaps the real
+     * listings for the same time. Keep the real ones wherever they overlap.
+     */
+    private fun cleanListings(list: List<EpgProgram>): List<EpgProgram> {
+        if (list.size < 2) return list
+        val real = list.filter { !isPlaceholder(it.title) }
+        val kept = if (real.isEmpty() || real.size == list.size) list else {
+            // The real shows' time spans, merged into separate stretches, so each placeholder is
+            // checked against them with a quick search (every placeholder against every real show
+            // took minutes on big guides).
+            val spans = ArrayList<LongArray>()
+            for (r in real.sortedBy { it.startMs }) {
+                val last = spans.lastOrNull()
+                if (last != null && r.startMs <= last[1]) { if (r.stopMs > last[1]) last[1] = r.stopMs }
+                else spans += longArrayOf(r.startMs, r.stopMs)
+            }
+            fun overlapsReal(p: EpgProgram): Boolean {
+                var lo = 0; var hi = spans.size - 1; var idx = -1
+                while (lo <= hi) {
+                    val mid = (lo + hi) ushr 1
+                    if (spans[mid][0] < p.stopMs) { idx = mid; lo = mid + 1 } else hi = mid - 1
+                }
+                return idx >= 0 && spans[idx][1] > p.startMs
+            }
+            list.filter { p -> !isPlaceholder(p.title) || !overlapsReal(p) }
+        }
+        return resolveOverlaps(kept)
+    }
+
+    /**
+     * Makes sure only one program covers any moment. When a long entry (often a "Programming"
+     * filler) runs across later shows, it's cut off where the next show starts. Otherwise the
+     * filler, having started earlier, is what counts as "on now" even while a real show is airing.
+     */
+    private fun resolveOverlaps(list: List<EpgProgram>): List<EpgProgram> {
+        val sorted = list.sortedWith(compareBy<EpgProgram>({ it.startMs }, { isPlaceholder(it.title) }, { it.stopMs - it.startMs }))
+        val out = ArrayList<EpgProgram>(sorted.size)
+        for (p in sorted) {
+            val last = out.lastOrNull()
+            if (last != null && last.stopMs > p.startMs) {
+                if (last.startMs == p.startMs) continue // same start: keep the one sorted first
+                out[out.lastIndex] = last.copy(stopMs = p.startMs)
+            }
+            if (p.stopMs > p.startMs) out += p
+        }
+        return out
+    }
+
+    /** True when (almost) everything in a channel's listings is a placeholder. */
+    private fun isPlaceholderListing(list: List<EpgProgram>): Boolean {
+        val placeholders = list.count { isPlaceholder(it.title) }
+        return placeholders * 10 >= list.size * 8
+    }
+
+    // Guides repeat the same few titles a million times: each is checked once.
+    private val placeholderCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    private fun isPlaceholder(title: String): Boolean {
+        if (placeholderCache.size > 50_000) placeholderCache.clear()
+        return placeholderCache.getOrPut(title) { PLACEHOLDER_TITLES.matches(title.trim().lowercase()) }
+    }
+
+    /**
+     * Assign EPG changes applied straight to the stored guide instead of reading every guide
+     * file again (which took as long as a full guide update, just to change one channel):
+     *  - Unassign: the channel's listings are simply dropped. Nothing is read.
+     *  - A guide channel picked by hand: only that one guide file is read, for just that channel.
+     *  - Back to automatic: the guides' channel lists (already in memory, the ones Assign EPG
+     *    shows) say which guide channels could match; only the guides that have one are read,
+     *    for just those channels, and the best is picked the same way a full update picks.
+     * Only if those lists aren't loaded yet does it fall back to reading every guide.
+     * [changes]: channel key -> its new assignment (null = back to automatic).
+     */
+    fun applyEpgChanges(changes: Map<String, EpgAssignment?>) {
+        if (changes.isEmpty()) return
+        scope.launch {
+            mutex.withLock {
+                val quick = runCatching { applyEpgChangesQuick(changes) }
+                    .onFailure { Log.w(TAG, "Quick EPG change failed; full re-match", it) }
+                    .getOrDefault(false)
+                if (!quick) {
+                    LIVE_REPORT.add("Assign EPG: guide channel lists not ready, so every guide was read")
+                    setStatus(loading = true, message = statusText(R.string.iptv_repository_status_updating_guide))
+                    buildPrograms(prefs.currentSettings(), collectEpgTargets())
+                }
+                _status.value = LiveTvStatus(loading = false, loadedOnce = true)
+            }
+        }
+    }
+
+    private suspend fun applyEpgChangesQuick(changes: Map<String, EpgAssignment?>): Boolean = withContext(Dispatchers.IO) {
+        val settings = prefs.currentSettings()
+        val targets = collectEpgTargets()
+        val now = System.currentTimeMillis()
+        val windowStart = now - settings.epgPastHours.coerceAtLeast(1) * HOUR
+        val windowEnd = now + settings.epgFutureDays.coerceAtLeast(1) * 24 * HOUR
+        val assigned = changes.filterValues { it != null && !it.isNone }.mapValues { it.value!! }
+
+        // Back to automatic: possible matches, from the guides' channel lists.
+        data class Cand(val order: Int, val sourceId: String, val xmltvId: String, val idMatch: Boolean)
+        val autoBack = changes.filterValues { it == null }.keys
+        val cands = HashMap<String, MutableList<Cand>>()
+        if (autoBack.isNotEmpty()) {
+            val lists = sourceListsFromDb(targets)
+            if (lists.isEmpty()) return@withContext false
+            val chans = _channels.value.filter { it.key in autoBack }
+            targets.forEachIndexed { order, t ->
+                val list = lists.firstOrNull { it.sourceId == t.fileId } ?: return@forEachIndexed
+                chans.forEach { c ->
+                    if (!guideFor(t.fileId, c.sourceId)) return@forEach // switched off for its playlist
+                    val tvg = c.tvgId?.lowercase()?.takeIf { it.isNotBlank() }
+                    val names = listOfNotNull(c.tvgName, c.name).map { normalize(it) }.filter { it.isNotEmpty() }.toSet()
+                    list.channels.forEach { e ->
+                        val idMatch = tvg != null && e.id.lowercase() == tvg
+                        val nameMatch = !idMatch && names.isNotEmpty() && (e.names + e.id).any { normalize(it) in names }
+                        if (idMatch || nameMatch) cands.getOrPut(c.key) { ArrayList() } += Cand(order, t.fileId, e.id, idMatch)
+                    }
+                }
+            }
+        }
+
+        // Each guide file read once, for just the channels needed from it.
+        val wantedBySource = HashMap<String, MutableSet<String>>()
+        assigned.values.forEach { wantedBySource.getOrPut(it.sourceId) { HashSet() } += it.xmltvId }
+        cands.values.flatten().forEach { wantedBySource.getOrPut(it.sourceId) { HashSet() } += it.xmltvId }
+        val programsBySource = HashMap<String, Map<String, List<EpgProgram>>>()
+        val iconsBySource = HashMap<String, Map<String, String>>()
+        for ((sourceId, wanted) in wantedBySource) {
+            val target = targets.firstOrNull { it.fileId == sourceId } ?: continue
+            val file = epgFile(target.fileId)
+            if (!file.exists()) continue
+            setStatus(loading = true, message = readingGuideMessage(target.name))
+            val parsed = openMaybeGzip(file).use { input ->
+                XmltvParser.parse(input, windowStart, windowEnd) { wanted }
+            }
+            programsBySource[sourceId] = if (target.shiftMs == 0L) parsed.programs
+                else parsed.programs.mapValues { (_, l) -> l.shiftedBy(target.shiftMs) }
+            iconsBySource[sourceId] = parsed.channels.mapNotNull { (id, ch) -> ch.icon?.takeIf { it.isNotBlank() }?.let { id to it } }.toMap()
+        }
+
+        val newPrograms = HashMap<String, List<EpgProgram>>()
+        val newIcons = HashMap<String, String>()
+        // For the stored guide: which guide channel each changed channel points at now, and those
+        // guide channels' shows (in the guide's own times), in case they aren't stored yet.
+        val newLinks = HashMap<String, EpgDatabase.GuideLink>()
+        val newListings = HashMap<String, List<EpgProgram>>()
+        val tvgShiftOf = _channels.value.filter { it.key in changes.keys && it.tvgShiftMinutes != 0 }
+            .associate { it.key to it.tvgShiftMinutes * 60_000L }
+        assigned.forEach { (key, a) ->
+            val listings = cleanListings(programsBySource[a.sourceId]?.get(a.xmltvId).orEmpty())
+            newPrograms[key] = listings.shiftedBy(tvgShiftOf[key] ?: 0L)
+            newLinks[key] = EpgDatabase.GuideLink(a.sourceId, a.xmltvId, tvgShiftOf[key] ?: 0L)
+            newListings[a.sourceId + "\u0000" + a.xmltvId] = listings
+            iconsBySource[a.sourceId]?.get(a.xmltvId)?.let { newIcons[key] = it }
+        }
+        // Automatic: the same choice a full update makes (real listings first, then a tvg-id
+        // match over a name match, then the guide higher in the list).
+        val newAuto = HashMap<String, EpgAssignment>()
+        cands.forEach { (key, list) ->
+            var bestScore = Long.MIN_VALUE
+            var best: Pair<Cand, List<EpgProgram>>? = null
+            list.forEach { c ->
+                val listings = cleanListings(programsBySource[c.sourceId]?.get(c.xmltvId).orEmpty())
+                if (listings.isEmpty()) return@forEach
+                val score = guideRank(!isPlaceholderListing(listings), c.idMatch, listings, c.order)
+                if (score > bestScore) { bestScore = score; best = c to listings }
+            }
+            best?.let { (c, listings) ->
+                newPrograms[key] = listings.shiftedBy(tvgShiftOf[key] ?: 0L)
+                newLinks[key] = EpgDatabase.GuideLink(c.sourceId, c.xmltvId, tvgShiftOf[key] ?: 0L)
+                newListings[c.sourceId + "\u0000" + c.xmltvId] = listings
+                newAuto[key] = EpgAssignment(c.sourceId, c.xmltvId)
+                iconsBySource[c.sourceId]?.get(c.xmltvId)?.let { newIcons[key] = it }
+            }
+        }
+
+        val changed = changes.keys
+        // Stored guide first (when the guide is kept in the database), then what's on screen.
+        if (guideInDb) {
+            val fp = guideFingerprint(settings, targets)
+            guideDb.setChannels(fp, changed, newLinks, newListings, { isPlaceholder(it) }, newAuto, guideParts(settings, targets, fp))
+        }
+        _programs.value = HashMap(_programs.value).apply {
+            changed.forEach { remove(it) }
+            newPrograms.forEach { (k, l) ->
+                val shown = if (guideInDb) l.filter { it.stopMs > loadedFrom && it.startMs < loadedTo } else l
+                if (shown.isNotEmpty()) put(k, shown)
+            }
+        }
+        _autoMatches.value = (_autoMatches.value - changed) + newAuto
+        fullRangeChannels.removeAll(changed)
+        val logos = HashMap(_epgLogos.value).apply { changed.forEach { remove(it) }; putAll(newIcons) }
+        _epgLogos.value = logos
+        saveEpgLogos(logos)
+        // Keep the "already used" marks in Assign EPG up to date.
+        val used = (assigned.values + newAuto.values).groupBy({ it.sourceId }, { it.xmltvId })
+        if (used.isNotEmpty()) {
+            _epgSources.value = _epgSources.value.map { s ->
+                used[s.sourceId]?.let { ids -> s.copy(usedIds = s.usedIds + ids) } ?: s
+            }
+        }
+        LIVE_REPORT.add(
+            "Assign EPG: ${changed.size} channel(s) updated, " +
+                (if (programsBySource.isEmpty()) "no guide read" else "read ${programsBySource.size} of ${targets.size} guide(s)")
+        )
+        true
+    }
+
+    fun rematchEpg() {
+        scope.launch {
+            mutex.withLock {
+                setStatus(loading = true, message = statusText(R.string.iptv_repository_status_updating_guide))
+                buildPrograms(prefs.currentSettings(), collectEpgTargets())
+                _status.value = LiveTvStatus(loading = false, loadedOnce = true)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- IO helpers
+
+    private fun playlistFile(id: String) = File(playlistDir, "$id.m3u")
+    /** An Xtream login's group names in the provider's order (see [PlaylistGroupOrder]). */
+    private fun groupOrderFile(id: String) = File(playlistDir, "$id.groups")
+
+    /** The providers' own group order, for the guide's group list. */
+    private suspend fun loadGroupOrder() {
+        PlaylistGroupOrder.ranks = runCatching {
+            val playlists = prefs.currentPlaylists().filter { it.liveEnabled }
+            val multi = playlists.size > 1
+            val ranks = HashMap<String, Int>()
+            for (pl in playlists) {
+                val f = groupOrderFile(pl.id)
+                if (!f.exists()) continue
+                f.readLines().filter { it.isNotBlank() }.forEachIndexed { i, name ->
+                    ranks.putIfAbsent(if (multi) "${pl.id}::$name" else name, i)
+                }
+            }
+            ranks
+        }.getOrDefault(emptyMap())
+    }
+    private fun epgFile(id: String) = File(epgDir, "$id.xml")
+
+    /**
+     * Downloads [url] to [target]. Returns false when nothing changed: the server said "not
+     * modified" (we send the ETag / Last-Modified from last time), or the new file is identical.
+     * Unchanged files skip the re-reading and re-matching that follows a download.
+     */
+    private suspend fun download(
+        url: String,
+        target: File,
+        userAgent: String,
+        progressLabel: ((Context) -> String)? = null,
+        /** Ask for the whole file, not "only if changed" (Update now: a cache that wrongly
+         *  answers "not changed" otherwise keeps an old guide forever). */
+        full: Boolean = false,
+        /** Name for the Start-Up Report line saying what came back (guides only). */
+        reportAs: String? = null,
+        /** M3U links: refuse (with [NotAPlaylistException]) a reply that is clearly not a
+         *  channel list, like a video or web page, or a "forbidden" answer, without saving it. */
+        checkPlaylist: Boolean = false
+    ): Boolean = withContext(Dispatchers.IO) {
+        require(url.isNotBlank()) { "No URL set" }
+        target.parentFile?.mkdirs()
+        val meta = File(target.parentFile, target.name + ".meta")
+        val (etag, lastModified) = if (!full && target.exists() && meta.exists()) {
+            meta.readLines().let { it.getOrNull(0).orEmpty() to it.getOrNull(1).orEmpty() }
+        } else "" to ""
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", userAgent.ifBlank { DEFAULT_UA })
+            .apply {
+                if (etag.isNotBlank()) header("If-None-Match", etag)
+                if (lastModified.isNotBlank()) header("If-Modified-Since", lastModified)
+            }
+            .build()
+        http.newCall(request).execute().use { response ->
+            if (response.code == 304 && target.exists()) {
+                target.setLastModified(System.currentTimeMillis()) // checked again after the usual interval
+                reportAs?.let { LIVE_REPORT.add("Guide \"$it\": server said not changed since last time; kept the copy we have") }
+                return@withContext false
+            }
+            if (checkPlaylist && (response.code == 403 || response.code == 406)) {
+                throw NotAPlaylistException("an error (${httpError(response.code)})")
+            }
+            if (!response.isSuccessful) throw HttpStatusException(response.code, httpError(response.code))
+            val body = response.body ?: error("Empty response")
+            val tmp = File(target.parentFile, target.name + ".tmp")
+            // With a label: how much has come in so far, so a big download doesn't look frozen.
+            val total = body.contentLength().takeIf { it > 0 }
+            // A download cut off part-way (connection lost, storage full) must not leave its
+            // half-written file behind: guides are often 50–200 MB. The copy from before stays.
+            try {
+                body.byteStream().use { raw ->
+                    // Saved zipped: guide files (XMLTV) and big playlists shrink to about a tenth,
+                    // and plain guides of several hundred MB made the app take up close to 1 GB.
+                    // Ones that already arrive zipped (.xml.gz) are kept as they are.
+                    val input = BufferedInputStream(raw, 64 * 1024)
+                    if (checkPlaylist) notAPlaylist(input)?.let { throw NotAPlaylistException(it) }
+                    input.mark(2)
+                    val alreadyZipped = input.read() == 0x1f && input.read() == 0x8b
+                    input.reset()
+                    val fileOut = tmp.outputStream()
+                    (if (alreadyZipped) fileOut else fastGzip(fileOut)).use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        var read = 0L
+                        var shownAt = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            read += n
+                            if (progressLabel != null) {
+                                val now = System.currentTimeMillis()
+                                if (now - shownAt > 750) {
+                                    shownAt = now
+                                    setStatus(loading = true, message = downloadProgressMessage(progressLabel, read, total))
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                tmp.delete()
+                throw e
+            }
+            if (tmp.length() == 0L) {
+                tmp.delete()
+                error("Empty response")
+            }
+            runCatching {
+                meta.writeText(response.header("ETag").orEmpty() + "\n" + response.header("Last-Modified").orEmpty())
+            }
+            val same = target.exists() && (
+                if (isGzip(target) == isGzip(tmp)) target.length() == tmp.length() && sameContent(target, tmp)
+                else sameDecoded(target, tmp)
+            )
+            val serverDate = response.header("Last-Modified")?.let { " (server's date: $it)" }.orEmpty()
+            if (same) {
+                tmp.delete()
+                target.setLastModified(System.currentTimeMillis())
+                reportAs?.let { LIVE_REPORT.add("Guide \"$it\": downloaded ${sizeLabel(target.length())} zipped, same as the copy we had$serverDate") }
+                return@withContext false
+            }
+            reportAs?.let { LIVE_REPORT.add("Guide \"$it\": downloaded, new copy ${sizeLabel(tmp.length())} zipped$serverDate") }
+            if (!tmp.renameTo(target)) {
+                tmp.copyTo(target, overwrite = true)
+                tmp.delete()
+            }
+            markChanged(target)
+            true
+        }
+    }
+
+    /** An M3U link answered with something other than channels; [what] says what came back. */
+    private class NotAPlaylistException(val what: String) : Exception(what)
+
+    /** The server answered with an error code (same message as before, the code kept for retries). */
+    private class HttpStatusException(val code: Int, message: String) : IllegalStateException(message)
+
+    /**
+     * Downloads a guide. With no user agent typed in for it (or its playlist): if the server
+     * turns the app's default (browser-style) user agent away, as some guide providers do to keep
+     * out web scrapers (often with a 404), it's asked again as a media player (VLC), like other
+     * IPTV apps. The one that worked is remembered for that guide on this TV.
+     */
+    private suspend fun downloadGuide(target: EpgTarget, file: File, full: Boolean): Boolean {
+        val label: (Context) -> String = { localized -> localized.getString(R.string.iptv_repository_status_downloading_guide_label, target.name) }
+        if (!target.autoAgent) return download(target.url, file, target.userAgent, progressLabel = label, full = full, reportAs = target.name)
+        val first = target.userAgent.ifBlank { DEFAULT_UA }
+        val second = if (first == PLAYER_UA) DEFAULT_UA else PLAYER_UA
+        fun nameOf(ua: String) = if (ua == PLAYER_UA) "a media-player user agent (VLC)" else "the app's default user agent"
+        val refused = try {
+            return download(target.url, file, first, progressLabel = label, full = full, reportAs = target.name)
+        } catch (e: HttpStatusException) {
+            if (e.code !in GUIDE_AGENT_RETRY_CODES) throw e
+            e
+        }
+        LIVE_REPORT.add("Guide \"${target.name}\": ${nameOf(first)} got HTTP ${refused.code}; trying ${nameOf(second)}")
+        val changed = try {
+            download(target.url, file, second, progressLabel = label, full = true, reportAs = target.name)
+        } catch (e: HttpStatusException) {
+            throw HttpStatusException(e.code, httpError(e.code) + ". If this guide's provider asks for a specific user agent, enter it in the guide's settings.")
+        }
+        LIVE_REPORT.add("Guide \"${target.name}\": loaded with ${nameOf(second)}" + if (target.sourceId != null) "; using it for this guide from now on" else "")
+        target.sourceId?.let { id ->
+            val remember = if (second == DEFAULT_UA) "" else second
+            prefs.updateEpgSources { list -> list.map { if (it.id == id) it.copy(fallbackUserAgent = remember) else it } }
+        }
+        return changed
+    }
+
+    /**
+     * Downloads an M3U link. With no user agent set for it: if the link answers the app's
+     * default (browser-style) user agent with a video, web page or "forbidden" instead of
+     * channels, it's asked again as a media player (VLC), like other IPTV apps. The one that
+     * worked is remembered for this playlist (and used for its channels and guide), and
+     * checked again the same way whenever it stops working.
+     */
+    private suspend fun downloadM3u(
+        pl: PlaylistSource,
+        file: File,
+        /** Update now / a newly added or edited playlist: ask for the whole file, not "only if
+         *  changed". A server or cache that wrongly answers "not changed" otherwise keeps an old
+         *  copy of the playlist (groups removed at the provider stay) however often it's updated. */
+        full: Boolean = false
+    ): Boolean {
+        val label: (Context) -> String = { localized -> localized.getString(R.string.iptv_repository_status_downloading_playlist_label, pl.name) }
+        val url = pl.resolvedUrl()
+        if (pl.userAgent.isNotBlank()) return download(url, file, pl.userAgent, progressLabel = label, full = full)
+        val first = pl.fallbackUserAgent.ifBlank { DEFAULT_UA }
+        val second = if (first == DEFAULT_UA) PLAYER_UA else DEFAULT_UA
+        fun nameOf(ua: String) = if (ua == DEFAULT_UA) "the app's default user agent" else "a media-player user agent (VLC)"
+        val firstProblem = try {
+            return download(url, file, first, progressLabel = label, full = full, checkPlaylist = true)
+        } catch (e: NotAPlaylistException) {
+            e.what
+        }
+        LIVE_REPORT.add("Playlist \"${pl.name}\": ${nameOf(first)} got $firstProblem, not channels; trying ${nameOf(second)}")
+        val changed = try {
+            download(url, file, second, progressLabel = label, full = true, checkPlaylist = true)
+        } catch (e: NotAPlaylistException) {
+            error("The link sent $firstProblem instead of a channel list. If the provider asks for a specific user agent, enter it in this playlist's settings.")
+        }
+        val remember = if (second == DEFAULT_UA) "" else second
+        prefs.updatePlaylists { list -> list.map { if (it.id == pl.id) it.copy(fallbackUserAgent = remember) else it } }
+        LIVE_REPORT.add("Playlist \"${pl.name}\": loaded with ${nameOf(second)}; using it for this playlist from now on")
+        // Its channels' user agent changed too, so they're rebuilt even if the list is the same.
+        return changed || remember != pl.fallbackUserAgent
+    }
+
+    /**
+     * Looks at the start of a download (left unread) and says what it is when it's clearly not
+     * an M3U: a video or other binary file, or a web page. Anything else, including lists
+     * without the usual header, is let through as before.
+     */
+    private fun notAPlaylist(input: BufferedInputStream): String? {
+        val peekSize = 16 * 1024
+        input.mark(peekSize + 1)
+        val raw = ByteArray(peekSize)
+        var n = 0
+        while (n < peekSize) {
+            val r = input.read(raw, n, peekSize - n)
+            if (r < 0) break
+            n += r
+        }
+        input.reset()
+        if (n == 0) return null // empty: reported as an empty response as before
+        var bytes = raw.copyOf(n)
+        if (n >= 2 && (bytes[0].toInt() and 0xff) == 0x1f && (bytes[1].toInt() and 0xff) == 0x8b) {
+            // Zipped: look at what's inside (as much as unzips from the part we have).
+            val out = java.io.ByteArrayOutputStream()
+            runCatching {
+                java.util.zip.GZIPInputStream(java.io.ByteArrayInputStream(bytes)).use { z ->
+                    val buf = ByteArray(4096)
+                    while (out.size() < peekSize) {
+                        val r = z.read(buf)
+                        if (r < 0) break
+                        out.write(buf, 0, r)
+                    }
+                }
+            }
+            bytes = out.toByteArray()
+            if (bytes.isEmpty()) return null
+        }
+        val text = String(bytes, Charsets.UTF_8)
+        if (text.contains("#EXTM3U", ignoreCase = true) || text.contains("#EXTINF", ignoreCase = true)) return null
+        val binary = bytes.take(1024).any { val c = it.toInt() and 0xff; c == 0 || c < 0x09 }
+        if (binary) return "a video or other file"
+        if (text.trimStart('\uFEFF', ' ', '\t', '\r', '\n').startsWith("<")) return "a web page"
+        return null
+    }
+
+    /**
+     * When a downloaded file last really changed. The saved channel list and guide are checked
+     * against this, not the file's date: the date is also bumped every time an update finds
+     * nothing new, which used to make every restart re-read all playlists and guides.
+     */
+    private fun stampFile(f: File) = File(f.parentFile, f.name + ".stamp")
+
+    private fun contentStamp(f: File): String =
+        runCatching { stampFile(f).readText().trim() }.getOrNull()?.takeIf { it.isNotEmpty() }
+            ?: "${f.length()}"
+
+    private fun markChanged(f: File) {
+        runCatching { stampFile(f).writeText(System.currentTimeMillis().toString()) }
+    }
+
+    private fun isGzip(f: File): Boolean = runCatching {
+        f.inputStream().use { val a = it.read(); val b = it.read(); a == 0x1f && b == 0x8b }
+    }.getOrDefault(false)
+
+    /**
+     * Same content once unzipped. A saved copy is zipped to save space after each update, so a
+     * fresh plain download never matched it byte for byte: a playlist that hadn't changed at all
+     * was reported as "new content" at every start, redoing every guide and the Sports search.
+     */
+    private fun sameDecoded(a: File, b: File): Boolean = runCatching {
+        fun digest(f: File): ByteArray {
+            val md = java.security.MessageDigest.getInstance("MD5")
+            openMaybeGzip(f).use { input ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    md.update(buf, 0, n)
+                }
+            }
+            return md.digest()
+        }
+        digest(a).contentEquals(digest(b))
+    }.getOrDefault(false)
+
+    private fun sameContent(a: File, b: File): Boolean = runCatching {
+        fun digest(f: File): ByteArray {
+            val md = java.security.MessageDigest.getInstance("MD5")
+            f.inputStream().use { input ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    md.update(buf, 0, n)
+                }
+            }
+            return md.digest()
+        }
+        digest(a).contentEquals(digest(b))
+    }.getOrDefault(false)
+
+    // ---------------------------------------------------------------- Xtream Codes API
+
+    /**
+     * Loads an Xtream login through the Xtream API (player_api.php), the way TiviMate does:
+     * account check, categories, then live streams, written out as an M3U file so the rest of
+     * Live TV treats it like any playlist. Much lighter for the provider than the one-shot
+     * get.php playlist, which many panels time out on (HTTP 502) or switch off. Falls back to
+     * get.php if the API isn't available.
+     */
+    private suspend fun ensureCurrentStalker(source: PlaylistSource) {
+        stalker.assertCurrent(source)
+    }
+
+    private fun decodeStalkerEntry(value: String): com.nuvio.stalker.StalkerStreamRef? {
+        if (!value.startsWith("stalker-ref:")) return null
+        return runCatching { com.nuvio.stalker.StalkerStreamRef.decode(String(android.util.Base64.decode(
+            value.removePrefix("stalker-ref:"), android.util.Base64.NO_WRAP), Charsets.UTF_8)) }.getOrNull()
+    }
+
+    /** A complete catalogue is obtained before replacing the last usable private cache. */
+    private suspend fun downloadStalker(pl: PlaylistSource, file: File) {
+        val client = stalker.client(pl)
+        val groups = client.liveGroups().associate { it.id to it.name }
+        val channels = client.liveChannels()
+        val identity = com.nuvio.tv.livetv.stalker.StalkerGateway.identity(pl)
+        file.parentFile?.mkdirs()
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        fun attr(value: String) = value.replace('"', '\'').replace('\n', ' ').replace('\r', ' ')
+        try {
+            java.util.zip.GZIPOutputStream(tmp.outputStream()).bufferedWriter().use { out ->
+                out.appendLine("#EXTM3U")
+                out.appendLine("#NUVIO-STALKER-CONFIG:" + identity)
+                for (c in channels) {
+                    val group = groups[c.groupId] ?: "Uncategorized"
+                    val encodedGroup = "stalker-group:" + android.util.Base64.encodeToString(group.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+                    val encoded = android.util.Base64.encodeToString(c.stream.copy(sourceIdentity = identity).encode().toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+                    out.append("#EXTINF:-1 tvg-id=\"").append(attr(c.id)).append("\" tvg-name=\"").append(attr(c.name))
+                        .append("\" tvg-logo=\"").append(attr(c.logo.orEmpty())).append("\" group-title=\"")
+                        .append(encodedGroup).append('"')
+                    c.number?.toIntOrNull()?.takeIf { it > 0 }?.let { out.append(" tvg-chno=\"").append(it.toString()).append('"') }
+                    if (c.archiveEnabled) out.append(" catchup=\"stalker\" catchup-days=\"").append(c.archiveDays.coerceAtLeast(1).toString()).append('"')
+                    out.append(',').append(c.name.replace('\n', ' ').replace('\r', ' ')).append('\n').append("stalker-ref:").append(encoded).append('\n')
+                }
+            }
+            prefs.withCurrentPlaylist(pl) {
+                if (!tmp.renameTo(file)) throw java.io.IOException("Could not save the Stalker channel cache.")
+                groupOrderFile(pl.id).writeText(groups.values.joinToString("\n") { it.replace('\n', ' ').replace('\r', ' ') })
+            }
+        } finally { tmp.delete() }
+    }
+
+    /** Feed portal guide data through the same storage, assignment and time-shift pipeline as XMLTV. */
+    private suspend fun downloadStalkerGuide(pl: PlaylistSource, file: File, settings: LiveTvSettings): Boolean {
+        val hours = maxOf(168, settings.epgFutureDays.coerceAtLeast(1) * 24 + settings.epgPastHours.coerceAtLeast(1))
+        val client = stalker.client(pl)
+        val identity = com.nuvio.tv.livetv.stalker.StalkerGateway.identity(pl)
+        val channels = _channels.value.filter { it.sourceId == pl.id && it.stalkerRef != null }
+        // A portal added as the first source: no guide has made the folder yet.
+        file.parentFile?.mkdirs()
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        val time = java.text.SimpleDateFormat("yyyyMMddHHmmss Z", java.util.Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+        val stampDate = java.util.Date(0L)
+        fun timestamp(ms: Long): String { stampDate.time = ms; return time.format(stampDate) }
+        try {
+            java.util.zip.GZIPOutputStream(tmp.outputStream()).use { output ->
+                val xml = android.util.Xml.newSerializer().apply { setOutput(output, "UTF-8") }
+                fun text(tag: String, value: String?) { if (!value.isNullOrBlank()) { xml.startTag(null, tag); xml.text(value); xml.endTag(null, tag) } }
+                xml.startDocument("UTF-8", true); xml.startTag(null, "tv")
+                for (channel in channels) {
+                    xml.startTag(null, "channel"); xml.attribute(null, "id", channel.stalkerRef!!.providerId)
+                    text("display-name", channel.name); xml.endTag(null, "channel")
+                }
+                client.forEachProgramme(hours) { p ->
+                    xml.startTag(null, "programme"); xml.attribute(null, "channel", p.channelId)
+                    xml.attribute(null, "start", timestamp(p.startMillis))
+                    xml.attribute(null, "stop", timestamp(p.stopMillis))
+                    p.archiveProgramId?.let { programmeId ->
+                        xml.attribute(null, "stalker-id", programmeId)
+                        xml.attribute(null, "stalker-source", identity)
+                    }
+                    text("title", p.title); text("desc", p.description); text("category", p.category)
+                    xml.endTag(null, "programme")
+                }
+                xml.endTag(null, "tv"); xml.endDocument(); xml.flush()
+            }
+            ensureCurrentStalker(pl)
+            val unchanged = file.exists() && sameDecoded(file, tmp)
+            return prefs.withCurrentPlaylist(pl) {
+                if (unchanged) { file.setLastModified(System.currentTimeMillis()); false }
+                else {
+                    if (!tmp.renameTo(file)) throw java.io.IOException("Could not save the Stalker guide cache.")
+                    markChanged(file)
+                    true
+                }
+            }
+        } finally { tmp.delete() }
+    }
+
+    private suspend fun downloadXtream(pl: PlaylistSource, target: File) = withContext(Dispatchers.IO) {
+        require(pl.xtreamBase().isNotBlank()) { "No server set" }
+        require(pl.xtreamUsername.isNotBlank() && pl.xtreamPassword.isNotBlank()) { "Username and password are required" }
+        val api = pl.xtreamApiUrl()
+        val apiResult = runCatching {
+            // 1. Account
+            val info = JSONObject(getText(api, pl.userAgent))
+            // Which stream formats this account may use (some panels turn off .ts and only
+            // allow .m3u8; asking for .ts then fails on every channel with "bad http status").
+            allowedFormats = info.optJSONObject("user_info")?.optJSONArray("allowed_output_formats")?.let { arr ->
+                (0 until arr.length()).map { arr.optString(it).lowercase() }.toSet()
+            } ?: emptySet()
+            // Catch-up links are in the server's local time. When the server's time zone differs
+            // from the TV's (say the server runs on UTC and the TV is in London in summer),
+            // every replay started an hour off. Remember the server's zone for catch-up.
+            // A server that names no time zone: worked out from its clock instead.
+            ZoneFinder.fromServerInfo(info.optJSONObject("server_info"))?.let { (tz, _) ->
+                if (tz != pl.serverTimezone) {
+                    prefs.updatePlaylists { list -> list.map { if (it.id == pl.id) it.copy(serverTimezone = tz) else it } }
+                }
+                zoneCheckedAt[pl.id] = System.currentTimeMillis()
+            }
+            info.optJSONObject("user_info")?.let { ui ->
+                accountOf(ui)?.let { saveAccount(pl, it) }
+                if (ui.optString("auth") == "0") throw XtreamLoginError("Login failed: check the username and password")
+                val status = ui.optString("status")
+                if (status.isNotBlank() && !status.equals("Active", ignoreCase = true)) {
+                    throw XtreamLoginError("Account $status")
+                }
+                ui.optString("exp_date").toLongOrNull()?.let { exp ->
+                    if (exp > 0 && exp * 1000 < System.currentTimeMillis()) {
+                        val date = java.text.DateFormat.getDateInstance().format(java.util.Date(exp * 1000))
+                        throw XtreamLoginError("Account expired on $date")
+                    }
+                }
+            } ?: if (info.has("user_info")) Unit else error("Not an Xtream API response")
+
+            // 2. Categories (in the provider's order, kept for the guide's group list)
+            val categories = HashMap<String, String>()
+            val categoryOrder = ArrayList<String>()
+            runCatching {
+                val arr = org.json.JSONArray(getText("$api&action=get_live_categories", pl.userAgent))
+                for (i in 0 until arr.length()) {
+                    val c = arr.optJSONObject(i) ?: continue
+                    categories[c.optString("category_id")] = c.optString("category_name")
+                    c.optString("category_name").ifBlank { null }?.let { categoryOrder += it }
+                }
+            }
+            if (categoryOrder.isNotEmpty()) runCatching {
+                groupOrderFile(pl.id).writeText(categoryOrder.joinToString("\n") { it.replace("\n", " ").replace("\"", "'").trim() })
+            }
+
+            // 3. Live streams, streamed straight into an M3U file
+            writeXtreamPlaylist(pl, "$api&action=get_live_streams", categories, target)
+        }
+        val error = apiResult.exceptionOrNull() ?: return@withContext
+        if (error is XtreamLoginError) throw error
+        Log.w(TAG, "Xtream API failed for ${pl.name}, trying get.php: ${error.message}")
+        // Fallback: the classic one-shot playlist. If that fails too, report the API error.
+        runCatching { download(pl.resolvedUrl(), target, pl.userAgent) }
+            .onFailure { throw IllegalStateException(error.message ?: it.message) }
+    }
+
+    private class XtreamLoginError(message: String) : Exception(message)
+
+    /** Stream formats the provider allows for the account being loaded (from user_info). */
+    @Volatile private var allowedFormats: Set<String> = emptySet()
+
+    private fun xtreamExtension(pl: PlaylistSource): String = when (pl.streamFormat) {
+        "ts" -> "ts"
+        "m3u8" -> "m3u8"
+        // Auto: .ts unless the provider only allows HLS.
+        else -> if (allowedFormats.isNotEmpty() && "ts" !in allowedFormats && "m3u8" in allowedFormats) "m3u8" else "ts"
+    }
+
+    private fun writeXtreamPlaylist(pl: PlaylistSource, url: String, categories: Map<String, String>, target: File) {
+        val ext = xtreamExtension(pl)
+        target.parentFile?.mkdirs()
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        val base = pl.xtreamBase()
+        val user = java.net.URLEncoder.encode(pl.xtreamUsername.trim(), "UTF-8")
+        val pass = java.net.URLEncoder.encode(pl.xtreamPassword.trim(), "UTF-8")
+        var count = 0
+        val request = Request.Builder().url(url).header("User-Agent", pl.userAgent.ifBlank { DEFAULT_UA }).build()
+        // An import cut off part-way leaves nothing half-written behind (the saved list stays).
+        try {
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) error(httpError(response.code))
+                val body = response.body ?: error("Empty response")
+                // Written zipped straight away (like downloads), instead of saved plain and zipped
+                // again afterwards, which read and wrote the whole list a second time.
+                fastGzip(tmp.outputStream()).bufferedWriter().use { out ->
+                    out.write("#EXTM3U\n")
+                    android.util.JsonReader(body.charStream()).use { reader ->
+                        // Most panels send a list; some send the channels keyed by number instead
+                        // ({"0": {...}, "1": {...}}), which failed with "Expected BEGIN_ARRAY but was
+                        // BEGIN_OBJECT". Both are read.
+                        val keyed = reader.peek() == android.util.JsonToken.BEGIN_OBJECT
+                        if (keyed) reader.beginObject() else reader.beginArray()
+                        while (reader.hasNext()) {
+                            if (keyed) {
+                                reader.nextName()
+                                if (reader.peek() != android.util.JsonToken.BEGIN_OBJECT) { reader.skipValue(); continue }
+                            }
+                            val f = HashMap<String, String>()
+                            reader.beginObject()
+                            while (reader.hasNext()) {
+                                val name = reader.nextName()
+                                when (reader.peek()) {
+                                    android.util.JsonToken.STRING -> f[name] = reader.nextString()
+                                    android.util.JsonToken.NUMBER -> f[name] = reader.nextString()
+                                    android.util.JsonToken.BOOLEAN -> f[name] = reader.nextBoolean().toString()
+                                    else -> reader.skipValue()
+                                }
+                            }
+                            reader.endObject()
+                            val streamId = f["stream_id"]
+                            if (streamId.isNullOrBlank()) continue
+                            val title = (f["name"] ?: "Channel $streamId").replace("\n", " ").trim()
+                            val attrs = buildString {
+                                fun attr(k: String, v: String?) {
+                                    if (!v.isNullOrBlank()) append(" $k=\"${v.replace("\"", "'")}\"")
+                                }
+                                attr("tvg-id", f["epg_channel_id"])
+                                attr("tvg-name", title)
+                                attr("tvg-logo", f["stream_icon"])
+                                attr("group-title", categories[f["category_id"]] ?: "Uncategorized")
+                                attr("tvg-chno", f["num"])
+                                if (f["tv_archive"] == "1") {
+                                    attr("catchup", "xc")
+                                    attr("catchup-days", f["tv_archive_duration"]?.takeIf { it != "0" } ?: "1")
+                                }
+                            }
+                            out.write("#EXTINF:-1$attrs,$title\n")
+                            out.write("$base/live/$user/$pass/$streamId.$ext\n")
+                            count++
+                            if (count % 500 == 0) setStatus(loading = true, message = statusText(R.string.iptv_repository_status_loading_channels, pl.name, count))
+                        }
+                        if (keyed) reader.endObject() else reader.endArray()
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            tmp.delete()
+            throw e
+        }
+        if (count == 0) {
+            tmp.delete()
+            error("The provider returned no live channels")
+        }
+        if (!tmp.renameTo(target)) {
+            tmp.copyTo(target, overwrite = true)
+            tmp.delete()
+        }
+    }
+
+    /**
+     * The server's time zone for catch-up, for playlists that don't know it yet. Tried in turn:
+     * the zone the server reports (player_api.php), the gap between the server's clock and the
+     * real time (same answer, for servers that don't name a zone), and the time zone written in
+     * the provider's own guide (xmltv.php on the same server). The first answer is saved with
+     * the playlist, so later replays don't ask again.
+     *
+     * The lookup runs on its own, so a caller that stops waiting (slow server) doesn't stop it:
+     * the zone is still saved when the answer comes. A lookup that failed is tried again after
+     * [ZONE_RETRY_MS].
+     */
+    suspend fun learnServerZone(channel: LiveChannel): String? {
+        val pl = prefs.currentPlaylists().firstOrNull { it.id == channel.sourceId } ?: return null
+        pl.serverTimezone.takeIf { it.isNotBlank() }?.let { return it }
+        val failed = zoneFailedAt[pl.id]
+        if (failed != null && System.currentTimeMillis() - failed < ZONE_RETRY_MS) return null
+        return startZoneLookup(pl, channel.url).await()
+    }
+
+    /**
+     * A time zone worked out from the server's clock or guide is a fixed offset, which goes wrong
+     * when the clocks change: looked up again in the background, at most every [ZONE_RECHECK_MS].
+     * Zones the server names (Europe/Amsterdam) follow the clock changes themselves; Xtream
+     * logins re-read theirs on every playlist update anyway.
+     */
+    fun recheckServerZone(channel: LiveChannel) {
+        scope.launch {
+            val pl = prefs.currentPlaylists().firstOrNull { it.id == channel.sourceId } ?: return@launch
+            if (!ZoneFinder.isWorkedOut(pl.serverTimezone)) return@launch
+            val now = System.currentTimeMillis()
+            val last = zoneCheckedAt.putIfAbsent(pl.id, now) ?: return@launch // first replay this session: just found or loaded
+            if (now - last < ZONE_RECHECK_MS) return@launch
+            zoneCheckedAt[pl.id] = now
+            startZoneLookup(pl, channel.url)
+        }
+    }
+
+    private fun startZoneLookup(pl: PlaylistSource, channelUrl: String): kotlinx.coroutines.Deferred<String?> =
+        synchronized(zoneLookups) {
+            zoneLookups[pl.id] ?: scope.async {
+                try {
+                    lookupServerZone(pl, channelUrl)
+                } finally {
+                    synchronized(zoneLookups) { zoneLookups.remove(pl.id) }
+                }
+            }.also { zoneLookups[pl.id] = it }
+        }
+
+    private suspend fun lookupServerZone(pl: PlaylistSource, channelUrl: String): String? {
+        // Where to ask: an Xtream login's own server; for an M3U, the server its channel links point to.
+        val (host, user, pass) = if (pl.isXtream) {
+            Triple(pl.xtreamBase(), pl.xtreamUsername.trim(), pl.xtreamPassword.trim())
+        } else {
+            val m = Regex("""^(https?://[^/]+)/(?:live/)?([^/]+)/([^/]+)/(\d+)(\.[a-z0-9]+)?(\?.*)?$""", RegexOption.IGNORE_CASE)
+                .find(channelUrl) ?: return null
+            Triple(m.groupValues[1], m.groupValues[2], m.groupValues[3])
+        }
+        val ua = pl.effectiveUserAgent.ifBlank { DEFAULT_UA }
+        val login = "username=" + java.net.URLEncoder.encode(user, "UTF-8") + "&password=" + java.net.URLEncoder.encode(pass, "UTF-8")
+        val notes = ArrayList<String>()
+        // 1 and 2: the server's account info (its time zone, else its clock).
+        var found: Pair<String, String>? = runCatching {
+            val info = JSONObject(getText("$host/player_api.php?$login", ua)).optJSONObject("server_info")
+            ZoneFinder.fromServerInfo(info).also {
+                if (it == null) notes += if (info == null) "server: no server details in its reply" else "server: names no time zone or clock"
+            }
+        }.getOrElse { notes += "server: " + zoneError(it); null }
+        // 3: the provider's own guide, on the same server.
+        if (found == null) {
+            found = runCatching {
+                ZoneFinder.fromGuide(firstBytes("$host/xmltv.php?$login", ua, GUIDE_PROBE_BYTES)).also {
+                    if (it == null) notes += "guide: no times in the first part of it"
+                }
+            }.getOrElse { notes += "guide: " + zoneError(it); null }
+        }
+        // 4: a guide already downloaded for this provider (its file is on this box, so the server
+        // can't refuse it): one on the provider's own site, an Xtream panel guide, or one named
+        // after the playlist. Other guides (third-party sites) are written in their own zone.
+        if (found == null) {
+            found = runCatching { zoneFromAddedGuides(pl, listOf(host, pl.url, channelUrl)) }.getOrNull()
+            if (found == null) notes += "added guides: none from this provider with a time zone in it"
+        }
+        if (found != null) {
+            val (tz, how) = found
+            LIVE_REPORT.add("Server time zone for \"${pl.name}\": $tz ($how)")
+            zoneFailedAt.remove(pl.id)
+            zoneCheckedAt[pl.id] = System.currentTimeMillis()
+            prefs.updatePlaylists { list -> list.map { if (it.id == pl.id) it.copy(serverTimezone = tz) else it } }
+            return tz
+        }
+        LIVE_REPORT.add("Server time zone for \"${pl.name}\": unknown (${notes.joinToString("; ")})")
+        zoneFailedAt[pl.id] = System.currentTimeMillis()
+        return null
+    }
+
+    /** Step 4 of [lookupServerZone]: the time zone written in a guide of this provider's already on this box. */
+    private suspend fun zoneFromAddedGuides(pl: PlaylistSource, links: List<String>): Pair<String, String>? {
+        fun site(link: String): String? = runCatching {
+            java.net.URI(link.trim()).host?.lowercase()?.split('.')?.filter { it.isNotEmpty() }?.takeLast(2)?.joinToString(".")
+        }.getOrNull()?.takeIf { it.contains('.') }
+        val sites = links.mapNotNull { site(it) }.toSet()
+        val name = normalize(pl.name)
+        val guides = prefs.currentEpgSources().filter { it.enabled && it.url.isNotBlank() }.filter { g ->
+            site(g.url) in sites || g.url.contains("xmltv.php", ignoreCase = true) ||
+                (name.length >= 3 && normalize(g.name).contains(name))
+        }
+        for (g in guides) {
+            val file = epgFile(g.id)
+            if (!file.isFile) continue
+            val text = withContext(Dispatchers.IO) {
+                openMaybeGzip(file).use { String(it.readNBytesCompat(GUIDE_PROBE_BYTES), Charsets.UTF_8) }
+            }
+            ZoneFinder.fromGuide(text)?.let { (tz, _) -> return tz to "from the guide \"${g.name}\"" }
+        }
+        return null
+    }
+
+    /** Why a time zone lookup failed, in a few words for the Start-Up Report. */
+    private fun zoneError(e: Throwable): String = when (e) {
+        is org.json.JSONException -> "its reply wasn't the usual account details"
+        is java.net.SocketTimeoutException -> "no answer in time"
+        is java.net.UnknownHostException -> "server not found"
+        is javax.net.ssl.SSLException -> "secure connection failed"
+        is java.io.IOException -> e.message?.takeIf { it.isNotBlank() } ?: "connection failed"
+        else -> e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+    }
+
+    /** The start of a (possibly gzipped) download, as text: enough to read a guide's first times. */
+    private fun firstBytes(url: String, userAgent: String, max: Int): String {
+        val request = Request.Builder().url(url).header("User-Agent", userAgent).build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error(httpError(response.code))
+            val body = response.body ?: error("Empty response")
+            var input: java.io.InputStream = java.io.BufferedInputStream(body.byteStream())
+            input.mark(2)
+            val b0 = input.read(); val b1 = input.read()
+            input.reset()
+            if (b0 == 0x1f && b1 == 0x8b) input = java.util.zip.GZIPInputStream(input)
+            val buf = ByteArray(max)
+            var n = 0
+            while (n < max) {
+                val r = input.read(buf, n, max - n)
+                if (r < 0) break
+                n += r
+            }
+            return String(buf, 0, n, Charsets.UTF_8)
+        }
+    }
+
+    /** Xtream user_info → the account details worth showing. */
+    private fun accountOf(ui: JSONObject): PlaylistAccount? {
+        if (ui.optString("auth") == "0") return null
+        val exp = ui.optString("exp_date").toLongOrNull()?.takeIf { it > 0 }?.times(1000) ?: 0L
+        return PlaylistAccount(
+            expiresAtMs = exp,
+            status = ui.optString("status"),
+            maxConnections = ui.optString("max_connections").toIntOrNull() ?: 0,
+            activeConnections = ui.optString("active_cons").toIntOrNull() ?: 0,
+            checkedAtMs = System.currentTimeMillis()
+        )
+    }
+
+    private suspend fun saveAccount(pl: PlaylistSource, a: PlaylistAccount) {
+        prefs.setPlaylistAccount(pl.id, a)
+        a.expiryLabel()?.let { LIVE_REPORT.add("Account for \"${pl.name}\": expires $it") }
+        warnIfExpiring(pl.id, pl.name, a)
+    }
+
+    private val expiryWarned = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    private fun warnIfExpiring(id: String, name: String, a: PlaylistAccount) {
+        if (!a.expiringSoon() || !expiryWarned.add(id)) return
+        val days = a.daysLeft() ?: return
+        com.nuvio.tv.livetv.record.LiveTvNotice.show(
+            when {
+                a.expiresAtMs <= System.currentTimeMillis() -> statusText(R.string.iptv_repository_status_expired, name)
+                days == 0L -> statusText(R.string.iptv_repository_status_expires_today, name)
+                days == 1L -> statusText(R.string.iptv_repository_status_expires_tomorrow, name)
+                else -> context.withAppLocale().resources.getQuantityString(R.plurals.iptv_repository_status_expires_days, days.toInt(), name, days)
+            }
+        )
+    }
+
+    /**
+     * What an M3U playlist offers besides its channels. Its own movie and episode entries (read
+     * into On Demand straight from the playlist), and, for playlists from an Xtream provider, the
+     * account: the same server's player_api.php has the expiry date and connections, and fuller
+     * movie and series details. The login comes from the link itself (…/get.php?username=…) or,
+     * for short links that hide it, from the playlist's channel links (…/live/user/pass/123.ts);
+     * one found in the channel links is only kept once the provider accepts it.
+     */
+    /** M3U playlists already looked at for movies, series and a login since the app started. */
+    private val linkLoginChecked: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
+
+    private suspend fun refreshM3uAccount(pl: PlaylistSource) = withContext(Dispatchers.IO) {
+        if (pl.hasCatalog) return@withContext
+        val file = playlistFile(pl.id)
+        val scan = if (file.exists()) scanPlaylistLinks(file) else null
+        val hasVodEntries = scan?.second ?: pl.vodInPlaylist
+        val login = pl.loginInLink() ?: scan?.first
+        // The login kept for the channel links: the accepted one, the last accepted one when the
+        // provider can't be asked right now, or none when the links no longer carry one.
+        var kept: Triple<String, String, String>? =
+            if (scan != null && scan.first == null) null
+            else pl.linkServer.takeIf { it.isNotBlank() }?.let { Triple(it, pl.linkUsername, pl.linkPassword) }
+        if (login != null) {
+            val (server, user, pass) = login
+            fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8")
+            val ua = pl.effectiveUserAgent.ifBlank { DEFAULT_UA }
+            val checked = runCatching {
+                val ui = JSONObject(getText("$server/player_api.php?username=${enc(user)}&password=${enc(pass)}", ua)).optJSONObject("user_info")
+                    ?: error("the provider's answer had no account details")
+                if (ui.has("auth") && ui.optInt("auth", 1) == 0) error("the provider didn't accept the login")
+                ui
+            }
+            checked.onSuccess { ui ->
+                kept = login
+                accountOf(ui)?.let { saveAccount(pl, it) }
+            }.onFailure { e ->
+                LIVE_REPORT.add(
+                    "Playlist \"${pl.name}\": couldn't check the Xtream login with ${server.substringAfter("://")} (${e.message ?: e.javaClass.simpleName})" +
+                        if (hasVodEntries) "; movies and series come from the playlist itself" else ""
+                )
+            }
+        }
+        val keptNow = kept
+        val loginChanged = (keptNow?.first ?: "") != pl.linkServer || (keptNow?.second ?: "") != pl.linkUsername || (keptNow?.third ?: "") != pl.linkPassword
+        if (!loginChanged && hasVodEntries == pl.vodInPlaylist) return@withContext
+        prefs.updatePlaylists { list ->
+            list.map {
+                if (it.id != pl.id) it
+                else {
+                    // Movies and series found for the first time: switched on, like a new Xtream
+                    // login (playlists saved before On Demand existed had them off, which meant
+                    // nothing for an M3U playlist until now).
+                    val hadVod = it.vodInPlaylist || it.linkServer.isNotBlank() || it.loginInLink() != null
+                    val hasVod = hasVodEntries || keptNow != null || it.loginInLink() != null
+                    it.copy(
+                        linkServer = keptNow?.first ?: "", linkUsername = keptNow?.second ?: "", linkPassword = keptNow?.third ?: "",
+                        vodInPlaylist = hasVodEntries,
+                        importVod = if (!hadVod && hasVod) true else it.importVod
+                    )
+                }
+            }
+        }
+        if (loginChanged) LIVE_REPORT.add(
+            if (keptNow == null) "Playlist \"${pl.name}\": no Xtream login in its links any more"
+            else "Playlist \"${pl.name}\": Xtream login found in its links and accepted"
+        )
+        if (hasVodEntries != pl.vodInPlaylist) LIVE_REPORT.add(
+            "Playlist \"${pl.name}\": " + if (hasVodEntries) "lists movies or episodes, added to On Demand" else "no longer lists movies or episodes"
+        )
+    }
+
+    /**
+     * Reads a playlist's links for two things: the Xtream login in its channel links (the first
+     * ".../live/user/pass/123.ts", /movie/, /series/ or short ".../user/pass/123" link) and
+     * whether it lists movies or episodes. Stops as soon as it has both.
+     */
+    private fun scanPlaylistLinks(file: File): Pair<Triple<String, String, String>?, Boolean>? = runCatching {
+        var login: Triple<String, String, String>? = null
+        var vod = false
+        openMaybeGzip(file).reader(Charsets.UTF_8).buffered(64 * 1024).useLines { lines ->
+            for (raw in lines) {
+                val line = raw.trim()
+                if (line.isEmpty() || line[0] == '#') continue
+                val link = line.substringBefore('|')
+                if (!vod && isVodEntry(link)) vod = true
+                if (login == null) XTREAM_CHANNEL_LINK.matchEntire(link)?.let { m ->
+                    fun dec(v: String) = runCatching { java.net.URLDecoder.decode(v.replace("+", "%2B"), "UTF-8") }.getOrDefault(v)
+                    val server = PlaylistSource.cleanXtreamServer(m.groupValues[1])
+                    val user = dec(m.groupValues[2])
+                    val pass = dec(m.groupValues[3])
+                    if (server.isNotBlank() && user.isNotBlank() && pass.isNotBlank()) login = Triple(server, user, pass)
+                }
+                if (vod && login != null) break
+            }
+        }
+        login to vod
+    }.getOrNull()
+
+    private fun getText(url: String, userAgent: String): String {
+        val request = Request.Builder().url(url).header("User-Agent", userAgent.ifBlank { DEFAULT_UA }).build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error(httpError(response.code))
+            return response.body?.string() ?: error("Empty response")
+        }
+    }
+
+    /** Plain-English reasons for the HTTP errors people actually hit. */
+    private fun httpError(code: Int): String = when (code) {
+        401, 403 -> "HTTP $code: the provider refused the request (wrong login, or it blocks this app; try setting a user agent)"
+        404 -> "HTTP 404: nothing at that address (check the server, port and link)"
+        429 -> "HTTP 429: too many requests, try again in a few minutes"
+        // Not standard codes: Xtream panels use these when an account is over its connection
+        // limit, expired, or blocked for the moment.
+        456, 458, 461 -> "HTTP $code: the provider refused this login for now (too many connections, expired, or blocked). Close other apps using it and try again later."
+        502, 503, 504, 520, 521, 522, 523, 524 -> "HTTP $code: the provider's server didn't respond, try again later"
+        884 -> "HTTP 884: the provider blocked this app (try setting a user agent)"
+        else -> "HTTP $code"
+    }
+
+    /** A zip stream at the fastest setting: a TV box's processor matters more than the last few MB. */
+    private fun fastGzip(out: java.io.OutputStream): java.io.OutputStream =
+        object : java.util.zip.GZIPOutputStream(java.io.BufferedOutputStream(out, 64 * 1024), 64 * 1024) {
+            init { def.setLevel(java.util.zip.Deflater.BEST_SPEED) }
+        }
+
+    /**
+     * Zips a saved guide or playlist that isn't zipped yet. Its "last changed" stamp is kept, so
+     * this doesn't count as new content (the saved guide is read again once, as its size changed).
+     */
+    private fun zipInPlace(file: File) {
+        runCatching {
+            if (!file.exists() || file.length() < 1024 * 1024) return
+            val zipped = file.inputStream().use { val a = it.read(); val b = it.read(); a == 0x1f && b == 0x8b }
+            if (zipped) return
+            val tmp = File(file.parentFile, file.name + ".zip.tmp")
+            file.inputStream().use { input -> fastGzip(tmp.outputStream()).use { out -> input.copyTo(out, 64 * 1024) } }
+            val modified = file.lastModified()
+            if (!stampFile(file).exists()) markChanged(file)
+            if (!tmp.renameTo(file)) { tmp.copyTo(file, overwrite = true); tmp.delete() }
+            file.setLastModified(modified)
+            LIVE_REPORT.add("Saved \"${file.name}\" zipped to save space")
+        }.onFailure {
+            runCatching { File(file.parentFile, file.name + ".zip.tmp").delete() }
+            Log.w(TAG, "Couldn't zip ${file.name}", it)
+        }
+    }
+
+    private fun openMaybeGzip(file: File, onProgress: ((Long) -> Unit)? = null): InputStream {
+        val raw: InputStream = if (onProgress == null) file.inputStream() else ProgressInputStream(file.inputStream(), onProgress)
+        val input = BufferedInputStream(raw, 64 * 1024)
+        input.mark(2)
+        val b1 = input.read()
+        val b2 = input.read()
+        input.reset()
+        return if (b1 == 0x1f && b2 == 0x8b) BufferedInputStream(GZIPInputStream(input, 64 * 1024)) else input
+    }
+
+    private fun sizeLabel(bytes: Long): String = when {
+        bytes >= 1024L * 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f GB", bytes / (1024.0 * 1024 * 1024))
+        bytes >= 1024L * 1024 -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024))
+        else -> "${bytes / 1024} KB"
+    }
+
+    /** Counts what's been read from a file, for "Reading guide… 45%". */
+    private class ProgressInputStream(inner: InputStream, private val onProgress: (Long) -> Unit) : java.io.FilterInputStream(inner) {
+        private var done = 0L
+        override fun read(): Int = super.read().also { if (it >= 0) { done++; onProgress(done) } }
+        override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) { done += it; onProgress(done) } }
+        override fun skip(n: Long): Long = super.skip(n).also { done += it }
+    }
+
+    private fun sha1(s: String): String =
+        MessageDigest.getInstance("SHA-1").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }.take(16)
+
+    companion object {
+        private const val TAG = "LiveTvRepository"
+        private const val HOUR = 60L * 60L * 1000L
+        /** A server time zone lookup that failed is tried again after this long. */
+        private const val ZONE_RETRY_MS = 2L * 60L * 1000L
+        /** A worked-out time zone (fixed offset) is looked up again after this long, in the background. */
+        private const val ZONE_RECHECK_MS = 12L * 60L * 60L * 1000L
+        /** How much of the provider's guide is read to find its time zone. */
+        private const val GUIDE_PROBE_BYTES = 64 * 1024
+        /** How often to look for playlists and guides past their update time while the app is open. */
+        private const val STALE_CHECK_MS = 30L * 60L * 1000L
+        /** Opening Live TV doesn't check again this soon after the last automatic check. */
+        private const val RECHECK_GAP_MS = 5L * 60L * 1000L
+        /** Extra guide hours read ahead, so the window moves along a few times a day, not constantly. */
+        /** The most channels of one group whose listings are loaded for every day ahead. */
+        private const val MAX_FULL_RANGE_CHANNELS = 400
+        // Hours read ahead of what's asked for (each read only adds the hours not loaded yet).
+        private const val RANGE_SLACK_MS = 6 * HOUR
+        // 2: guides compared by how far ahead they go (matched again once after updating).
+        private const val GUIDE_CACHE_VERSION = 2
+        /**
+         * A guide file that had more days than were kept is read again after this long even when
+         * the file itself hasn't changed, so its later days come in (see buildProgramsInner).
+         */
+        private const val REUSE_MAX_AGE_MS = 20 * HOUR
+        private const val CHANNELS_CACHE_VERSION = 9
+        private const val MAX_SAVED_LISTINGS = 300_000
+        /** Titles guides use when they have no real listing. */
+        private val PLACEHOLDER_TITLES = Regex(
+            """(programming|program|programme|no information|no info|no program information|no programme information|""" +
+                """to be announced|tba|tbd|n/?a|off air|no data|no epg|not available|information not available|""" +
+                """regular programming|scheduled programming|paid programming|coming soon|no program guide available)\.?"""
+        )
+        private val VOD_PATH = Regex("""/(movie|movies|series|vod)/""", RegexOption.IGNORE_CASE)
+        private val VOD_EXT = Regex("""\.(mp4|mkv|avi|mov|wmv|m4v|webm|flv)(\?|$)""", RegexOption.IGNORE_CASE)
+
+        /** A movie or episode in an M3U (by its link), not a live channel. */
+        /** An Xtream channel, movie or episode link, with the login in it. */
+        private val XTREAM_CHANNEL_LINK = Regex(
+            """^(https?://[^/\s?#]+)/(?:live/|movie/|series/)?([^/\s?#]+)/([^/\s?#]+)/\d+(?:\.[A-Za-z0-9]+)?(?:\?.*)?$""",
+            RegexOption.IGNORE_CASE
+        )
+
+        fun isVodEntry(url: String): Boolean = VOD_PATH.containsMatchIn(url) || VOD_EXT.containsMatchIn(url)
+
+        private val LIVE_PATH = Regex("""/live/""", RegexOption.IGNORE_CASE)
+        /** "S01E02", "S1 E2", "S01.E02": named like a series episode, not a channel. */
+        private val EPISODE_NAME = Regex("""\bS\d{1,3}\s*[._-]?\s*E\d{1,4}\b""", RegexOption.IGNORE_CASE)
+
+        /**
+         * A playlist whose links say what each entry is (/live/, /movie/, /series/): at least 50
+         * marked, and no more than 1 in 100 unmarked. Many providers' live links have no marker at
+         * all, so the stray check only applies where nearly everything has one.
+         */
+        internal fun isMarkedPlaylist(marked: Int, unmarked: Int): Boolean =
+            marked >= 50 && unmarked * 100 <= marked
+
+        /**
+         * A stray entry in a marked playlist: no marker in its link and named like an episode.
+         * Providers' exports sometimes tack these on; they showed up as one-item Live TV groups
+         * ("EURO Russian" with "RU | Telekanal S02 E02"). A marked live channel is never one.
+         */
+        internal fun isStrayEntry(e: M3uEntry): Boolean =
+            !LIVE_PATH.containsMatchIn(e.url) && EPISODE_NAME.containsMatchIn(e.name)
+
+        /** "Programming", "No information", "To Be Announced"… (no real show to show a poster for). */
+        fun isPlaceholderTitle(title: String): Boolean = PLACEHOLDER_TITLES.matches(title.trim().lowercase())
+
+        const val DEFAULT_UA = "Mozilla/5.0 (Linux; Android 12; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+        /** Tried for M3U links that don't send channels to [DEFAULT_UA] (see downloadM3u). */
+        const val PLAYER_UA = "VLC/3.0.20 LibVLC/3.0.20"
+        /** Answers a guide server gives a user agent it doesn't like (see downloadGuide). */
+        private val GUIDE_AGENT_RETRY_CODES = setOf(401, 403, 404, 406, 451, 884)
+
+        private val qualityTokens = Regex("""\b(fhd|uhd|hd|sd|4k|8k|hevc|h265|h264|1080p|720p|backup|raw)\b""")
+        private val prefixToken = Regex("""^[a-z]{2,3}\s*[:|]\s*""")
+        private val bracketed = Regex("""\[.*?]|\(.*?\)""")
+
+        private val countryEnd = Regex("""(\.(com|co|net|tv))?\.[a-z]{2}$""", RegexOption.IGNORE_CASE)
+
+        /** A guide or tvg-id as a name: "GloboSP.br" -> "globosp". */
+        internal fun idName(id: String): String = normalize(id.trim().replace(countryEnd, ""))
+
+        internal fun normalize(name: String): String {
+            var n = name.lowercase().trim()
+            n = n.replace(prefixToken, "")
+            n = n.replace(bracketed, " ")
+            n = n.replace(qualityTokens, " ")
+            return n.filter { it.isLetterOrDigit() }
+        }
+    }
+}
+
+/** Up to [n] bytes from the start of a stream (InputStream.readNBytes needs Android 13). */
+private fun java.io.InputStream.readNBytesCompat(n: Int): ByteArray {
+    val buf = ByteArray(n)
+    var total = 0
+    while (total < n) {
+        val r = read(buf, total, n - total)
+        if (r < 0) break
+        total += r
+    }
+    return buf.copyOf(total)
+}

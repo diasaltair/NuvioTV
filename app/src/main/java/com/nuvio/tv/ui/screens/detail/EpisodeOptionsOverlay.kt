@@ -157,7 +157,9 @@ internal fun EpisodeOptionsOverlay(
     onMarkPreviousEpisodesWatched: () -> Unit = {},
     showWatchedActions: Boolean = true,
     isCurrentlyPlaying: Boolean = false,
-    onNavigateEpisode: ((Int) -> Unit)? = null
+    onNavigateEpisode: ((Int) -> Unit)? = null,
+    /** Live TV fork: more lines after Play (Record on your channel, Live TV options). */
+    extraActions: List<Pair<String, () -> Unit>> = emptyList()
 ) {
     val context = LocalContext.current
     val activityDensity = LocalDensity.current
@@ -260,7 +262,7 @@ internal fun EpisodeOptionsOverlay(
                 EpisodeOverlayActionKind.START_FROM_BEGINNING -> onStartFromBeginning
             }
         )
-    }
+    } + extraActions.map { (label, onClick) -> EpisodeOverlayAction(label = label, onClick = onClick) } // Live TV fork
     val initialActionIndex = actions.indexOfFirst { it.enabled }.coerceAtLeast(0)
     var acceptsSelectKey by remember { mutableStateOf(false) }
 

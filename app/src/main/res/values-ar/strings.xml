@@ -3347,16 +3347,9 @@
     <string name="web_stream_badge_imported">استُورد رابط الشارة.</string>
     <string name="web_stream_badge_importing">جارٍ الاستيراد\u2026</string>
     <string name="web_stream_badge_load_error">تعذر تحميل إعدادات شارات البث</string>
-
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">صفوف الشاشة الرئيسية</string>
+    <string name="settings_home_screen_rows_subtitle">اختر ترتيب الصفوف على شاشتك الرئيسية</string>
     <plurals name="cw_episodes_left">
-        <item quantity="zero">%d متبقية</item>
-        <item quantity="one">%d متبقية</item>
-        <item quantity="two">%d متبقية</item>
-        <item quantity="few">%d متبقية</item>
-        <item quantity="many">%d متبقية</item>
-        <item quantity="other">%d متبقية</item>
-    </plurals>
     <string name="cw_no_artwork">لا توجد صورة</string>
     <string name="detail_eyebrow_episodes">الحلقات</string>
     <string name="detail_section_parental_guide">دليل الوالدين</string>
@@ -3370,9 +3363,6 @@
     <string name="ambient_mode_timeout">البدء بعد</string>
     <string name="ambient_mode_timeout_subtitle">مدة الانتظار قبل بدء الوضع المحيطي</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="one">دقيقة واحدة</item>
-        <item quantity="other">%1$d دقائق</item>
-    </plurals>
     <string name="ambient_mode_catalogs">القوائم</string>
     <string name="ambient_mode_catalogs_subtitle">اختر حتى 3 قوائم لعرض صورها</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">اختر حتى 3 قوائم</string>
@@ -4457,21 +4447,7 @@
     <string name="report_sent_no_phone">شكرًا على البلاغ. Arc مشروع هواية، لذا لا يحصل كل بلاغ على رد.</string>
     <string name="report_sent_back">العودة إلى المشاهدة</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="zero">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقيقة.</item>
-        <item quantity="one">اختر كل ما ينطبق. احتفظ Arc بآخر دقيقة.</item>
-        <item quantity="two">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقيقة.</item>
-        <item quantity="few">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقائق.</item>
-        <item quantity="many">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقيقة.</item>
-        <item quantity="other">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقيقة.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="zero">إعدادات المشغل وآخر %1$d دقيقة</item>
-        <item quantity="one">إعدادات المشغل وآخر دقيقة</item>
-        <item quantity="two">إعدادات المشغل وآخر %1$d دقيقة</item>
-        <item quantity="few">إعدادات المشغل وآخر %1$d دقائق</item>
-        <item quantity="many">إعدادات المشغل وآخر %1$d دقيقة</item>
-        <item quantity="other">إعدادات المشغل وآخر %1$d دقيقة</item>
-    </plurals>
     <string name="report_settings_subtitle">صِف ما حدث من خطأ أو ما تريد أن يفعله Arc</string>
     <string name="report_group_choose">ماذا تريد أن تبلّغ عنه؟</string>
     <string name="report_group_options">خيارات</string>
@@ -4524,13 +4500,6 @@
     <string name="report_sent_kind_bug">شيء لا يعمل</string>
     <string name="report_sent_kind_idea">فكرة أو طلب</string>
     <plurals name="report_my_reports_new">
-        <item quantity="zero">جديد: %1$d</item>
-        <item quantity="one">جديد: %1$d</item>
-        <item quantity="two">جديد: %1$d</item>
-        <item quantity="few">جديد: %1$d</item>
-        <item quantity="many">جديد: %1$d</item>
-        <item quantity="other">جديد: %1$d</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">يُفحص مرة يوميًا. Arc مشروع هواية، لذا لا يحصل كل بلاغ على رد.</string>
     <string name="report_my_reports_hint_off">الفحص متوقف. فعّل «افحص بلاغاتي» لترى ما يحدث لبلاغاتك.</string>
@@ -4553,13 +4522,6 @@
     <string name="report_ready_follow_off">لمتابعة هذا البلاغ، امسح الرمز في الشاشة التالية بهاتفك.</string>
     <string name="report_notice_title">هناك جديد بشأن بلاغك</string>
     <plurals name="report_notice_many_title">
-        <item quantity="zero">هناك جديد بشأن %1$d من بلاغاتك</item>
-        <item quantity="one">هناك جديد بشأن %1$d من بلاغاتك</item>
-        <item quantity="two">هناك جديد بشأن %1$d من بلاغاتك</item>
-        <item quantity="few">هناك جديد بشأن %1$d من بلاغاتك</item>
-        <item quantity="many">هناك جديد بشأن %1$d من بلاغاتك</item>
-        <item quantity="other">هناك جديد بشأن %1$d من بلاغاتك</item>
-    </plurals>
     <string name="report_notice_one">%1$s، أُرسل في %2$s: %3$s.</string>
     <string name="report_notice_many">افتح «بلاغاتي» لترى ما تغيّر.</string>
     <string name="report_notice_open">فتح «بلاغاتي»</string>
@@ -4570,23 +4532,9 @@
     <string name="report_stop_recording">إيقاف التسجيل</string>
     <string name="report_recording_pill">التسجيل %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="zero">التسجيل %1$s · %2$d علامة</item>
-        <item quantity="one">التسجيل %1$s · %2$d علامة</item>
-        <item quantity="two">التسجيل %1$s · %2$d علامتان</item>
-        <item quantity="few">التسجيل %1$s · %2$d علامات</item>
-        <item quantity="many">التسجيل %1$s · %2$d علامة</item>
-        <item quantity="other">التسجيل %1$s · %2$d علامة</item>
-    </plurals>
     <string name="report_recording_no_space">لا توجد مساحة كافية للتسجيل</string>
     <string name="report_item_recording">التسجيل، %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="zero">%d علامة. أرقام فقط، دون صوت أو صورة.</item>
-        <item quantity="one">%d علامة. أرقام فقط، دون صوت أو صورة.</item>
-        <item quantity="two">%d علامتان. أرقام فقط، دون صوت أو صورة.</item>
-        <item quantity="few">%d علامات. أرقام فقط، دون صوت أو صورة.</item>
-        <item quantity="many">%d علامة. أرقام فقط، دون صوت أو صورة.</item>
-        <item quantity="other">%d علامة. أرقام فقط، دون صوت أو صورة.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">الإبلاغ عن مشكلة / وضع علامة</string>
     <string name="remote_buttons_job_report_mark_desc">يفتح لوحة البلاغ. أثناء التسجيل يضيف علامة.</string>
     <string name="display_mode_measured">القياس</string>

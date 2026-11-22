@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Switch
@@ -38,6 +40,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +70,20 @@ fun CatalogOrderScreen(
     onBackPress: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    // Live TV fork: adding and changing Live TV / Sports rows.
+    val rowsSetup: com.nuvio.tv.livetv.home.HomeRowsSetupViewModel = hiltViewModel()
+    var addingRow by remember { mutableStateOf(false) }
+    var editingRowId by remember { mutableStateOf<String?>(null) }
+    val liveRows by rowsSetup.rows.collectAsState()
+    val emptyRowIds by rowsSetup.emptyRowIds.collectAsState()
+    if (addingRow) {
+        com.nuvio.tv.livetv.home.AddHomeRowDialog(viewModel = rowsSetup, onDismiss = { addingRow = false })
+    }
+    editingRowId?.let { id ->
+        val row = liveRows.firstOrNull { it.id == id }
+        if (row == null) editingRowId = null
+        else com.nuvio.tv.livetv.home.HomeRowOptionsDialog(row = row, viewModel = rowsSetup, onDismiss = { editingRowId = null })
+    }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -99,6 +118,18 @@ fun CatalogOrderScreen(
                     subtitle = stringResource(R.string.catalog_order_follow_addons_desc),
                     checked = uiState.followAddonsOrder,
                     onToggle = { viewModel.toggleFollowAddonsOrder(!uiState.followAddonsOrder) }
+                )
+                // Live TV fork: add a Live TV or Sports row.
+                Spacer(modifier = Modifier.height(NuvioTheme.spacing.lg))
+                AddLiveRowCard(onClick = { addingRow = true })
+                // Live TV fork: rows from a playlist's group or category, named with the playlist.
+                Spacer(modifier = Modifier.height(NuvioTheme.spacing.sm))
+                val playlistNames by rowsSetup.playlistNames.collectAsState()
+                com.nuvio.tv.ui.screens.settings.SettingsToggleRow(
+                    title = stringResource(R.string.home_rows_playlist_names),
+                    subtitle = stringResource(R.string.home_rows_playlist_names_hint),
+                    checked = playlistNames,
+                    onToggle = { rowsSetup.setPlaylistNames(!playlistNames) }
                 )
             }
 
@@ -147,7 +178,9 @@ fun CatalogOrderScreen(
                                     )
                                 }
                             },
-                            onToggleEnabled = { viewModel.toggleCatalogEnabled(item.disableKey) }
+                            onToggleEnabled = { viewModel.toggleCatalogEnabled(item.disableKey) },
+                            onEdit = item.liveRow?.let { r -> { editingRowId = r.id } },
+                            hiddenEmpty = item.liveRow?.id?.let { it in emptyRowIds } == true
                         )
                     }
                 }
@@ -161,7 +194,10 @@ private fun CatalogOrderCard(
     item: CatalogOrderItem,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
-    onToggleEnabled: () -> Unit
+    onToggleEnabled: () -> Unit,
+    onEdit: (() -> Unit)? = null,
+    /** Live TV fork: a row left off Home for now, having nothing to show. */
+    hiddenEmpty: Boolean = false
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().settingsSubmenuSurface(),
@@ -176,6 +212,13 @@ private fun CatalogOrderCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                val live = item.liveRow
+                val typeText = when (live?.kind) {
+                    com.nuvio.tv.livetv.home.HomeLiveRow.KIND_SPORTS -> stringResource(R.string.home_rows_type_sports)
+                    com.nuvio.tv.livetv.home.HomeLiveRow.KIND_CHANNELS -> stringResource(R.string.home_rows_type_live)
+                    com.nuvio.tv.livetv.home.HomeLiveRow.KIND_VOD -> stringResource(R.string.home_rows_type_vod)
+                    else -> item.typeLabel.toDisplayTypeLabel()
+                }
                 Text(
                     text = if (ServerCatalog.isServerKey(item.key)) {
                         item.catalogName
@@ -187,10 +230,31 @@ private fun CatalogOrderCard(
                 )
                 Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
                 Text(
-                    text = item.addonName,
+                    text = when (live?.kind) {
+                        com.nuvio.tv.livetv.home.HomeLiveRow.KIND_SPORTS -> stringResource(
+                            R.string.home_rows_desc_sports,
+                            stringResource(if (live.startingSoon) R.string.home_rows_pick_sports_all_hint else R.string.home_rows_type_sports),
+                            live.limit
+                        )
+                        com.nuvio.tv.livetv.home.HomeLiveRow.KIND_CHANNELS -> stringResource(
+                            R.string.home_rows_desc_channels, stringResource(R.string.home_rows_type_live), live.limit
+                        )
+                        com.nuvio.tv.livetv.home.HomeLiveRow.KIND_VOD -> stringResource(
+                            R.string.home_rows_desc_vod, stringResource(R.string.home_rows_type_vod), live.limit
+                        )
+                        else -> item.addonName
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = NuvioTheme.colors.TextSecondary
                 )
+                if (hiddenEmpty && !item.isDisabled) {
+                    Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
+                    Text(
+                        text = stringResource(R.string.home_rows_hidden_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = NuvioTheme.colors.TextTertiary
+                    )
+                }
                 if (item.isDisabled) {
                     Spacer(modifier = Modifier.height(NuvioTheme.spacing.xs))
                     Text(
@@ -205,6 +269,29 @@ private fun CatalogOrderCard(
                 horizontalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.sm),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Live TV fork: a Live TV or Sports row's options.
+                if (onEdit != null) {
+                    Button(
+                        onClick = onEdit,
+                        colors = ButtonDefaults.colors(
+                            containerColor = NuvioTheme.colors.BackgroundCard,
+                            contentColor = NuvioTheme.colors.TextSecondary,
+                            focusedContainerColor = NuvioTheme.colors.FocusBackground,
+                            focusedContentColor = NuvioTheme.colors.Primary
+                        ),
+                        border = ButtonDefaults.border(
+                            focusedBorder = Border(
+                                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
+                                shape = RoundedCornerShape(NuvioTheme.radii.md)
+                            )
+                        ),
+                        shape = ButtonDefaults.shape(RoundedCornerShape(NuvioTheme.radii.md))
+                    ) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = null)
+                        Spacer(modifier = Modifier.width(NuvioTheme.spacing.xs))
+                        Text(text = stringResource(R.string.home_rows_edit))
+                    }
+                }
                 CatalogOrderButton(
                     onClick = onMoveUp,
                     enabled = item.canMoveUp,
@@ -233,6 +320,47 @@ private fun CatalogOrderCard(
                 ) {
                     Text(text = if (item.isDisabled) stringResource(R.string.catalog_order_enable) else stringResource(R.string.catalog_order_disable))
                 }
+            }
+        }
+    }
+}
+
+/** Live TV fork: the Add a row button at the top of the list. */
+@Composable
+private fun AddLiveRowCard(onClick: () -> Unit) {
+    androidx.tv.material3.Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = androidx.tv.material3.CardDefaults.colors(
+            containerColor = NuvioTheme.colors.BackgroundCard,
+            focusedContainerColor = NuvioTheme.colors.FocusBackground
+        ),
+        border = androidx.tv.material3.CardDefaults.border(
+            focusedBorder = Border(
+                border = NuvioTheme.focusRing.border(NuvioTheme.spacing.xxs),
+                shape = RoundedCornerShape(NuvioTheme.radii.md)
+            )
+        ),
+        shape = androidx.tv.material3.CardDefaults.shape(RoundedCornerShape(NuvioTheme.radii.md)),
+        scale = androidx.tv.material3.CardDefaults.scale(focusedScale = 1f)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = NuvioTheme.colors.Primary)
+            Spacer(modifier = Modifier.width(NuvioTheme.spacing.md))
+            Column {
+                Text(
+                    text = stringResource(R.string.home_rows_add_button),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = NuvioTheme.colors.TextPrimary
+                )
+                Text(
+                    text = stringResource(R.string.home_rows_add_button_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = NuvioTheme.colors.TextSecondary
+                )
             }
         }
     }

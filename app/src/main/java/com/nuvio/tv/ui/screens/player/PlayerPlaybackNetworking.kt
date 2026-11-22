@@ -55,7 +55,7 @@ internal object PlayerPlaybackNetworking {
         }
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
-            .dns(IPv4FirstDns())
+            .dns(IPv4FirstDns(com.nuvio.tv.livetv.data.ForkDns.playback))
             .socketFactory(PlaybackSocketFactory)
             .eventListenerFactory(PlaybackConnectionEvents)
             .addNetworkInterceptor(playbackRefusalLog)
@@ -92,7 +92,7 @@ internal object PlayerPlaybackNetworking {
         }
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
-            .dns(IPv4FirstDns())
+            .dns(IPv4FirstDns(com.nuvio.tv.livetv.data.ForkDns.playback))
             .socketFactory(PlaybackSocketFactory)
             // Attached HERE because OkHttpClient.Builder(client) copies
             // eventListenerFactory, so every newBuilder() derivative inherits
@@ -284,7 +284,7 @@ internal object PlayerPlaybackNetworking {
             }
         }.toMap()
         val client = createHttpClient(requestHeaders, useLongReadTimeout, slowStart)
-        val httpFactory = OkHttpDataSource.Factory(client).apply {
+        val httpFactory = OkHttpDataSource.Factory(com.nuvio.vpn.android.VpnHttpClient.wrap(client)).apply {
             setDefaultRequestProperties(requestHeaders)
             if (requestHeaders.none { it.key.equals("User-Agent", ignoreCase = true) }) {
                 setUserAgent(PlayerMediaSourceFactory.DEFAULT_USER_AGENT)
@@ -310,7 +310,7 @@ internal object PlayerPlaybackNetworking {
         readTimeoutMs: Int,
         range: String? = null
     ): HttpURLConnection {
-        return (URL(url).openConnection() as HttpURLConnection).apply {
+        return com.nuvio.vpn.android.VpnHttpClient.openConnection(URL(url)).apply {
             instanceFollowRedirects = true
             connectTimeout = connectTimeoutMs
             readTimeout = readTimeoutMs

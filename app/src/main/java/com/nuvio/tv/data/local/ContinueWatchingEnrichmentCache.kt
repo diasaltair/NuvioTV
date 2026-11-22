@@ -72,6 +72,19 @@ data class CachedInProgressItem(
     @SerializedName("ratingVisible", alternate = ["u"]) val ratingVisible: Boolean? = null
 )
 
+/**
+ * Live TV fork: whether a cached item read back with every required value. Gson fills a missing
+ * value with null even where Kotlin says it can't be, which crashed the app at start-up after an
+ * update (the update kept the real field names; the old cache had the shortened ones).
+ */
+internal fun allPresent(vararg values: Any?): Boolean = values.all { it != null }
+
+internal fun CachedNextUpItem.intact(): Boolean =
+    allPresent(contentId, contentType, name, videoId, genres)
+
+internal fun CachedInProgressItem.intact(): Boolean =
+    allPresent(contentId, contentType, name, videoId, genres)
+
 @Singleton
 class ContinueWatchingEnrichmentCache @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -153,7 +166,7 @@ class ContinueWatchingEnrichmentCache @Inject constructor(
         profileId: Int,
         expectedClearVersion: Int? = null
     ) = saveSnapshot(
-        "nextup", items.savableSnapshot("next-up", CachedNextUpItem::isSavable) { Log.w(TAG, it) },
+        "nextup", items.filterNot { com.nuvio.tv.livetv.calendar.CalendarHomeFeed.isInjected(it.contentId, it.videoId) }.savableSnapshot("next-up", CachedNextUpItem::isSavable) { Log.w(TAG, it) },
         force, profileId, expectedClearVersion, nextUpWrites
     )
 
@@ -166,7 +179,7 @@ class ContinueWatchingEnrichmentCache @Inject constructor(
         profileId: Int,
         expectedClearVersion: Int? = null
     ) = saveSnapshot(
-        "inprogress", items.savableSnapshot("in-progress", CachedInProgressItem::isSavable) { Log.w(TAG, it) },
+        "inprogress", items.filterNot { com.nuvio.tv.livetv.calendar.CalendarHomeFeed.isInjectedMovie(it.contentId) }.savableSnapshot("in-progress", CachedInProgressItem::isSavable) { Log.w(TAG, it) },
         force, profileId, expectedClearVersion, inProgressWrites
     )
 

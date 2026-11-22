@@ -531,7 +531,7 @@ private fun StreamAutoPlayModeDialog(
         onOptionSelected = onModeSelected,
         onDismiss = onDismiss,
         width = 460.dp,
-        maxHeight = 320.dp
+        maxHeight = 380.dp
     )
 }
 

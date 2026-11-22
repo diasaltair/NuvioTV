@@ -45,6 +45,8 @@ private fun PlayerRuntimeController.startMpvOnAttachedView(view: NuvioMpvSurface
             phase = "mpv_starting",
             message = context.getString(com.nuvio.tv.R.string.player_loading_starting)
         )
+        performPendingMpvHardRestartIfNeeded(view)
+        view.applyVpnProxy(nativeVpnProxy?.address())
         view.applyHi10pGnextSoftwareFallback(shouldUseMpvHi10pGnextSoftwareFallback())
         view.applyHardwareDecodeMode(mpvHardwareDecodeModeSetting)
         applyMpvDirectDecodeMode(view)
@@ -181,6 +183,8 @@ private fun PlayerRuntimeController.startMpvPlayback(
             message = context.getString(com.nuvio.tv.R.string.player_loading_starting),
             showOverlay = true
         )
+        performPendingMpvHardRestartIfNeeded(view)
+        view.applyVpnProxy(nativeVpnProxy?.address())
         view.applyHi10pGnextSoftwareFallback(shouldUseMpvHi10pGnextSoftwareFallback())
         view.applyHardwareDecodeMode(mpvHardwareDecodeModeSetting)
         applyMpvDirectDecodeMode(view)
@@ -279,6 +283,8 @@ private fun PlayerRuntimeController.startMpvPlayback(
 }
 
 internal fun PlayerRuntimeController.releaseMpvPlayer() {
+    nativeVpnProxy?.close()
+    nativeVpnProxy = null
     unregisterMpvEventRelay()
     runCatching { mpvView?.releasePlayer() }
 }

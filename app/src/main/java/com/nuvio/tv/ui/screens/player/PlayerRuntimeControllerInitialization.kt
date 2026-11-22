@@ -99,6 +99,9 @@ import com.nuvio.tv.data.local.LibassRenderMode
 import com.nuvio.tv.data.local.PlayerSettings
 import com.nuvio.tv.data.repository.PlaybackIssueErrorInput
 import com.nuvio.tv.domain.model.Subtitle
+import com.nuvio.stalker.StalkerPlaybackLocator
+import com.nuvio.tv.livetv.multiview.StalkerPlayerEntryPoint
+import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -422,8 +425,53 @@ internal fun PlayerRuntimeController.initializePlayer(
     val afrPreflightToken = afrPreflightGate.token()
     mpvMediaLoadPrepared = false
 
+    val requestedUrl = url
+    val requestedHeaders = headers
+    val isStalker = requestedUrl.startsWith("stalker:", ignoreCase = true)
+
     scope.launch {
         if (initializationGeneration != playbackRecoveryGate.generation) return@launch
+        val prepared = try {
+            if (isStalker) {
+                val locator = StalkerPlaybackLocator.decode(requestedUrl)
+                    ?: throw IllegalArgumentException("The Stalker playback reference is invalid. Refresh the source.")
+                EntryPointAccessors.fromApplication(context.applicationContext, StalkerPlayerEntryPoint::class.java)
+                    .stalkerGateway().prepare(locator.sourceId, locator.stream)
+            } else null
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (!afrPreflightGate.isCurrent(afrPreflightToken)) return@launch
+            _uiState.update { it.copy(error = if (failure is com.nuvio.stalker.StalkerException) failure.message else
+                "Stalker playback could not be prepared. Check the source and VPN settings.", showLoadingOverlay = false) }
+            return@launch
+        }
+        if (!afrPreflightGate.isCurrent(afrPreflightToken)) return@launch
+        val url = prepared?.url ?: requestedUrl
+        val headers = prepared?.headers ?: requestedHeaders
+        val diagnosticHost = if (isStalker) "stalker" else url.safeHost()
+        if (prepared != null) {
+            currentStreamMimeType = prepared.mimeType ?: PlayerMediaSourceFactory.inferMimeType(
+                url = url, filename = currentFilename, responseHeaders = currentStreamResponseHeaders
+            )
+        }
+        try {
+            com.nuvio.tv.core.vpn.awaitVpnForPlayback(context, url)
+            val proxy = com.nuvio.tv.core.vpn.awaitNativeVpnProxy(context)
+            if (!afrPreflightGate.isCurrent(afrPreflightToken)) { proxy?.close(); return@launch }
+            nativeVpnProxy?.close()
+            nativeVpnProxy = proxy
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (!afrPreflightGate.isCurrent(afrPreflightToken)) return@launch
+            _uiState.update {
+                it.copy(error = if (isStalker) "VPN protection could not be verified for this Stalker stream."
+                    else failure.message ?: "VPN connection could not be verified.", showLoadingOverlay = false)
+            }
+            return@launch
+        }
+        if (!afrPreflightGate.isCurrent(afrPreflightToken)) return@launch
         try {
             // Player reuse: snapshot the live player's constructor-baked companions
             // before the per-stream resets and construction overwrite the fields.
@@ -521,7 +569,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                     "Tunneled playback skipped: media audio goes to USB (route=${currentAudioOutputRoute?.key})"
                 )
             }
-            val tunnelingActive = playerSettings.effectiveTunnelingEnabled && !tunnelingBlockedByUsbAudio
+            // Software decoders can't tunnel: a stream rebuilt on one plays untunneled.
+            val tunnelingActive = playerSettings.effectiveTunnelingEnabled && !tunnelingBlockedByUsbAudio &&
+                forceSoftwareVideoForStreamUrl != currentStreamUrl
             if (rememberAudioDelayPerDeviceEnabled) {
                 applyStoredAudioDelayForCurrentRouteIfEnabled()
             }
@@ -547,7 +597,10 @@ internal fun PlayerRuntimeController.initializePlayer(
             mpvDirectDecodeModeSetting = playerSettings.mpvDirectDecodeMode
             var effectiveInternalPlayerEngine = overrideInternalPlayerEngine ?: playerSettings.internalPlayerEngine
             if (effectiveInternalPlayerEngine == InternalPlayerEngine.AUTO) {
-                effectiveInternalPlayerEngine = resolveAutoInternalPlayerEngine()
+                effectiveInternalPlayerEngine = if (isStalker) InternalPlayerEngine.EXOPLAYER else resolveAutoInternalPlayerEngine()
+            }
+            require(!isStalker || effectiveInternalPlayerEngine == InternalPlayerEngine.EXOPLAYER) {
+                "Stalker playback requires the internal ExoPlayer. Select ExoPlayer in player settings."
             }
             // A format check always starts on the main player, whatever player is chosen; MPV only as its fallback.
             if (overrideInternalPlayerEngine == null && com.nuvio.tv.core.formatcheck.FormatCheckSession.active) {
@@ -561,7 +614,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             }
             currentInternalPlayerEngine = effectiveInternalPlayerEngine
             playbackAnalyticsDiagnostics.setTraceContext(
-                host = url.safeHost(),
+                host = diagnosticHost,
                 engine = effectiveInternalPlayerEngine.name
             )
             playbackAnalyticsDiagnostics.setStartupContext(
@@ -600,6 +653,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             )
 
             val afrJob = async {
+                if (!isStalker) {
                 if (effectiveInternalPlayerEngine == InternalPlayerEngine.MVP_PLAYER) {
                     // MPV has no track-format path; keep the full probing preflight.
                     // Thread the resolved mimeType through so the
@@ -624,6 +678,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                         resolutionMatchingEnabled = playerSettings.resolutionMatchingEnabled,
                         preflightToken = afrPreflightToken
                     )
+                }
                 }
             }
             if (effectiveInternalPlayerEngine == InternalPlayerEngine.MVP_PLAYER) {
@@ -659,6 +714,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     awaitSavedProgressLoad()
                     if (initializationGeneration != playbackRecoveryGate.generation) return@launch
                     initializeMpvPlayer(url = url, headers = headers, allowEngineFailover = allowEngineFailover)
+                    mediaSourceFactory.stalkerMediaPolicy = null
                     fetchAddonSubtitles()
                 } finally {
                     mpvInitializationInProgress = false
@@ -741,7 +797,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                                 "manualConversion=${result.usesManualConversion} " +
                                 "bridgeReady=${result.bridgeReady} " +
                                 "api=${result.apiLevel} " +
-                                "host=${url.safeHost()}"
+                                "host=${diagnosticHost}"
                     )
                 }
                 else -> {
@@ -767,10 +823,10 @@ internal fun PlayerRuntimeController.initializePlayer(
 
             // DV7 to DV8.1 libdovi probe — only runs when the effective mode requests it.
             val dv7ToDv81SettingActive = effectiveDv7Mode == Dv7HandlingMode.DV81_LIBDOVI
-            val dv7ToDv81Probe = if (dv7ToDv81SettingActive) {
+            val dv7ToDv81Probe = if (dv7ToDv81SettingActive && !isStalker) {
                 DoviBridge.probeRealtimeConversionSupport(url)
             } else {
-                val reason = when (effectiveDv7Mode) {
+                val reason = if (isStalker) "provider-scoped-transport" else when (effectiveDv7Mode) {
                     Dv7HandlingMode.HDR10_BASE_LAYER -> "hdr10-base-layer-mode"
                     Dv7HandlingMode.STRIP_DV -> "strip-dv-mode"
                     Dv7HandlingMode.OFF -> "dv7-mode-off"
@@ -790,7 +846,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             // base layer via dv7ToHevcForcedStreamUrls; that override must also disarm the
             // conversion/extractor path, otherwise the retry rebuilds the exact same broken
             // pipeline (stock extractor + no vendored MKV path) and fails identically.
-            val dv7ConversionDisarmedForUrl = dv7ToHevcForcedStreamUrls.contains(url)
+            val dv7ConversionDisarmedForUrl = dv7ToHevcForcedStreamUrls.contains(requestedUrl)
             isExperimentalDv7ToDv81ActiveForCurrentPlayback =
                 dv7ToDv81SettingActive && dv7ToDv81Probe.supported && !dv7ConversionDisarmedForUrl
             // AUTO fallback: if AUTO chose DV81 but the probe failed for this stream,
@@ -803,7 +859,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 Log.i(
                     PlayerRuntimeController.TAG,
                     "DV7_AUTO_FALLBACK: dv81-probe-failed reason=${dv7ToDv81Probe.reason} " +
-                            "fallback=HDR10_BASE_LAYER host=${url.safeHost()}"
+                            "fallback=HDR10_BASE_LAYER host=${diagnosticHost}"
                 )
             }
             hasAttemptedDv7ToDv81ForCurrentPlayback = false
@@ -822,7 +878,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                         "reason=${dv7ToDv81Probe.reason} " +
                         "selfTest=${dv7ToDv81Probe.selfTest.reason} " +
                         "bridge=${dv7ToDv81Probe.bridgeVersion ?: "n/a"} " +
-                        "host=${url.safeHost()}"
+                        "host=${diagnosticHost}"
             )
 
             // ── Diagnostics builder ──
@@ -834,10 +890,10 @@ internal fun PlayerRuntimeController.initializePlayer(
                 ?: DolbyVisionBaseLayerPolicy.resolve(context = context, bridgeReady = DoviBridge.isLibraryLoaded)
             var currentDiagnostics = LastPlaybackDiagnostics(
                 timestampMs = System.currentTimeMillis(),
-                host = url.safeHost(),
-                streamUrl = url.diagnosticStreamUrl(serverPlayback.isServerSource(url)),
+                host = diagnosticHost,
+                streamUrl = if (isStalker) "" else url.diagnosticStreamUrl(serverPlayback.isServerSource(url)),
                 filename = currentFilename ?: streamName ?: title,
-                headersJson = org.json.JSONObject(headers).toString(),
+                headersJson = if (isStalker) "{}" else org.json.JSONObject(headers).toString(),
                 hdrCapsKnown = capsForDiagnostics.hdrCapsKnown,
                 displayDv = capsForDiagnostics.displayDv,
                 displayHdr10 = capsForDiagnostics.displayHdr10,
@@ -1045,7 +1101,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 Log.i(
                     PlayerRuntimeController.TAG,
                     "BUFFER_GATE: engine=exo-stock master=off; DefaultLoadControl " +
-                            "(1.5s back buffer, no VOD cache) host=${url.safeHost()}"
+                            "(1.5s back buffer, no VOD cache) host=${diagnosticHost}"
                 )
                 // Stock load control with a 1.5 s back buffer; the read-ahead reserve is idle unless thumbnails ask.
                 com.nuvio.tv.core.player.ReservableLoadControl.stock(backBufferMs = 1_500)
@@ -1073,7 +1129,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                         "nuvioPerf=${mediaSourceFactory.nuvioPerformanceModeEnabled} " +
                         "engineNative=$engineNative useNativeEffective=$effectiveNative " +
                         "vodCache=${mediaSourceFactory.vodCacheEnabled} " +
-                        "host=${url.safeHost()}"
+                        "host=${diagnosticHost}"
             )
 
             currentDiagnostics = currentDiagnostics.copy(
@@ -1081,9 +1137,9 @@ internal fun PlayerRuntimeController.initializePlayer(
                 parallelNetworkEnabled = playerSettings.parallelNetworkEnabled
             )
 
-            val safeAudioModeEnabled = safeAudioForcedStreamUrls.contains(url)
-            val audioDisabledForStream = audioDisabledForcedStreamUrls.contains(url)
-            val vc1TrackSelectionBypassActive = vc1TrackSelectionBypassStreamUrls.contains(url)
+            val safeAudioModeEnabled = safeAudioForcedStreamUrls.contains(requestedUrl)
+            val audioDisabledForStream = audioDisabledForcedStreamUrls.contains(requestedUrl)
+            val vc1TrackSelectionBypassActive = vc1TrackSelectionBypassStreamUrls.contains(requestedUrl)
             isSafeAudioModeActiveForCurrentPlayback = safeAudioModeEnabled
             isAudioDisabledForCurrentPlayback = audioDisabledForStream
             isVc1TrackSelectionBypassActiveForCurrentPlayback = vc1TrackSelectionBypassActive
@@ -1315,7 +1371,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 !dv7Mode1Forced
             // DV7 conversion is handled app-side by DolbyVisionExtractorsFactory and the
             // vendored Matroska extractor (wired into effectiveExtractorsFactory below).
-            if (isExperimentalDv7ToDv81ActiveForCurrentPlayback &&
+            if (!isStalker && isExperimentalDv7ToDv81ActiveForCurrentPlayback &&
                 dv7ToDv81LastProbeReasonForCurrentPlayback != "ready") {
                 dv7ToDv81LastProbeReasonForCurrentPlayback = "app-extractor-factory"
             }
@@ -1594,7 +1650,7 @@ internal fun PlayerRuntimeController.initializePlayer(
             // after its own Matroska swap.
             val effectiveExtractorsFactory: ExtractorsFactory =
                 com.nuvio.tv.core.player.thumbnail.PlaybackTap.wrap(
-                    autoSyncExtractorsFactory(dolbyVisionExtractorsFactory, url, headers) // AutoSync hook
+                    (if (isStalker) dolbyVisionExtractorsFactory else autoSyncExtractorsFactory(dolbyVisionExtractorsFactory, url, headers)) // AutoSync hook
                 )
 
             setLoadingStatus(
@@ -1614,7 +1670,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     extractorsFactory = effectiveExtractorsFactory,
                     subtitleParserFactory = null
                 )
-                val playerDataSourceFactory = LoggingDataSourceFactory(PlayerPlaybackNetworking.createDataSourceFactory(context, headers), "BUILDER_DEFAULT")
+                val playerDataSourceFactory = LoggingDataSourceFactory((prepared?.policy?.let { androidx.media3.datasource.DefaultDataSource.Factory(context, it.httpFactory()) } ?: PlayerPlaybackNetworking.createDataSourceFactory(context, headers)), "BUILDER_DEFAULT")
                 ExoPlayer.Builder(context)
                     .setBandwidthMeter(bandwidthMeter)
                     .setTrackSelector(trackSelector!!)
@@ -1626,6 +1682,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     .build()
             }
 
+            mediaSourceFactory.stalkerMediaPolicy = prepared?.policy
             val constructionFingerprint = ExoConstructionFingerprint(
                 useLibass = useLibass,
                 isHls = isHls,
@@ -1723,14 +1780,14 @@ internal fun PlayerRuntimeController.initializePlayer(
             if (initializationGeneration != playbackRecoveryGate.generation) return@launch
             // Left the foreground while preparing: build on return instead of claiming a decoder
             // the foreground app may need. The resume rebuild uses currentStreamUrl.
-            if (releaseDecoderOnBackground && isInBackground && url == currentStreamUrl) {
+            if (releaseDecoderOnBackground && isInBackground && requestedUrl == currentStreamUrl) {
                 pendingBackgroundCrashRecovery = true
                 return@launch
             }
             nativeVideoSelection.activate(nativeSelectionOwner)
             _exoPlayer = if (useLibass) {
                 com.nuvio.tv.libass.media.AssHandler.setRenderScale(playerSettings.libassRenderScale.scale)
-                val playerDataSourceFactory = LoggingDataSourceFactory(PlayerPlaybackNetworking.createDataSourceFactory(context, headers), "BUILDER_LIBASS")
+                val playerDataSourceFactory = LoggingDataSourceFactory((prepared?.policy?.let { androidx.media3.datasource.DefaultDataSource.Factory(context, it.httpFactory()) } ?: PlayerPlaybackNetworking.createDataSourceFactory(context, headers)), "BUILDER_LIBASS")
                 ExoPlayer.Builder(context)
                     .setBandwidthMeter(bandwidthMeter)
                     .setLoadControl(loadControl)
@@ -2366,6 +2423,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
+                        if (!afrPreflightGate.isCurrent(afrPreflightToken)) return
                         if (isReleasingPlayer && error.errorCode == PlaybackException.ERROR_CODE_TIMEOUT) return
                         cancelFirstFrameWatchdog()
                         cancelTunnelAvSyncWatchdog()
@@ -2487,7 +2545,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                                 retryCurrentStreamWithDv7Mode1Fallback(currentPosition)
                                 return
                             }
-                            if (isExperimentalDv7ToDv81ActiveForCurrentPlayback && !hasAttemptedDv7ToDv81ForCurrentPlayback) {
+                            if (!isStalker && isExperimentalDv7ToDv81ActiveForCurrentPlayback && !hasAttemptedDv7ToDv81ForCurrentPlayback) {
                                 hasAttemptedDv7ToDv81ForCurrentPlayback = true
                                 val probe = DoviBridge.probeRealtimeConversionSupport(currentStreamUrl)
                                 dv7ToDv81LastProbeReasonForCurrentPlayback = probe.reason
@@ -2525,7 +2583,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                                 retryCurrentStreamWithDv7Mode1Fallback(currentPosition)
                                 return
                             }
-                            if (isExperimentalDv7ToDv81ActiveForCurrentPlayback &&
+                            if (!isStalker && isExperimentalDv7ToDv81ActiveForCurrentPlayback &&
                                 !hasAttemptedDv7ToDv81ForCurrentPlayback
                             ) {
                                 hasAttemptedDv7ToDv81ForCurrentPlayback = true
@@ -2675,8 +2733,13 @@ internal fun PlayerRuntimeController.initializePlayer(
                             return
                         }
 
+                        // A failed hardware video decoder gets one software-decoder rebuild first.
+                        if (trySoftwareVideoDecoderFallback(error)) {
+                            return
+                        }
+
                         // ── Main Engine Failover ──
-                        if (maybeAutoSwitchInternalPlayerOnStartupError(detailedError = detailedError, allowEngineFailover = allowEngineFailover)) {
+                        if (!isStalker && maybeAutoSwitchInternalPlayerOnStartupError(detailedError = detailedError, allowEngineFailover = allowEngineFailover)) {
                             return
                         }
 
@@ -2737,7 +2800,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                             errorCodeName = error.errorCodeName,
                             exceptionClass = error.javaClass.name,
                             causeClass = error.cause?.javaClass?.name,
-                            causeMessage = error.cause?.message,
+                            causeMessage = if (isStalker) null else error.cause?.message,
                             httpStatus = error.findInvalidResponseCodeException()?.responseCode
                         )
                         scope.launch {
@@ -2751,11 +2814,12 @@ internal fun PlayerRuntimeController.initializePlayer(
                         // Fatal error: stop any next-episode auto-play that may have been
                         // armed by a short placeholder ENDED or residual post-play state.
                         cancelNextEpisodeAutoPlayOnFatalError()
-                        val canSwitchToMpvOnFatal = currentInternalPlayerEngine != InternalPlayerEngine.MVP_PLAYER &&
+                        val canSwitchToMpvOnFatal = !isStalker && currentInternalPlayerEngine != InternalPlayerEngine.MVP_PLAYER &&
                             (error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
                              error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
                              error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ||
                              error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES ||
+                             error.errorCode == PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED ||
                              error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
                              error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED)
                         val card = errorCardFor(error)
@@ -3218,15 +3282,19 @@ internal fun PlayerRuntimeController.initializePlayer(
             if (!startupSubtitlePreparation.fetchCompleted) {
                 fetchAddonSubtitles()
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
+            if (!afrPreflightGate.isCurrent(afrPreflightToken)) return@launch
             if (
-                attemptStartupExhaustedSourceFailover(
+                !isStalker && attemptStartupExhaustedSourceFailover(
                     detailedError = e.message ?: context.getString(com.nuvio.tv.R.string.player_error_initialize_failed)
                 )
             ) {
                 return@launch
             }
-            val displayError = e.toDisplayMessage(context, context.getString(com.nuvio.tv.R.string.player_error_initialize_failed))
+            val displayError = if (isStalker) "Stalker playback could not start. Use the internal ExoPlayer and check the source and VPN settings."
+                else e.toDisplayMessage(context, context.getString(com.nuvio.tv.R.string.player_error_initialize_failed))
             val diagnostics = LastPlaybackDiagnostics(
                 timestampMs = System.currentTimeMillis(),
                 host = currentStreamUrl.safeHost(),
@@ -3240,7 +3308,7 @@ internal fun PlayerRuntimeController.initializePlayer(
                 errorCodeName = null,
                 exceptionClass = e.javaClass.name,
                 causeClass = e.cause?.javaClass?.name,
-                causeMessage = e.cause?.message ?: e.message,
+                causeMessage = if (isStalker) null else e.cause?.message ?: e.message,
                 httpStatus = null
             )
             scope.launch {

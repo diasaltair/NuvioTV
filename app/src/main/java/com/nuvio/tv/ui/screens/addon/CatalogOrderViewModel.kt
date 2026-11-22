@@ -29,7 +29,9 @@ class CatalogOrderViewModel @Inject constructor(
     private val layoutPreferenceDataStore: LayoutPreferenceDataStore,
     private val homeCatalogSettingsSyncService: HomeCatalogSettingsSyncService,
     private val serverCatalog: ServerCatalog,
-    private val builtInCatalogs: com.nuvio.tv.core.catalog.BuiltInCatalogs = com.nuvio.tv.core.catalog.BuiltInCatalogs.None
+    private val builtInCatalogs: com.nuvio.tv.core.catalog.BuiltInCatalogs = com.nuvio.tv.core.catalog.BuiltInCatalogs.None,
+    // Live TV fork: Live TV and Sports rows sit in this list too.
+    private val homeLiveRows: com.nuvio.tv.livetv.home.HomeLiveRows
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CatalogOrderUiState())
@@ -97,7 +99,7 @@ class CatalogOrderViewModel @Inject constructor(
      * Moving down means jumping below the next addon block.
      */
     private fun moveCollectionBetweenAddons(key: String, direction: Int) {
-        if (!key.startsWith("collection_")) return
+        if (!key.isMovableKey()) return
 
         val items = _uiState.value.items
         val currentIndex = items.indexOfFirst { it.key == key }
@@ -110,14 +112,14 @@ class CatalogOrderViewModel @Inject constructor(
             // Moving up: find the start of the previous addon block
             // Skip any adjacent collections above
             var scanIdx = currentIndex - 1
-            while (scanIdx >= 0 && currentKeys[scanIdx].startsWith("collection_")) {
+            while (scanIdx >= 0 && currentKeys[scanIdx].isMovableKey()) {
                 scanIdx--
             }
             if (scanIdx < 0) return // already at top
 
             // scanIdx is now pointing at an addon catalog. Find the start of its addon block.
             val targetAddonName = items[scanIdx].addonName
-            while (scanIdx > 0 && !currentKeys[scanIdx - 1].startsWith("collection_") &&
+            while (scanIdx > 0 && !currentKeys[scanIdx - 1].isMovableKey() &&
                 items[scanIdx - 1].addonName == targetAddonName) {
                 scanIdx--
             }
@@ -125,14 +127,14 @@ class CatalogOrderViewModel @Inject constructor(
         } else {
             // Moving down: find the end of the next addon block
             var scanIdx = currentIndex + 1
-            while (scanIdx < currentKeys.size && currentKeys[scanIdx].startsWith("collection_")) {
+            while (scanIdx < currentKeys.size && currentKeys[scanIdx].isMovableKey()) {
                 scanIdx++
             }
             if (scanIdx >= currentKeys.size) return // already at bottom
 
             // scanIdx is now pointing at an addon catalog. Find the end of its addon block.
             val targetAddonName = items[scanIdx].addonName
-            while (scanIdx < currentKeys.lastIndex && !currentKeys[scanIdx + 1].startsWith("collection_") &&
+            while (scanIdx < currentKeys.lastIndex && !currentKeys[scanIdx + 1].isMovableKey() &&
                 items[scanIdx + 1].addonName == targetAddonName) {
                 scanIdx++
             }
@@ -171,7 +173,8 @@ class CatalogOrderViewModel @Inject constructor(
                 layoutPreferenceDataStore.homeCatalogOrderKeys,
                 layoutPreferenceDataStore.disabledHomeCatalogKeys,
                 layoutPreferenceDataStore.customCatalogTitles,
-                layoutPreferenceDataStore.followAddonsOrder
+                layoutPreferenceDataStore.followAddonsOrder,
+                combine(homeLiveRows.rows, homeLiveRows.names) { rows, names -> rows to names }
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
                 val addons = values[0] as List<Addon>
@@ -184,6 +187,8 @@ class CatalogOrderViewModel @Inject constructor(
                 @Suppress("UNCHECKED_CAST")
                 val customTitles = values[4] as Map<String, String>
                 val followAddons = values[5] as Boolean
+                @Suppress("UNCHECKED_CAST")
+                val live = values[6] as Pair<List<com.nuvio.tv.livetv.home.HomeLiveRow>, Map<String, String>>
 
                 val items = buildOrderedCatalogItems(
                     addons = addons,
@@ -191,7 +196,9 @@ class CatalogOrderViewModel @Inject constructor(
                     savedOrderKeys = savedOrderKeys,
                     disabledKeys = disabledKeys,
                     customTitles = customTitles,
-                    followAddonsOrder = followAddons
+                    followAddonsOrder = followAddons,
+                    liveRows = live.first,
+                    liveNames = live.second
                 )
                 Pair(items, followAddons)
             }.collectLatest { (orderedItems, followAddons) ->
@@ -213,7 +220,9 @@ class CatalogOrderViewModel @Inject constructor(
         savedOrderKeys: List<String>,
         disabledKeys: Set<String>,
         customTitles: Map<String, String> = emptyMap(),
-        followAddonsOrder: Boolean = false
+        followAddonsOrder: Boolean = false,
+        liveRows: List<com.nuvio.tv.livetv.home.HomeLiveRow> = emptyList(),
+        liveNames: Map<String, String> = emptyMap()
     ): List<CatalogOrderItem> {
         val defaultEntries = buildDefaultCatalogEntries(addons)
         val collectionEntries = collections.map { collection ->
@@ -225,7 +234,18 @@ class CatalogOrderViewModel @Inject constructor(
                 typeLabel = "collection"
             )
         }
-        val allEntries = defaultEntries + collectionEntries
+        // Live TV fork: each Live TV / Sports row (moves like a collection).
+        val liveEntries = liveRows.map { row ->
+            CatalogOrderEntry(
+                key = row.key,
+                disableKey = row.key,
+                catalogName = liveNames[row.id] ?: row.title,
+                addonName = "",
+                typeLabel = row.kind,
+                liveRow = row
+            )
+        }
+        val allEntries = defaultEntries + collectionEntries + liveEntries
         val availableMap = allEntries.associateBy { it.key }
         val defaultOrderKeys = allEntries.map { it.key }
 
@@ -234,7 +254,7 @@ class CatalogOrderViewModel @Inject constructor(
             // In follow mode, addon catalogs stay in manifest order.
             // Collections are positioned based on their relative position in savedOrderKeys.
             val addonKeys = defaultEntries.map { it.key }
-            val collectionKeys = collectionEntries.map { it.key }.toSet()
+            val collectionKeys = (collectionEntries + liveEntries).map { it.key }.toSet()
 
             val savedValid = savedOrderKeys.filter { it in availableMap }.distinct()
 
@@ -301,7 +321,7 @@ class CatalogOrderViewModel @Inject constructor(
         return effectiveOrder.mapIndexedNotNull { index, key ->
             val entry = availableMap[key] ?: return@mapIndexedNotNull null
             val displayName = customTitles[key]?.takeIf { it.isNotBlank() } ?: entry.catalogName
-            val isCollection = key.startsWith("collection_")
+            val isCollection = key.isMovableKey()
 
             val canMoveUp: Boolean
             val canMoveDown: Boolean
@@ -327,7 +347,8 @@ class CatalogOrderViewModel @Inject constructor(
                 isDisabled = entry.disableKey in disabledKeys ||
                     (entry.legacyDisableKey != null && entry.legacyDisableKey in disabledKeys),
                 canMoveUp = canMoveUp,
-                canMoveDown = canMoveDown
+                canMoveDown = canMoveDown,
+                liveRow = entry.liveRow
             )
         }
     }
@@ -348,7 +369,7 @@ class CatalogOrderViewModel @Inject constructor(
             var i = 0
             while (i < result.size) {
                 val key = result[i]
-                if (!key.startsWith("collection_")) {
+                if (!key.isMovableKey()) {
                     i++
                     continue
                 }
@@ -358,7 +379,7 @@ class CatalogOrderViewModel @Inject constructor(
                     result.removeAt(i)
                     var insertPos = i
                     while (insertPos < result.size &&
-                        !result[insertPos].startsWith("collection_") &&
+                        !result[insertPos].isMovableKey() &&
                         availableMap[result[insertPos]]?.addonName == prevAddon
                     ) {
                         insertPos++
@@ -380,7 +401,7 @@ class CatalogOrderViewModel @Inject constructor(
         availableMap: Map<String, CatalogOrderEntry>
     ): String? {
         for (j in index - 1 downTo 0) {
-            if (!order[j].startsWith("collection_")) {
+            if (!order[j].isMovableKey()) {
                 return availableMap[order[j]]?.addonName
             }
         }
@@ -393,7 +414,7 @@ class CatalogOrderViewModel @Inject constructor(
         availableMap: Map<String, CatalogOrderEntry>
     ): String? {
         for (j in index + 1 until order.size) {
-            if (!order[j].startsWith("collection_")) {
+            if (!order[j].isMovableKey()) {
                 return availableMap[order[j]]?.addonName
             }
         }
@@ -459,7 +480,9 @@ data class CatalogOrderItem(
     val typeLabel: String,
     val isDisabled: Boolean,
     val canMoveUp: Boolean,
-    val canMoveDown: Boolean
+    val canMoveDown: Boolean,
+    /** Live TV fork: set for a Live TV or Sports row (it gets an Edit button). */
+    val liveRow: com.nuvio.tv.livetv.home.HomeLiveRow? = null
 )
 
 private data class CatalogOrderEntry(
@@ -468,5 +491,10 @@ private data class CatalogOrderEntry(
     val legacyDisableKey: String? = null,
     val catalogName: String,
     val addonName: String,
-    val typeLabel: String
+    val typeLabel: String,
+    val liveRow: com.nuvio.tv.livetv.home.HomeLiveRow? = null
 )
+
+/** Live TV fork: collections, Live TV rows and Sports rows move between addons' catalogs. */
+private fun String.isMovableKey(): Boolean =
+    startsWith("collection_") || com.nuvio.tv.livetv.home.isLiveHomeRowKey(this)

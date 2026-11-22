@@ -468,7 +468,10 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         playbackPosition = pos,
                         duration = playerDuration,
                         bufferedPosition = (pos + cacheAheadMs).coerceAtLeast(pos),
-                        playerReportsLive = view.isLiveStreamNow() || mpvDurationGrowth.grew,
+                        // Live TV fork: a recording still being made looks live to the player (and its
+                        // length keeps growing), but it's a recording: skipping back and forward stay on.
+                        playerReportsLive = (view.isLiveStreamNow() || mpvDurationGrowth.grew) &&
+                            !com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType),
                         isPlaying = playingForWatchClock
                     )
                     recordMpvSample(pos, cacheAheadMs, playingNow, cacheBuffering) { view.frameDrops() }
@@ -486,16 +489,23 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                         hasFatalError = !_uiState.value.error.isNullOrBlank(),
                         durationMs = effectiveDuration
                     ) && !isPlaceholderPlayback()
+                    // Live TV fork: a recording that has played to its end finishes (and returns to
+                    // Recordings) whatever its length; the check above skips anything under about
+                    // two minutes as a placeholder clip.
+                    val recordingEnded = !naturalEnded &&
+                        com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType) &&
+                        !view.isLiveStreamNow() && mpvEofReached && firstFrameReady &&
+                        _uiState.value.error.isNullOrBlank()
                     val wasEnded = _uiState.value.playbackEnded
                     _uiState.update { state ->
                         state.copy(
                             isPlaying = playingNow,
-                            isBuffering = if (naturalEnded) false else (!firstFrameReady || cacheBuffering),
+                            isBuffering = if (naturalEnded || recordingEnded) false else (!firstFrameReady || cacheBuffering),
                             showLoadingOverlay = if (state.loadingOverlayEnabled) !firstFrameReady else false,
                             // Snap the loading-logo fill to 100% once playback is
                             // ready so the logo finishes filling on dismissal.
                             loadingProgress = if (firstFrameReady && state.loadingProgress != null) 1f else state.loadingProgress,
-                            playbackEnded = naturalEnded
+                            playbackEnded = naturalEnded || recordingEnded
                         )
                     }
                     // libmpv has no Media3 listener callbacks. Keep Android's active media
@@ -554,9 +564,23 @@ internal fun PlayerRuntimeController.startProgressUpdates() {
                     playbackPosition = pos,
                     duration = playerDuration.coerceAtLeast(0L),
                     bufferedPosition = player.bufferedPosition.coerceAtLeast(pos),
-                    playerReportsLive = player.isCurrentMediaItemLive,
+                    // Live TV fork: a recording still being made looks live to the player, but
+                    // it's a recording: skipping back and forward stay on.
+                    playerReportsLive = player.isCurrentMediaItemLive &&
+                        !com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType),
                     isPlaying = player.isPlaying
                 )
+                // Live TV fork: a recording that has played to its end finishes (and returns to
+                // Recordings) whatever its length; Nuvio's own end check skips anything under
+                // about two minutes as a placeholder clip.
+                if (com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType) &&
+                    player.playbackState == Player.STATE_ENDED &&
+                    !player.isCurrentMediaItemLive &&
+                    !_uiState.value.playbackEnded &&
+                    _uiState.value.error.isNullOrBlank()
+                ) {
+                    _uiState.update { it.copy(playbackEnded = true, isBuffering = false) }
+                }
                 playbackAnalyticsDiagnostics.recordProgressSnapshot(
                     player = player,
                     hasRenderedFirstFrame = hasRenderedFirstFrame,
@@ -767,6 +791,21 @@ internal fun PlayerRuntimeController.finishOnSourceErrorAtEnd(
 internal fun PlayerRuntimeController.stopProgressUpdates() {
     progressJob?.cancel()
     progressJob = null
+    // Live TV fork: a recording that has played to its end finishes (and returns to Recordings)
+    // whatever its length. Nuvio's own end check skips anything under about two minutes as a
+    // placeholder clip, and the progress check above stops at the end, so it's caught here,
+    // where the player stops it.
+    val player = _exoPlayer
+    if (player != null &&
+        !isUsingMpvEngine() &&
+        com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType) &&
+        player.playbackState == Player.STATE_ENDED &&
+        !player.isCurrentMediaItemLive &&
+        !_uiState.value.playbackEnded &&
+        _uiState.value.error.isNullOrBlank()
+    ) {
+        _uiState.update { it.copy(playbackEnded = true, isBuffering = false) }
+    }
 }
 
 internal fun PlayerRuntimeController.stopMpvProgressUpdatesForPause() {
@@ -888,13 +927,16 @@ internal fun PlayerRuntimeController.submitPlaybackIssueReport(choices: Playback
     if (!state.playbackIssueReportsEnabled) return
     if (state.playbackIssueReportStatus.isReportBusyOrDone) return
     val timeline = _playbackTimeline.value
-    val diagnostics = lastPlaybackDiagnosticsForReport.takeIf { it.timestampMs > 0L }
+    val isStalker = com.nuvio.tv.core.player.isStalkerPlaybackAddress(currentStreamUrl) || mediaSourceFactory.stalkerMediaPolicy != null
+    val diagnosticSnapshot = lastPlaybackDiagnosticsForReport.takeIf { it.timestampMs > 0L }
         ?: LastPlaybackDiagnostics(
             timestampMs = System.currentTimeMillis(),
             host = currentStreamUrl.reportSafeHost(),
             result = state.error?.let { "Error: $it" } ?: "Pending"
         )
-    val reportError = lastPlaybackIssueError
+    val diagnostics = if (isStalker) diagnosticSnapshot.copy(host = "stalker", streamUrl = null, headersJson = null,
+        result = diagnosticSnapshot.result.takeIf { it in setOf("Pending", "Played") } ?: "Stalker playback failed") else diagnosticSnapshot
+    val rawReportError = lastPlaybackIssueError
         ?: PlaybackIssueErrorInput(
             displayMessage = state.error,
             errorCode = null,
@@ -904,6 +946,10 @@ internal fun PlayerRuntimeController.submitPlaybackIssueReport(choices: Playback
             causeMessage = null,
             httpStatus = null
         )
+    val reportError = if (isStalker) rawReportError.copy(
+        displayMessage = if (state.error == null) null else "Stalker playback failed",
+        causeMessage = null
+    ) else rawReportError
     val audioTrack = state.audioTracks.reportTrackLabel(state.selectedAudioTrackIndex)
     val subtitleTrack = state.subtitleTracks.reportTrackLabel(state.selectedSubtitleTrackIndex)
     val reportReason = PlayerStartupLoadingPolicy.reportReason(
@@ -944,7 +990,7 @@ internal fun PlayerRuntimeController.submitPlaybackIssueReport(choices: Playback
         episode = currentEpisode,
         episodeTitle = currentEpisodeTitle.takeUnless { liveChannel },
         releaseYear = year,
-        streamUrl = currentStreamUrl,
+        streamUrl = if (isStalker) "" else currentStreamUrl,
         hideLinkHash = iptvSource,
         viewer = choices,
         streamMimeType = currentStreamMimeType,
@@ -956,15 +1002,15 @@ internal fun PlayerRuntimeController.submitPlaybackIssueReport(choices: Playback
         },
         videoHash = currentVideoHash,
         videoSize = currentVideoSize,
-        requestHeaders = currentHeaders,
-        responseHeaders = currentStreamResponseHeaders,
+        requestHeaders = if (isStalker) emptyMap() else currentHeaders,
+        responseHeaders = if (isStalker) emptyMap() else currentStreamResponseHeaders,
         playerEngine = currentInternalPlayerEngine.name,
         loading = loadingInput,
         positionMs = timeline.currentPosition.takeIf { it > 0L },
         durationMs = timeline.duration.takeIf { it > 0L },
         bufferedPositionMs = timeline.bufferedPosition.takeIf { it > 0L },
-        selectedAudioTrack = audioTrack,
-        selectedSubtitleTrack = subtitleTrack,
+        selectedAudioTrack = if (isStalker) null else audioTrack,
+        selectedSubtitleTrack = if (isStalker) null else subtitleTrack,
         isTorrentStream = isTorrentStream,
         playbackSettings = buildPlaybackIssuePlaybackSettingsInput(),
         playbackAnalytics = playbackAnalyticsInput,
@@ -1145,6 +1191,7 @@ private fun List<TrackInfo>.reportTrackLabel(selectedIndex: Int): String? {
 }
 
 private fun String.reportSafeHost(): String {
+    if (com.nuvio.tv.core.player.isStalkerPlaybackAddress(this)) return "stalker"
     return runCatching { Uri.parse(this).host ?: "unknown" }.getOrDefault("unknown")
 }
 
@@ -1284,6 +1331,11 @@ internal fun PlayerRuntimeController.currentWatchProgress(
 )
 
 internal fun PlayerRuntimeController.saveWatchProgressInternal(position: Long, duration: Long, syncRemote: Boolean = true) {
+    // Live TV fork: a recording keeps its own place (kept out of Continue Watching and history).
+    if (com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType)) {
+        if (position >= 1000) com.nuvio.tv.livetv.record.RecordingResume.save(context, contentId, position, duration)
+        return
+    }
     if (contentType.equals("cloud", ignoreCase = true)) {
         saveCloudLibraryProgress(position, duration, completed = false)
         return
@@ -1395,6 +1447,8 @@ internal fun PlayerRuntimeController.refreshScrobbleItem() {
 }
 
 internal fun PlayerRuntimeController.buildScrobbleItem(): TrackingMediaReference? {
+    // Live TV fork: recordings are never sent to Trakt or other trackers.
+    if (com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType)) return null
     val rawContentId = contentId ?: return null
     val isServerItem = ServerItemRef.isServerId(rawContentId)
     val parentMetaId = if (isServerItem) serverImdbId(rawContentId) ?: return null else rawContentId

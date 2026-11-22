@@ -9,6 +9,7 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.imageLoader
 import com.nuvio.tv.core.image.CustomPosterFallbackInterceptor
+import com.nuvio.tv.core.image.PlaybackImageCache
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.gif.GifDecoder
@@ -134,6 +135,9 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     override fun onCreate() {
+        // Before super.onCreate(): Hilt creates injected services there, and the budget is read once.
+        MemoryBudget.init(this)
+        com.nuvio.tv.core.player.PlaybackDeviceSupport.init(this)
         com.nuvio.tv.core.util.StartupLatencyTrace.coldOnce("app_create")
         com.nuvio.tv.core.image.PosterUpdates.started(System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
         warmStartPreferences()
@@ -149,6 +153,13 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
         com.nuvio.tv.data.repository.ArcMainWatchdog.start(this)
         com.nuvio.tv.data.repository.ArcHeartbeat.start(this) { screensaverController.playbackActive.value }
         PluginRuntimeHooks.onApplicationCreate(this)
+        // Live TV fork: VPN progress lines go into the start-up report.
+        com.nuvio.vpn.android.VpnPlaybackProtection.diagnostics =
+            java.util.function.Consumer { line -> com.nuvio.tv.livetv.model.LiveTvLoadReport.add(line) }
+        // ...and whether it's on and which profile (at start and whenever it changes).
+        com.nuvio.tv.livetv.data.VpnReportLines.start()
+        // The DNS setting (Live TV settings), before any Live TV or player request.
+        com.nuvio.tv.livetv.data.ForkDns.init(this)
         androidTvChannelSyncService.start()
         // Hydrate the AFR fps cache from disk (background load) so cold
         // rewatches take the preflight hit path (switch before prepare).

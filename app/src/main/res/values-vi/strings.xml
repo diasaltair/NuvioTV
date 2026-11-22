@@ -3455,6 +3455,8 @@
     <string name="autosync_label_synced">Đã tự động đồng bộ</string>
     <string name="stream_resume_from_time">Xem tiếp từ %1$s</string>
     <string name="stream_resume_from_percent">Xem tiếp từ %1$d%%</string>
+    <string name="settings_home_screen_rows">Hàng trên màn hình chính</string>
+    <string name="settings_home_screen_rows_subtitle">Chọn thứ tự các hàng trên màn hình chính</string>
     <string name="cw_no_artwork">Không có ảnh hiển thị</string>
     <string name="detail_eyebrow_episodes">Tập phim</string>
     <string name="detail_trailer_error_age_restricted">Trailer này bị giới hạn độ tuổi trên YouTube và không thể phát tại đây.</string>
@@ -4177,16 +4179,10 @@
     <string name="detail_episode_synopsis_none">Tập phim này chưa có tóm tắt.</string>
     <string name="player_track_role_commentary">Bình luận</string>
     <string name="player_track_role_audio_description">Mô tả âm thanh</string>
-
     <string name="autosync_toast_no_fit">Đồng bộ thất bại: Phụ đề không khớp với bản video này.</string>
-
     <string name="playback_release_decoder_on_background">Giải phóng bộ giải mã trong nền</string>
     <string name="playback_release_decoder_on_background_sub">Giải phóng bộ giải mã video khi Nuvio Arc chuyển sang nền. Bật tùy chọn này nếu phát lại bị lỗi bộ giải mã sau khi quay lại ứng dụng. Trình phát sẽ tải lại khi quay lại, kể cả sau khi trình bảo vệ màn hình hoạt động.</string>
-
-    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
-        <item quantity="other">Còn %d</item>
-    </plurals>
     <string name="detail_section_parental_guide">Hướng dẫn cho phụ huynh</string>
     <string name="licenses_attributions_subtitle_fonts_title">Phông chữ phụ đề</string>
     <string name="licenses_attributions_subtitle_fonts_body">Roboto, Montserrat, Asap Condensed và Noto Sans (kèm Noto Sans Arabic, Hebrew, Devanagari, Bengali và Tamil) của The Roboto Project Authors, The Montserrat Project Authors, The Asap Project Authors và The Noto Project Authors. Được cấp phép theo SIL Open Font License, Version 1.1.</string>
@@ -4473,11 +4469,7 @@
     <string name="report_sent_no_phone">Cảm ơn bạn đã báo cáo. Arc là dự án sở thích nên không phải báo cáo nào cũng được phản hồi.</string>
     <string name="report_sent_back">Quay lại xem tiếp</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="other">Chọn tất cả mục phù hợp. Arc đã giữ lại %1$d phút gần nhất.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="other">Cài đặt trình phát và %1$d phút gần nhất</item>
-    </plurals>
     <string name="report_settings_subtitle">Mô tả điều gì đã sai hoặc bạn muốn Arc làm gì</string>
     <string name="report_group_choose">Bạn muốn báo cáo điều gì?</string>
     <string name="report_group_options">Tùy chọn</string>
@@ -4530,8 +4522,6 @@
     <string name="report_sent_kind_bug">Có gì đó không hoạt động</string>
     <string name="report_sent_kind_idea">Ý tưởng hoặc yêu cầu</string>
     <plurals name="report_my_reports_new">
-        <item quantity="other">%1$d mới</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Kiểm tra mỗi ngày một lần. Arc là dự án sở thích nên không phải báo cáo nào cũng được phản hồi.</string>
     <string name="report_my_reports_hint_off">Đang tắt kiểm tra. Bật Kiểm tra báo cáo của tôi để xem báo cáo của bạn ra sao.</string>
@@ -4554,8 +4544,6 @@
     <string name="report_ready_follow_off">Để theo dõi báo cáo này, hãy quét mã ở màn hình tiếp theo bằng điện thoại.</string>
     <string name="report_notice_title">Báo cáo của bạn có cập nhật mới</string>
     <plurals name="report_notice_many_title">
-        <item quantity="other">%1$d báo cáo của bạn có cập nhật mới</item>
-    </plurals>
     <string name="report_notice_one">%1$s, gửi ngày %2$s: %3$s.</string>
     <string name="report_notice_many">Mở Báo cáo của tôi để xem có gì thay đổi.</string>
     <string name="report_notice_open">Mở Báo cáo của tôi</string>
@@ -4566,13 +4554,9 @@
     <string name="report_stop_recording">Dừng ghi</string>
     <string name="report_recording_pill">Đang ghi %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="other">Đang ghi %1$s · %2$d dấu</item>
-    </plurals>
     <string name="report_recording_no_space">Không đủ dung lượng trống để ghi</string>
     <string name="report_item_recording">Đang ghi, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="other">%d dấu. Chỉ số liệu, không bao giờ có âm thanh hay hình ảnh.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Báo cáo sự cố / đánh dấu</string>
     <string name="remote_buttons_job_report_mark_desc">Mở bảng báo cáo. Khi đang ghi, thêm một dấu.</string>
     <string name="display_mode_measured">Đo được</string>

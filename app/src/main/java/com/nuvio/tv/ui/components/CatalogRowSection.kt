@@ -330,6 +330,8 @@ fun CatalogRowSection(
                                 .padding(horizontal = NuvioTheme.spacing.sm, vertical = NuvioTheme.spacing.xxs)
                         )
                     }
+                    // Live TV fork: "Live TV ▲" hint when this is the top row.
+                    com.nuvio.tv.livetv.home.LiveTvHomeHint()
                 }
                 if (showAddonName) {
                     val addonText = if (catalogTitle.isBlank()) " " else stringResource(R.string.catalog_from_addon, catalogRow.addonName)

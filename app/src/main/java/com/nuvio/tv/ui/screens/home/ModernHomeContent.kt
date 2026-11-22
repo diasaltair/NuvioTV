@@ -95,6 +95,7 @@ import com.nuvio.tv.LocalSidebarExpanded
 import com.nuvio.tv.LocalContentFocusRequester
 import com.nuvio.tv.ui.util.LocalRecompositionHighlighterEnabled
 import com.nuvio.tv.ui.util.StableList
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.tv.ui.util.StableRef
 import com.nuvio.tv.ui.util.asStable
 import com.nuvio.tv.ui.util.formatHeroRuntime
@@ -556,7 +557,9 @@ fun ModernHomeContent(
 
         val hadActiveRow = focusHolder.activeRowKey != null
         val existingActive = focusHolder.activeRowKey?.let { rowByKey[it] }
-        val firstRow = carouselRows.list.firstOrNull()
+        // Live TV fork: start on the first poster row, not on a Live TV row (it has no posters).
+        val firstRow = carouselRows.list.firstOrNull { !com.nuvio.tv.livetv.home.isLiveHomeRowKey(it.key) }
+            ?: carouselRows.list.firstOrNull()
 
         val resolvedActive = when {
             existingActive != null -> existingActive
@@ -1159,6 +1162,12 @@ fun ModernHomeContent(
             val latestOnFocusedRowKeyChanged by rememberUpdatedState(onFocusedRowKeyChanged)
             val onActiveRowKeyChangeLambda = remember {
                 { key: String? ->
+                    // Live TV fork: Live TV and Sports cards aren't movies, so the last movie
+                    // highlighted (and its trailer) lets go when you move onto one of their rows.
+                    if (key != null && com.nuvio.tv.livetv.home.isLiveHomeRowKey(key)) {
+                        focusedCatalogSelection.value = null
+                        expandedCatalogFocusKey.value = null
+                    }
                     focusHolder.activeRowKey = key
                     activeRowKey.value = key
                     // saveFocusState only runs on dispose, which a system Home press never

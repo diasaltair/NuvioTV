@@ -69,7 +69,8 @@ internal suspend fun PlayerRuntimeController.fetchAddonSubtitlesNow(
     _uiState.update { it.copy(installedSubtitleAddonOrder = installedAddonOrder) }
 
     // Compute hash lazily for providers that support OpenSubtitles-style matching.
-    if (currentVideoHash == null && currentStreamUrl.isNotBlank()) {
+    if (currentVideoHash == null && currentStreamUrl.isNotBlank() &&
+        !com.nuvio.tv.core.player.isStalkerPlaybackAddress(currentStreamUrl)) {
         val result = OpenSubtitlesHasher.compute(currentStreamUrl, currentHeaders)
         if (result != null) {
             currentVideoHash = result.hash
@@ -616,6 +617,27 @@ internal fun PlayerRuntimeController.observeSubtitleSettings() {
     }
 }
 
+/** Live TV fork: where a recording was left off, as a saved-progress entry the player resumes from. */
+private fun PlayerRuntimeController.recordingResumeProgress(): WatchProgress? {
+    val (pos, dur) = com.nuvio.tv.livetv.record.RecordingResume.load(context, contentId) ?: return null
+    return WatchProgress(
+        contentId = contentId ?: return null,
+        contentType = com.nuvio.tv.livetv.record.RecordingResume.CONTENT_TYPE,
+        name = contentName ?: title,
+        poster = poster,
+        backdrop = null,
+        logo = null,
+        videoId = contentId ?: return null,
+        season = null,
+        episode = null,
+        episodeTitle = null,
+        position = pos,
+        duration = dur,
+        lastWatched = System.currentTimeMillis(),
+        progressPercent = null
+    )
+}
+
 internal fun PlayerRuntimeController.loadSavedProgressFor(season: Int?, episode: Int?) {
     val isCloudLibraryPlayback = contentType.equals("cloud", ignoreCase = true)
     val progressContentId = contentId
@@ -623,7 +645,9 @@ internal fun PlayerRuntimeController.loadSavedProgressFor(season: Int?, episode:
 
     scope.launch {
         pendingResumeProgress = null
-        val progress = if (isCloudLibraryPlayback) {
+        val progress = if (com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType)) {
+            recordingResumeProgress()
+        } else if (isCloudLibraryPlayback) {
             loadCloudLibraryResumeProgress()
         } else if (season != null && episode != null) {
             watchProgressRepository.getEpisodeProgress(
@@ -672,7 +696,9 @@ internal suspend fun PlayerRuntimeController.loadSavedProgressSuspend(season: In
     if (!isCloudLibraryPlayback && progressContentId == null) return
 
     pendingResumeProgress = null
-    val progress = if (isCloudLibraryPlayback) {
+    val progress = if (com.nuvio.tv.livetv.record.RecordingResume.isRecording(contentType)) {
+        recordingResumeProgress()
+    } else if (isCloudLibraryPlayback) {
         loadCloudLibraryResumeProgress()
     } else savedOrServerProgress {
         if (season != null && episode != null) {

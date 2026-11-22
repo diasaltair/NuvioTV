@@ -3195,6 +3195,8 @@
         <item quantity="one">%1$d মিনিট</item>
         <item quantity="other">%1$d মিনিট</item>
     </plurals>
+    <string name="settings_home_screen_rows">হোম স্ক্রিনের সারি</string>
+    <string name="settings_home_screen_rows_subtitle">আপনার হোম স্ক্রিনে সারিগুলোর ক্রম বেছে নিন</string>
     <string name="party_title">ওয়াচ পার্টি</string>
     <string name="party_leave">পার্টি ত্যাগ করুন</string>
     <string name="settings_media_servers">মিডিয়া সার্ভার</string>

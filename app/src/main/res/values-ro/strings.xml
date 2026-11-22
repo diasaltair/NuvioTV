@@ -830,13 +830,9 @@
     <string name="update_ignore">Ignoră</string>
       <string name="playback_player_auto">Automat (Cel mai bun pentru conținut)</string>
     <string name="playback_player_auto_desc">ExoPlayer pentru Filme și Seriale · MPV pentru Anime</string>
-
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">Rândurile ecranului de pornire</string>
+    <string name="settings_home_screen_rows_subtitle">Alege ordinea rândurilor de pe ecranul de pornire</string>
     <plurals name="cw_episodes_left">
-        <item quantity="one">Mai rămâne %d</item>
-        <item quantity="few">Mai rămân %d</item>
-        <item quantity="other">Mai rămân %d</item>
-    </plurals>
     <string name="cw_no_artwork">Fără ilustrație</string>
     <string name="detail_eyebrow_episodes">Episoade</string>
     <string name="detail_section_parental_guide">Ghid pentru părinți</string>
@@ -851,10 +847,6 @@
     <string name="ambient_mode_timeout">Pornește după</string>
     <string name="ambient_mode_timeout_subtitle">Cât se așteaptă înainte de pornirea modului Ambient</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="one">%1$d minut</item>
-        <item quantity="few">%1$d minute</item>
-        <item quantity="other">%1$d de minute</item>
-    </plurals>
     <string name="ambient_mode_catalogs">Cataloage</string>
     <string name="ambient_mode_catalogs_subtitle">Alege până la 3 cataloage din care se preiau imaginile</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Alege până la 3 cataloage</string>
@@ -1949,15 +1941,7 @@
     <string name="report_sent_no_phone">Mulțumesc pentru raport. Arc este un proiect de hobby, așa că nu fiecare raport primește un răspuns.</string>
     <string name="report_sent_back">Înapoi la vizionare</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Alege tot ce se potrivește. Arc a păstrat ultimul minut.</item>
-        <item quantity="few">Alege tot ce se potrivește. Arc a păstrat ultimele %1$d minute.</item>
-        <item quantity="other">Alege tot ce se potrivește. Arc a păstrat ultimele %1$d de minute.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Setările playerului și ultimul minut</item>
-        <item quantity="few">Setările playerului și ultimele %1$d minute</item>
-        <item quantity="other">Setările playerului și ultimele %1$d de minute</item>
-    </plurals>
     <string name="report_settings_subtitle">Spune ce n-a mers sau ce ai vrea să facă Arc</string>
     <string name="report_group_choose">Ce vrei să raportezi?</string>
     <string name="report_group_options">Opțiuni</string>
@@ -2010,10 +1994,6 @@
     <string name="report_sent_kind_bug">Ceva nu funcționează</string>
     <string name="report_sent_kind_idea">Idee sau cerere</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d nou</item>
-        <item quantity="few">%1$d noi</item>
-        <item quantity="other">%1$d noi</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Verificat o dată pe zi. Arc este un proiect de hobby, așa că nu fiecare raport primește un răspuns.</string>
     <string name="report_my_reports_hint_off">Verificarea este oprită. Pornește Verifică rapoartele mele ca să vezi ce se întâmplă cu rapoartele tale.</string>
@@ -2036,10 +2016,6 @@
     <string name="report_ready_follow_off">Ca să urmărești acest raport, scanează cu telefonul codul de pe ecranul următor.</string>
     <string name="report_notice_title">Raportul tău are noutăți</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">%1$d dintre rapoartele tale are noutăți</item>
-        <item quantity="few">%1$d dintre rapoartele tale au noutăți</item>
-        <item quantity="other">%1$d dintre rapoartele tale au noutăți</item>
-    </plurals>
     <string name="report_notice_one">%1$s, trimis pe %2$s: %3$s.</string>
     <string name="report_notice_many">Deschide Rapoartele mele ca să vezi ce s-a schimbat.</string>
     <string name="report_notice_open">Deschide Rapoartele mele</string>
@@ -2050,17 +2026,9 @@
     <string name="report_stop_recording">Oprește înregistrarea</string>
     <string name="report_recording_pill">Înregistrare %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Înregistrare %1$s · %2$d marcaj</item>
-        <item quantity="few">Înregistrare %1$s · %2$d marcaje</item>
-        <item quantity="other">Înregistrare %1$s · %2$d de marcaje</item>
-    </plurals>
     <string name="report_recording_no_space">Nu e destul spațiu liber pentru înregistrare</string>
     <string name="report_item_recording">Înregistrare, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d marcaj. Doar valori, niciodată sunet sau imagine.</item>
-        <item quantity="few">%d marcaje. Doar valori, niciodată sunet sau imagine.</item>
-        <item quantity="other">%d de marcaje. Doar valori, niciodată sunet sau imagine.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Raportează o problemă / marcaj</string>
     <string name="remote_buttons_job_report_mark_desc">Deschide panoul de raportare. În timpul înregistrării adaugă un marcaj.</string>
     <string name="display_mode_measured">Măsurat</string>

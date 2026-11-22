@@ -100,7 +100,14 @@ class HomeViewModel @Inject constructor(
     internal val homeRefreshSignal: com.nuvio.tv.core.util.HomeRefreshSignal,
     internal val serverCatalog: ServerCatalog,
     internal val calendarComingUp: CalendarComingUpSource? = null,
-    internal val builtInCatalogs: com.nuvio.tv.core.catalog.BuiltInCatalogs = com.nuvio.tv.core.catalog.BuiltInCatalogs.None
+    internal val builtInCatalogs: com.nuvio.tv.core.catalog.BuiltInCatalogs = com.nuvio.tv.core.catalog.BuiltInCatalogs.None,
+    // Live TV fork: Live TV and Sports rows added to Home.
+    internal val homeLiveRows: com.nuvio.tv.livetv.home.HomeLiveRows,
+    internal val metaPreviewEnricher: MetaPreviewEnricher = MetaPreviewEnricher(
+        tmdbService,
+        tmdbMetadataService,
+        mdbListRepository
+    )
 ) : ViewModel() {
     companion object {
         internal const val TAG = "HomeViewModel"
@@ -381,6 +388,12 @@ class HomeViewModel @Inject constructor(
     internal val catalogOrder = mutableListOf<String>()
     internal var addonsCache: List<Addon> = emptyList()
     internal var collectionsCache: List<Collection> = emptyList()
+    /** Live TV fork: the Live TV and Sports rows (key to name), in no particular order. */
+    internal var liveRowsCache: List<Pair<String, String>> = emptyList()
+    /** Live TV fork: On Demand rows' titles (by row key), and Live TV/Sports rows with nothing to show. */
+    internal var vodRowsCache: Map<String, CatalogRow> = emptyMap()
+    internal var vodRowKeys: Set<String> = emptySet()
+    internal var emptyLiveRowKeys: Set<String> = emptySet()
     internal var homeCatalogOrderKeys: List<String> = emptyList()
     internal var disabledHomeCatalogKeys: Set<String> = emptySet()
     internal var followAddonsOrderEnabled: Boolean = false
@@ -502,6 +515,8 @@ class HomeViewModel @Inject constructor(
     internal var cwPipelineJob: Job? = null
     internal val fullyWatchedSeriesIds get() = watchedSeriesStateHolder
     internal var tmdbEnrichFocusJob: Job? = null
+    /** Live TV fork: waiting for a highlighted On Demand card's match (see onItemFocusPipeline). */
+    internal var vodMatchWaitJob: Job? = null
     internal var pendingTmdbEnrichItemId: String? = null
     /** Item that was focused during startup grace period — will be enriched once grace ends. */
     internal var deferredEnrichItem: MetaPreview? = null
@@ -600,6 +615,17 @@ class HomeViewModel @Inject constructor(
         }
 
         observeStartupAuthNotice()
+        // Live TV fork: the Calendar's cards changed (a new episode is out, a bell rung): put
+        // them in again without waiting for Continue Watching's next update.
+        viewModelScope.launch {
+            com.nuvio.tv.livetv.calendar.CalendarHomeFeed.version.collect {
+                _uiState.update { st ->
+                    val (main, up) = com.nuvio.tv.livetv.calendar.CalendarHomeFeed.apply(st.continueWatchingItems, st.upcomingItems)
+                    if (main == st.continueWatchingItems && up == st.upcomingItems) st
+                    else st.copy(continueWatchingItems = main, upcomingItems = up)
+                }
+            }
+        }
         viewModelScope.launch {
             profileManager.activeProfileReady.first { it }
             StartupLatencyTrace.mark("home_profile_ready")
@@ -995,12 +1021,17 @@ class HomeViewModel @Inject constructor(
             is HomeEvent.OnItemClick -> navigateToDetail(event.itemId, event.itemType)
             is HomeEvent.OnLoadMoreCatalog -> loadMoreCatalogItems(event.catalogId, event.addonId, event.type)
             is HomeEvent.OnMarkContinueWatchingWatched -> markContinueWatchingWatched(event.item)
-            is HomeEvent.OnRemoveContinueWatching -> removeContinueWatching(
-                contentId = event.contentId,
-                season = event.season,
-                episode = event.episode,
-                isNextUp = event.isNextUp
-            )
+            is HomeEvent.OnRemoveContinueWatching -> {
+                // Live TV fork: a Calendar card is just taken away (there's no progress to remove).
+                if (!com.nuvio.tv.livetv.calendar.CalendarHomeFeed.dismiss(event.contentId, event.season, event.episode)) {
+                    removeContinueWatching(
+                        contentId = event.contentId,
+                        season = event.season,
+                        episode = event.episode,
+                        isNextUp = event.isNextUp
+                    )
+                }
+            }
             HomeEvent.OnRetry -> viewModelScope.launch { loadAllCatalogs(addonsCache, forceReload = true) }
         }
     }
@@ -1121,7 +1152,10 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun observeCollections() = observeCollectionsPipeline()
+    private fun observeCollections() {
+        observeCollectionsPipeline()
+        observeLiveRowsPipeline()
+    }
 
     private fun observeInstalledAddons() = observeInstalledAddonsPipeline()
 

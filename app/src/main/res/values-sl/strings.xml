@@ -2185,13 +2185,9 @@
     <string name="trakt_comments_error_request_failed">Zahteva za komentarje Trakt ni uspela</string>
     <string name="trakt_library_error_fetch_list_items">Pridobivanje elementov seznama ni uspelo</string>
 
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">Vrstice začetnega zaslona</string>
+    <string name="settings_home_screen_rows_subtitle">Izberite vrstni red vrstic na začetnem zaslonu</string>
     <plurals name="cw_episodes_left">
-        <item quantity="one">Še %d</item>
-        <item quantity="two">Še %d</item>
-        <item quantity="few">Še %d</item>
-        <item quantity="other">Še %d</item>
-    </plurals>
     <string name="cw_no_artwork">Ni slike</string>
     <string name="detail_eyebrow_episodes">Epizode</string>
     <string name="detail_section_parental_guide">Vodnik za starše</string>
@@ -2205,11 +2201,6 @@
     <string name="ambient_mode_timeout">Začni po</string>
     <string name="ambient_mode_timeout_subtitle">Kako dolgo počakati pred začetkom načina Ambient</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="one">%1$d minuta</item>
-        <item quantity="two">%1$d minuti</item>
-        <item quantity="few">%1$d minute</item>
-        <item quantity="other">%1$d minut</item>
-    </plurals>
     <string name="ambient_mode_catalogs">Katalogi</string>
     <string name="ambient_mode_catalogs_subtitle">Izberite do 3 kataloge, iz katerih se jemljejo slike</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Izberite do 3 kataloge</string>
@@ -3294,17 +3285,7 @@
     <string name="report_sent_no_phone">Hvala za prijavo. Arc je ljubiteljski projekt, zato ne dobi vsaka prijava odgovora.</string>
     <string name="report_sent_back">Nazaj na ogled</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">Izberite vse, kar velja. Arc je obdržal zadnjo minuto.</item>
-        <item quantity="two">Izberite vse, kar velja. Arc je obdržal zadnji %1$d minuti.</item>
-        <item quantity="few">Izberite vse, kar velja. Arc je obdržal zadnje %1$d minute.</item>
-        <item quantity="other">Izberite vse, kar velja. Arc je obdržal zadnjih %1$d minut.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">Nastavitve predvajalnika in zadnja minuta</item>
-        <item quantity="two">Nastavitve predvajalnika in zadnji %1$d minuti</item>
-        <item quantity="few">Nastavitve predvajalnika in zadnje %1$d minute</item>
-        <item quantity="other">Nastavitve predvajalnika in zadnjih %1$d minut</item>
-    </plurals>
     <string name="report_settings_subtitle">Povejte, kaj je šlo narobe ali kaj bi radi, da zna Arc</string>
     <string name="report_group_choose">Kaj želite prijaviti?</string>
     <string name="report_group_options">Možnosti</string>
@@ -3357,11 +3338,6 @@
     <string name="report_sent_kind_bug">Nekaj ne deluje</string>
     <string name="report_sent_kind_idea">Zamisel ali želja</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d nova</item>
-        <item quantity="two">%1$d novi</item>
-        <item quantity="few">%1$d nove</item>
-        <item quantity="other">%1$d novih</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Preverjeno enkrat na dan. Arc je ljubiteljski projekt, zato ne dobi vsaka prijava odgovora.</string>
     <string name="report_my_reports_hint_off">Preverjanje je izklopljeno. Vklopite Preverjaj moje prijave, da vidite, kaj se dogaja z vašimi prijavami.</string>
@@ -3384,11 +3360,6 @@
     <string name="report_ready_follow_off">Če želite spremljati to prijavo, s telefonom skenirajte kodo na naslednjem zaslonu.</string>
     <string name="report_notice_title">Pri vaši prijavi je novost</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">Novosti pri %1$d vaši prijavi</item>
-        <item quantity="two">Novosti pri %1$d vaših prijavah</item>
-        <item quantity="few">Novosti pri %1$d vaših prijavah</item>
-        <item quantity="other">Novosti pri %1$d vaših prijavah</item>
-    </plurals>
     <string name="report_notice_one">%1$s, poslano %2$s: %3$s.</string>
     <string name="report_notice_many">Odprite Moje prijave, da vidite, kaj se je spremenilo.</string>
     <string name="report_notice_open">Odpri Moje prijave</string>
@@ -3399,19 +3370,9 @@
     <string name="report_stop_recording">Ustavi snemanje</string>
     <string name="report_recording_pill">Snemanje %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">Snemanje %1$s · %2$d oznaka</item>
-        <item quantity="two">Snemanje %1$s · %2$d oznaki</item>
-        <item quantity="few">Snemanje %1$s · %2$d oznake</item>
-        <item quantity="other">Snemanje %1$s · %2$d oznak</item>
-    </plurals>
     <string name="report_recording_no_space">Ni dovolj prostega prostora za snemanje</string>
     <string name="report_item_recording">Snemanje, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d oznaka. Samo številke, nikoli zvok ali slika.</item>
-        <item quantity="two">%d oznaki. Samo številke, nikoli zvok ali slika.</item>
-        <item quantity="few">%d oznake. Samo številke, nikoli zvok ali slika.</item>
-        <item quantity="other">%d oznak. Samo številke, nikoli zvok ali slika.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">Prijavi težavo / označi</string>
     <string name="remote_buttons_job_report_mark_desc">Odpre ploščo za prijavo. Med snemanjem doda oznako.</string>
     <string name="display_mode_measured">Izmerjeno</string>

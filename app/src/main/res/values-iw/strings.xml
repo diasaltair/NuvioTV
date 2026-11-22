@@ -4269,6 +4269,8 @@
     <string name="player_track_role_audio_description">תיאור קולי</string>
     <string name="stream_resume_from_time">המשך מ-%1$s</string>
     <string name="stream_resume_from_percent">המשך מ-%1$d%%</string>
+    <string name="settings_home_screen_rows">שורות במסך הבית</string>
+    <string name="settings_home_screen_rows_subtitle">בחרו את סדר השורות במסך הבית</string>
     <string name="tvdb_metadata_credit">המטא-נתונים מסופקים על ידי %1$s</string>
     <string name="player_source_rate_limited">השרת הזה מגביל בקשות. נסו שוב בעוד כ-%1$d דקות, או בחרו מקור משרת אחר.</string>
     <string name="format_check_title">בדיקת פורמטים</string>
@@ -4465,17 +4467,7 @@
     <string name="report_sent_no_phone">תודה על הדיווח. Arc הוא פרויקט תחביב, ולכן לא כל דיווח מקבל תשובה.</string>
     <string name="report_sent_back">חזרה לצפייה</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">אפשר לבחור את כל מה שמתאים. Arc שמר את הדקה האחרונה.</item>
-        <item quantity="two">אפשר לבחור את כל מה שמתאים. Arc שמר את %1$d הדקות האחרונות.</item>
-        <item quantity="many">אפשר לבחור את כל מה שמתאים. Arc שמר את %1$d הדקות האחרונות.</item>
-        <item quantity="other">אפשר לבחור את כל מה שמתאים. Arc שמר את %1$d הדקות האחרונות.</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">הגדרות הנגן והדקה האחרונה</item>
-        <item quantity="two">הגדרות הנגן ו-%1$d הדקות האחרונות</item>
-        <item quantity="many">הגדרות הנגן ו-%1$d הדקות האחרונות</item>
-        <item quantity="other">הגדרות הנגן ו-%1$d הדקות האחרונות</item>
-    </plurals>
     <string name="report_settings_subtitle">ספרו מה השתבש או מה הייתם רוצים ש-Arc יעשה</string>
     <string name="report_group_choose">על מה תרצו לדווח?</string>
     <string name="report_group_options">אפשרויות</string>
@@ -4528,11 +4520,6 @@
     <string name="report_sent_kind_bug">משהו לא עובד</string>
     <string name="report_sent_kind_idea">רעיון או בקשה</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d חדש</item>
-        <item quantity="two">%1$d חדשים</item>
-        <item quantity="many">%1$d חדשים</item>
-        <item quantity="other">%1$d חדשים</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">נבדק פעם ביום. Arc הוא פרויקט תחביב, ולכן לא כל דיווח מקבל תשובה.</string>
     <string name="report_my_reports_hint_off">הבדיקה כבויה. אפשר להפעיל את בדיקת הדיווחים שלי כדי לראות מה קורה עם הדיווחים שלך.</string>
@@ -4555,11 +4542,6 @@
     <string name="report_ready_follow_off">כדי לעקוב אחרי הדיווח הזה, אפשר לסרוק בטלפון את הקוד במסך הבא.</string>
     <string name="report_notice_title">יש עדכון בדיווח שלך</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">יש עדכון ב-%1$d מהדיווחים שלך</item>
-        <item quantity="two">יש עדכון ב-%1$d מהדיווחים שלך</item>
-        <item quantity="many">יש עדכון ב-%1$d מהדיווחים שלך</item>
-        <item quantity="other">יש עדכון ב-%1$d מהדיווחים שלך</item>
-    </plurals>
     <string name="report_notice_one">%1$s, נשלח ב-%2$s: %3$s.</string>
     <string name="report_notice_many">אפשר לפתוח את הדיווחים שלי כדי לראות מה השתנה.</string>
     <string name="report_notice_open">פתיחת הדיווחים שלי</string>
@@ -4570,19 +4552,9 @@
     <string name="report_stop_recording">עצירת ההקלטה</string>
     <string name="report_recording_pill">מקליט %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">מקליט %1$s · %2$d סימון</item>
-        <item quantity="two">מקליט %1$s · %2$d סימונים</item>
-        <item quantity="many">מקליט %1$s · %2$d סימונים</item>
-        <item quantity="other">מקליט %1$s · %2$d סימונים</item>
-    </plurals>
     <string name="report_recording_no_space">אין מספיק מקום פנוי להקלטה</string>
     <string name="report_item_recording">הקלטה, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d סימון. נתונים בלבד, אף פעם לא צליל או תמונה.</item>
-        <item quantity="two">%d סימונים. נתונים בלבד, אף פעם לא צליל או תמונה.</item>
-        <item quantity="many">%d סימונים. נתונים בלבד, אף פעם לא צליל או תמונה.</item>
-        <item quantity="other">%d סימונים. נתונים בלבד, אף פעם לא צליל או תמונה.</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">דיווח על בעיה / סימון</string>
     <string name="remote_buttons_job_report_mark_desc">פותח את חלונית הדיווח. בזמן הקלטה מוסיף סימון.</string>
     <string name="display_mode_measured">נמדד</string>

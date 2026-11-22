@@ -17,6 +17,13 @@ object StreamAutoPlaySelector {
         preferredNames: Set<String> = emptySet()
     ): List<AddonStreams> {
         if (streams.isEmpty()) return streams
+        // Live TV fork: the On Demand tab goes where it's set in Live TV settings (first, after
+        // the first addon, or last), not wherever sorting by installed addons would put it.
+        val onDemand = streams.firstOrNull { it.addonName == com.nuvio.tv.livetv.ondemand.OnDemandStreams.GROUP_NAME }
+        if (onDemand != null) {
+            val rest = orderAddonStreams(streams.filter { it !== onDemand }, installedOrder, preferredNames)
+            return com.nuvio.tv.livetv.ondemand.OnDemandStreams.placeTab(rest, onDemand)
+        }
         val (servers, rest) = streams.partition { it.addonName in preferredNames || it.isServerGroup() }
         if (servers.isNotEmpty()) {
             val (preferred, others) = servers.partition { it.addonName in preferredNames }
@@ -127,7 +134,9 @@ object StreamAutoPlaySelector {
         preferredBingeGroup: String? = null,
         preferBingeGroupInSelection: Boolean = false,
         bingeGroupOnly: Boolean = false,
-        debridStreamPreferences: DebridStreamPreferences? = null
+        debridStreamPreferences: DebridStreamPreferences? = null,
+        qualityRules: com.nuvio.tv.domain.model.DebridStreamPreferences? = null,
+        lowQualityGroups: LowQualityGroups = LowQualityGroups.PUSH_DOWN
     ): Stream? {
         if (streams.isEmpty()) return null
 
@@ -141,6 +150,13 @@ object StreamAutoPlaySelector {
             StreamAutoPlaySource.ALL_SOURCES -> streams
             StreamAutoPlaySource.INSTALLED_ADDONS_ONLY -> streams.filter { it.serverTarget != null || it.addonName in installedAddonNames }
             StreamAutoPlaySource.ENABLED_PLUGINS_ONLY -> streams.filter { it.addonName !in installedAddonNames }
+        }.filterNot {
+            // Live TV fork: provider copies (📡 On Demand) aren't picked automatically, except to
+            // carry on a show you're already watching from your provider (same binge group), or
+            // when set to be allowed in Live TV settings (with On Demand as the first tab).
+            it.addonName == com.nuvio.tv.livetv.ondemand.OnDemandStreams.GROUP_NAME &&
+                !com.nuvio.tv.livetv.ondemand.OnDemandStreams.autoPlayAllowed &&
+                preferredBingeGroup?.trim() != com.nuvio.tv.livetv.ondemand.OnDemandStreams.BINGE_GROUP
         }
         val candidateStreams = sourceScopedStreams.filter { stream ->
             val isAddonStream = stream.addonName in installedAddonNames

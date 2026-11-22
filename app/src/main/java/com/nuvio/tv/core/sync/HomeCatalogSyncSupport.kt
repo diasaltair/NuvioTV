@@ -40,7 +40,8 @@ internal fun homeCollectionKey(collectionId: String): String {
 }
 
 internal fun isDeviceOnlyCatalogKey(key: String): Boolean =
-    ServerCatalog.isServerKey(key) || BuiltInCatalogs.isBuiltInKey(key)
+    ServerCatalog.isServerKey(key) || BuiltInCatalogs.isBuiltInKey(key) ||
+        com.nuvio.tv.livetv.home.isLiveHomeRowKey(key)
 
 internal fun List<String>.withLocalServerKeys(local: List<String>): List<String> =
     local.withIndex()
@@ -48,6 +49,13 @@ internal fun List<String>.withLocalServerKeys(local: List<String>): List<String>
         .fold(filterNot(::isDeviceOnlyCatalogKey).toMutableList()) { keys, (index, key) ->
             keys.apply { add(index.coerceAtMost(size), key) }
         }
+
+/**
+ * Home rows the Nuvio account never hears about, so they keep their place when the account's
+ * row order comes in: media-server catalogs, and (Live TV fork) Live TV and Sports rows.
+ */
+internal fun isLocalOnlyHomeKey(key: String): Boolean =
+    isDeviceOnlyCatalogKey(key)
 
 internal fun homeLegacyDisabledCatalogKey(
     addonBaseUrl: String,

@@ -1000,12 +1000,9 @@
     <string name="update_ignore">नज़रअंदाज़ करें</string>
     <string name="playback_player_auto">ऑटो (सामग्री के लिए सर्वश्रेष्ठ)</string>
     <string name="playback_player_auto_desc">ExoPlayer मूवीज़ और टीवी शोज़ के लिए · MPV एनीमे के लिए</string>
-
-    <!-- Nuvio-test additions -->
+    <string name="settings_home_screen_rows">होम स्क्रीन की पंक्तियाँ</string>
+    <string name="settings_home_screen_rows_subtitle">अपनी होम स्क्रीन पर पंक्तियों का क्रम चुनें</string>
     <plurals name="cw_episodes_left">
-        <item quantity="one">%d बाकी</item>
-        <item quantity="other">%d बाकी</item>
-    </plurals>
     <string name="cw_no_artwork">कोई आर्टवर्क नहीं</string>
     <string name="detail_eyebrow_episodes">एपिसोड</string>
     <string name="detail_section_parental_guide">अभिभावक मार्गदर्शिका</string>
@@ -1020,9 +1017,6 @@
     <string name="ambient_mode_timeout">इसके बाद शुरू करें</string>
     <string name="ambient_mode_timeout_subtitle">एम्बिएंट मोड शुरू होने से पहले कितना इंतज़ार करें</string>
     <plurals name="ambient_mode_timeout_minutes">
-        <item quantity="one">%1$d मिनट</item>
-        <item quantity="other">%1$d मिनट</item>
-    </plurals>
     <string name="ambient_mode_catalogs">कैटलॉग</string>
     <string name="ambient_mode_catalogs_subtitle">आर्टवर्क लेने के लिए अधिकतम 3 कैटलॉग चुनें</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">अधिकतम 3 कैटलॉग चुनें</string>
@@ -2115,13 +2109,7 @@
     <string name="report_sent_no_phone">रिपोर्ट के लिए धन्यवाद। Arc एक शौकिया प्रोजेक्ट है, इसलिए हर रिपोर्ट का जवाब नहीं मिलता।</string>
     <string name="report_sent_back">वीडियो पर वापस जाएँ</string>
     <plurals name="report_panel_what_hint_kept">
-        <item quantity="one">जो भी लागू हों, सब चुनें। Arc ने आख़िरी मिनट रखा है।</item>
-        <item quantity="other">जो भी लागू हों, सब चुनें। Arc ने आख़िरी %1$d मिनट रखे हैं।</item>
-    </plurals>
     <plurals name="report_item_playback_kept">
-        <item quantity="one">प्लेयर सेटिंग और आख़िरी मिनट</item>
-        <item quantity="other">प्लेयर सेटिंग और आख़िरी %1$d मिनट</item>
-    </plurals>
     <string name="report_settings_subtitle">बताएँ कि क्या गड़बड़ हुई या आप Arc से क्या करवाना चाहते हैं</string>
     <string name="report_group_choose">आप क्या रिपोर्ट करना चाहते हैं?</string>
     <string name="report_group_options">विकल्प</string>
@@ -2174,9 +2162,6 @@
     <string name="report_sent_kind_bug">कुछ काम नहीं कर रहा</string>
     <string name="report_sent_kind_idea">सुझाव या अनुरोध</string>
     <plurals name="report_my_reports_new">
-        <item quantity="one">%1$d नई</item>
-        <item quantity="other">%1$d नई</item>
-    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">दिन में एक बार जाँचा जाता है। Arc एक शौकिया प्रोजेक्ट है, इसलिए हर रिपोर्ट का जवाब नहीं मिलता।</string>
     <string name="report_my_reports_hint_off">जाँच बंद है। अपनी रिपोर्टों का हाल देखने के लिए मेरी रिपोर्टें जाँचें चालू करें।</string>
@@ -2199,9 +2184,6 @@
     <string name="report_ready_follow_off">इस रिपोर्ट पर नज़र रखने के लिए अगली स्क्रीन पर दिया कोड अपने फ़ोन से स्कैन करें।</string>
     <string name="report_notice_title">आपकी रिपोर्ट पर नई जानकारी है</string>
     <plurals name="report_notice_many_title">
-        <item quantity="one">आपकी %1$d रिपोर्ट पर नई जानकारी है</item>
-        <item quantity="other">आपकी %1$d रिपोर्टों पर नई जानकारी है</item>
-    </plurals>
     <string name="report_notice_one">%1$s, %2$s को भेजी गई: %3$s।</string>
     <string name="report_notice_many">क्या बदला, यह देखने के लिए मेरी रिपोर्टें खोलें।</string>
     <string name="report_notice_open">मेरी रिपोर्टें खोलें</string>
@@ -2212,15 +2194,9 @@
     <string name="report_stop_recording">रिकॉर्डिंग रोकें</string>
     <string name="report_recording_pill">रिकॉर्डिंग %1$s</string>
     <plurals name="report_recording_pill_marks">
-        <item quantity="one">रिकॉर्डिंग %1$s · %2$d चिह्न</item>
-        <item quantity="other">रिकॉर्डिंग %1$s · %2$d चिह्न</item>
-    </plurals>
     <string name="report_recording_no_space">रिकॉर्ड करने के लिए पर्याप्त खाली जगह नहीं है</string>
     <string name="report_item_recording">रिकॉर्डिंग, %1$s</string>
     <plurals name="report_item_recording_hint">
-        <item quantity="one">%d चिह्न। सिर्फ़ आंकड़े, आवाज़ या तस्वीर कभी नहीं।</item>
-        <item quantity="other">%d चिह्न। सिर्फ़ आंकड़े, आवाज़ या तस्वीर कभी नहीं।</item>
-    </plurals>
     <string name="remote_buttons_job_report_mark">समस्या की रिपोर्ट करें / चिह्नित करें</string>
     <string name="remote_buttons_job_report_mark_desc">रिपोर्ट पैनल खोलता है। रिकॉर्डिंग के दौरान एक चिह्न जोड़ता है।</string>
     <string name="display_mode_measured">मापा गया</string>
