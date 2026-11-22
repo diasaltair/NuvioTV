@@ -530,8 +530,6 @@
     <string name="settings_layout_subtitle">Home structure and poster styles</string>
     <string name="settings_content_discovery">Content &amp; discovery</string>
     <string name="settings_content_discovery_subtitle">Add-ons, plugins, catalogs, and discovery sources</string>
-    <string name="settings_home_screen_rows">Home Screen Rows</string>
-    <string name="settings_home_screen_rows_subtitle">Choose the order of rows on your home screen</string>
     <string name="settings_content_discovery_addons_subtitle">Manage add-ons, catalog order, and collections</string>
     <string name="settings_content_discovery_plugins_subtitle">Manage repositories and stream providers</string>
     <string name="settings_plugins">Plugins</string>
@@ -4652,4 +4650,23 @@
     <string name="plugin_summary_stopped">%1$d stopped at the time limit</string>
     <string name="plugin_summary_running">%1$d still searching</string>
     <string name="plugin_breakdown_title">Plugin search</string>
+    <string name="ambient_mode_subtitle">Show artwork from your catalogs while the TV sits idle</string>
+    <string name="settings_home_screen_rows">Home Screen Rows</string>
+    <string name="settings_home_screen_rows_subtitle">Choose the order of rows on your home screen</string>
+    <string name="audio_night_mode">Night Mode</string>
+    <string name="audio_night_mode_sub">Lifts dialogue and quiet sounds, so you can keep the volume low</string>
+    <string name="audio_night_mode_desc">Lifts dialogue and quiet sounds; loud scenes stay as they were mixed. Works on audio decoded by the app. Dolby and DTS sent to a receiver or soundbar as passthrough are left as they are.</string>
+    <string name="audio_night_mode_value">Night mode: %1$s</string>
+    <string name="sub_outline_width">Outline Width</string>
+    <string name="sub_libass_mode">Libass Render Mode</string>
+    <string name="layout_trailer_4k">4K Trailers</string>
+    <string name="layout_trailer_4k_sub">Play trailers above 1080p when available. Uses much more memory; off by default on devices with 2 GB of RAM or less.</string>
+    <string name="audio_downmix_lfe_level">LFE level on downmix</string>
+    <string name="audio_downmix_lfe_level_sub">Mixes the subwoofer (LFE) channel into the other speakers instead of dropping it. Only for layouts without LFE, such as 2.0.</string>
+    <string name="audio_downmix_lfe_level_desc">Used when the downmix layout has no LFE channel. Applies from the next playback.</string>
+    <string name="audio_downmix_lfe_level_off">Off</string>
+    <string name="audio_downmix_lfe_level_half">50%</string>
+    <string name="audio_downmix_lfe_level_full">100%</string>
+    <string name="player_chapters_title">Chapters (%1$d)</string>
+    <string name="player_chapter_remaining">%1$s left</string>
 </resources>

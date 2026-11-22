@@ -1,13 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="autoplay_mode_quality">Best quality</string>
-    <string name="autoplay_mode_quality_desc">Play the best source by your Quality rules: resolution, source, trusted release groups, HDR and audio.</string>
     <string name="quality_rules_title">Quality rules</string>
     <string name="quality_rules_subtitle">What Best quality picks and how Best quality first sorts, for every source.</string>
     <string name="quality_rules_open">Show</string>
     <string name="quality_rules_close">Hide</string>
-    <string name="stream_sort_sources">Sort sources</string>
-    <string name="stream_sort_sources_sub">The order of the source list.</string>
     <string name="stream_sort_source_order">Source order</string>
     <string name="stream_sort_source_order_desc">As each source sends them.</string>
     <string name="stream_sort_best_first">Best quality first</string>

@@ -3347,9 +3347,16 @@
     <string name="web_stream_badge_imported">استُورد رابط الشارة.</string>
     <string name="web_stream_badge_importing">جارٍ الاستيراد\u2026</string>
     <string name="web_stream_badge_load_error">تعذر تحميل إعدادات شارات البث</string>
-    <string name="settings_home_screen_rows">صفوف الشاشة الرئيسية</string>
-    <string name="settings_home_screen_rows_subtitle">اختر ترتيب الصفوف على شاشتك الرئيسية</string>
+
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="zero">%d متبقية</item>
+        <item quantity="one">%d متبقية</item>
+        <item quantity="two">%d متبقية</item>
+        <item quantity="few">%d متبقية</item>
+        <item quantity="many">%d متبقية</item>
+        <item quantity="other">%d متبقية</item>
+    </plurals>
     <string name="cw_no_artwork">لا توجد صورة</string>
     <string name="detail_eyebrow_episodes">الحلقات</string>
     <string name="detail_section_parental_guide">دليل الوالدين</string>
@@ -3363,6 +3370,9 @@
     <string name="ambient_mode_timeout">البدء بعد</string>
     <string name="ambient_mode_timeout_subtitle">مدة الانتظار قبل بدء الوضع المحيطي</string>
     <plurals name="ambient_mode_timeout_minutes">
+        <item quantity="one">دقيقة واحدة</item>
+        <item quantity="other">%1$d دقائق</item>
+    </plurals>
     <string name="ambient_mode_catalogs">القوائم</string>
     <string name="ambient_mode_catalogs_subtitle">اختر حتى 3 قوائم لعرض صورها</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">اختر حتى 3 قوائم</string>
@@ -4447,7 +4457,21 @@
     <string name="report_sent_no_phone">شكرًا على البلاغ. Arc مشروع هواية، لذا لا يحصل كل بلاغ على رد.</string>
     <string name="report_sent_back">العودة إلى المشاهدة</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="zero">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقيقة.</item>
+        <item quantity="one">اختر كل ما ينطبق. احتفظ Arc بآخر دقيقة.</item>
+        <item quantity="two">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقيقة.</item>
+        <item quantity="few">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقائق.</item>
+        <item quantity="many">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقيقة.</item>
+        <item quantity="other">اختر كل ما ينطبق. احتفظ Arc بآخر %1$d دقيقة.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="zero">إعدادات المشغل وآخر %1$d دقيقة</item>
+        <item quantity="one">إعدادات المشغل وآخر دقيقة</item>
+        <item quantity="two">إعدادات المشغل وآخر %1$d دقيقة</item>
+        <item quantity="few">إعدادات المشغل وآخر %1$d دقائق</item>
+        <item quantity="many">إعدادات المشغل وآخر %1$d دقيقة</item>
+        <item quantity="other">إعدادات المشغل وآخر %1$d دقيقة</item>
+    </plurals>
     <string name="report_settings_subtitle">صِف ما حدث من خطأ أو ما تريد أن يفعله Arc</string>
     <string name="report_group_choose">ماذا تريد أن تبلّغ عنه؟</string>
     <string name="report_group_options">خيارات</string>
@@ -4500,6 +4524,13 @@
     <string name="report_sent_kind_bug">شيء لا يعمل</string>
     <string name="report_sent_kind_idea">فكرة أو طلب</string>
     <plurals name="report_my_reports_new">
+        <item quantity="zero">جديد: %1$d</item>
+        <item quantity="one">جديد: %1$d</item>
+        <item quantity="two">جديد: %1$d</item>
+        <item quantity="few">جديد: %1$d</item>
+        <item quantity="many">جديد: %1$d</item>
+        <item quantity="other">جديد: %1$d</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">يُفحص مرة يوميًا. Arc مشروع هواية، لذا لا يحصل كل بلاغ على رد.</string>
     <string name="report_my_reports_hint_off">الفحص متوقف. فعّل «افحص بلاغاتي» لترى ما يحدث لبلاغاتك.</string>
@@ -4522,6 +4553,13 @@
     <string name="report_ready_follow_off">لمتابعة هذا البلاغ، امسح الرمز في الشاشة التالية بهاتفك.</string>
     <string name="report_notice_title">هناك جديد بشأن بلاغك</string>
     <plurals name="report_notice_many_title">
+        <item quantity="zero">هناك جديد بشأن %1$d من بلاغاتك</item>
+        <item quantity="one">هناك جديد بشأن %1$d من بلاغاتك</item>
+        <item quantity="two">هناك جديد بشأن %1$d من بلاغاتك</item>
+        <item quantity="few">هناك جديد بشأن %1$d من بلاغاتك</item>
+        <item quantity="many">هناك جديد بشأن %1$d من بلاغاتك</item>
+        <item quantity="other">هناك جديد بشأن %1$d من بلاغاتك</item>
+    </plurals>
     <string name="report_notice_one">%1$s، أُرسل في %2$s: %3$s.</string>
     <string name="report_notice_many">افتح «بلاغاتي» لترى ما تغيّر.</string>
     <string name="report_notice_open">فتح «بلاغاتي»</string>
@@ -4532,9 +4570,23 @@
     <string name="report_stop_recording">إيقاف التسجيل</string>
     <string name="report_recording_pill">التسجيل %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="zero">التسجيل %1$s · %2$d علامة</item>
+        <item quantity="one">التسجيل %1$s · %2$d علامة</item>
+        <item quantity="two">التسجيل %1$s · %2$d علامتان</item>
+        <item quantity="few">التسجيل %1$s · %2$d علامات</item>
+        <item quantity="many">التسجيل %1$s · %2$d علامة</item>
+        <item quantity="other">التسجيل %1$s · %2$d علامة</item>
+    </plurals>
     <string name="report_recording_no_space">لا توجد مساحة كافية للتسجيل</string>
     <string name="report_item_recording">التسجيل، %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="zero">%d علامة. أرقام فقط، دون صوت أو صورة.</item>
+        <item quantity="one">%d علامة. أرقام فقط، دون صوت أو صورة.</item>
+        <item quantity="two">%d علامتان. أرقام فقط، دون صوت أو صورة.</item>
+        <item quantity="few">%d علامات. أرقام فقط، دون صوت أو صورة.</item>
+        <item quantity="many">%d علامة. أرقام فقط، دون صوت أو صورة.</item>
+        <item quantity="other">%d علامة. أرقام فقط، دون صوت أو صورة.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">الإبلاغ عن مشكلة / وضع علامة</string>
     <string name="remote_buttons_job_report_mark_desc">يفتح لوحة البلاغ. أثناء التسجيل يضيف علامة.</string>
     <string name="display_mode_measured">القياس</string>
@@ -4566,4 +4618,38 @@
     <string name="about_update_optimize_install_subtitle">بدء تشغيل أسرع بعد التحديث، لكن التطبيق يُغلق نحو دقيقة أثناء التثبيت. أوقف هذا الخيار لاستخدام شاشة مثبّت Android بدلًا من ذلك</string>
     <string name="update_ready_closes">اكتمل التنزيل. يُغلق التطبيق أثناء تثبيت التحديث، وقد يستغرق ذلك دقيقة. افتحه مجددًا بعد ذلك.</string>
     <string name="update_ready_closes_and_reopens">اكتمل التنزيل. يُغلق التطبيق أثناء تثبيت التحديث ويُعاد فتحه تلقائيًا، وقد يستغرق ذلك دقيقة.</string>
+    <string name="custom_theme_preview_ring">العنصر المُركَّز عليه</string>
+    <string name="supporter_membership_view">عرض العضوية</string>
+    <string name="playback_section_player_title_desc">المشغّل الافتراضي والمحرك الداخلي والبديل عند الخطأ.</string>
+    <string name="playback_section_interface_desc">التراكبات والساعة والتفاصيل المعروضة أثناء التشغيل.</string>
+    <string name="auto_skip_movie_credits">شارة النهاية</string>
+    <string name="skip_movie_credits">تخطي شارة النهاية</string>
+    <string name="skip_to_post_credits">التخطي إلى ما بعد شارة النهاية</string>
+    <string name="audio_night_mode">الوضع الليلي</string>
+    <string name="audio_night_mode_sub">يرفع الحوار والأصوات الهادئة لتتمكن من إبقاء الصوت منخفضًا</string>
+    <string name="audio_night_mode_desc">يرفع الحوار والأصوات الهادئة؛ وتبقى المشاهد الصاخبة كما مُزجت. يعمل على الصوت الذي يفك ترميزه التطبيق. أما Dolby وDTS المُرسلة إلى جهاز استقبال أو شريط صوتي كتمرير مباشر فتبقى كما هي.</string>
+    <string name="audio_night_mode_value">الوضع الليلي: %1$s</string>
+    <string name="sub_libass_mode">وضع عرض libass</string>
+    <string name="autoplay_preload_next_episode">تحميل مصادر الحلقة التالية مسبقًا</string>
+    <string name="autoplay_post_play_recommendations">اقتراحات بعد التشغيل</string>
+    <string name="autoplay_post_play_movie_threshold">توقيت اقتراحات الأفلام</string>
+    <string name="autoplay_post_play_movie_threshold_sub">اختر متى تظهر اقتراحات الأفلام، أما الحلقات فتتبع إعداد «وضع توقيت الحلقة التالية».</string>
+    <string name="layout_hide_floating_pill">إخفاء مؤشر التنقل العائم</string>
+    <string name="layout_episode_options_overlay">نافذة خيارات الحلقة</string>
+    <string name="layout_trailer_play_in_background">التشغيل في الخلفية</string>
+    <string name="layout_trailer_pause_on_scroll">الإيقاف المؤقت عند التمرير</string>
+    <string name="layout_trailer_4k">إعلانات 4K</string>
+    <string name="layout_trailer_4k_sub">تشغيل الإعلانات بدقة أعلى من 1080p عند توفرها. يستخدم ذاكرة أكبر بكثير؛ معطّل افتراضيًا على الأجهزة ذات ذاكرة 2 غ.ب أو أقل.</string>
+    <string name="player_switch_to_mpv">التبديل إلى مشغّل MPV</string>
+    <string name="audio_downmix_lfe_level">مستوى LFE عند دمج القنوات</string>
+    <string name="audio_downmix_lfe_level_sub">يمزج قناة مضخم الصوت (LFE) في السماعات الأخرى بدلًا من حذفها. ينطبق فقط على التخطيطات التي لا تحتوي على قناة LFE، مثل 2.0.</string>
+    <string name="audio_downmix_lfe_level_desc">يُستخدم عندما لا يحتوي تخطيط دمج القنوات على قناة LFE. يُطبَّق من التشغيل التالي.</string>
+    <string name="audio_downmix_lfe_level_off">معطّل</string>
+    <string name="audio_downmix_lfe_level_half">50%</string>
+    <string name="audio_downmix_lfe_level_full">100%</string>
+    <string name="player_chapters_title">الفصول (%1$d)</string>
+    <string name="player_chapter_remaining">متبقٍّ %1$s</string>
+    <string name="ambient_mode_subtitle">عرض صور من قوائمك عندما لا يُستخدم التلفاز</string>
+    <string name="settings_home_screen_rows">صفوف الشاشة الرئيسية</string>
+    <string name="settings_home_screen_rows_subtitle">اختر ترتيب الصفوف على شاشتك الرئيسية</string>
 </resources>

@@ -4244,8 +4244,6 @@
     <string name="tvdb_metadata_credit">Metadados fornecidos por %1$s</string>
     <string name="stream_resume_from_time">Continuar a partir de %1$s</string>
     <string name="stream_resume_from_percent">Continuar a partir de %1$d%%</string>
-    <string name="settings_home_screen_rows">Linhas da tela inicial</string>
-    <string name="settings_home_screen_rows_subtitle">Escolha a ordem das linhas na sua tela inicial</string>
     <string name="player_source_rate_limited">Este servidor está limitando as solicitações. Tente novamente em cerca de %1$d min ou escolha uma fonte de outro servidor.</string>
     <string name="format_check_title">Verificação de formatos</string>
     <string name="format_check_row_subtitle">Reproduz pequenos vídeos de teste para descobrir quais formatos de vídeo, HDR e áudio este aparelho realmente suporta.</string>
@@ -4441,7 +4439,15 @@
     <string name="report_sent_no_phone">Obrigado pelo relatório. O Arc é um projeto de hobby, então nem todo relatório recebe resposta.</string>
     <string name="report_sent_back">Voltar a assistir</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Escolha tudo o que se aplica. O Arc guardou o último minuto.</item>
+        <item quantity="many">Escolha tudo o que se aplica. O Arc guardou os últimos %1$d minutos.</item>
+        <item quantity="other">Escolha tudo o que se aplica. O Arc guardou os últimos %1$d minutos.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Configurações do player e o último minuto</item>
+        <item quantity="many">Configurações do player e os últimos %1$d minutos</item>
+        <item quantity="other">Configurações do player e os últimos %1$d minutos</item>
+    </plurals>
     <string name="report_settings_subtitle">Conte o que deu errado ou o que você gostaria que o Arc fizesse</string>
     <string name="report_group_choose">O que você quer relatar?</string>
     <string name="report_group_options">Opções</string>
@@ -4494,6 +4500,10 @@
     <string name="report_sent_kind_bug">Algo não funciona</string>
     <string name="report_sent_kind_idea">Ideia ou pedido</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d novo</item>
+        <item quantity="many">%1$d novos</item>
+        <item quantity="other">%1$d novos</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Verificado uma vez por dia. O Arc é um projeto de hobby, então nem todo relatório recebe resposta.</string>
     <string name="report_my_reports_hint_off">A verificação está desligada. Ative Verificar meus relatórios para ver o que acontece com seus relatórios.</string>
@@ -4516,6 +4526,10 @@
     <string name="report_ready_follow_off">Para acompanhar este relatório, escaneie o código da próxima tela com o celular.</string>
     <string name="report_notice_title">Seu relatório tem novidades</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">%1$d dos seus relatórios tem novidades</item>
+        <item quantity="many">%1$d dos seus relatórios têm novidades</item>
+        <item quantity="other">%1$d dos seus relatórios têm novidades</item>
+    </plurals>
     <string name="report_notice_one">%1$s, enviado em %2$s: %3$s.</string>
     <string name="report_notice_many">Abra Meus relatórios para ver o que mudou.</string>
     <string name="report_notice_open">Abrir Meus relatórios</string>
@@ -4526,9 +4540,15 @@
     <string name="report_stop_recording">Parar a gravação</string>
     <string name="report_recording_pill">Gravando %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Gravando %1$s · %2$d marca</item>
+        <item quantity="other">Gravando %1$s · %2$d marcas</item>
+    </plurals>
     <string name="report_recording_no_space">Sem espaço livre suficiente para gravar</string>
     <string name="report_item_recording">Gravação, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d marca. Só números, nunca som nem imagem.</item>
+        <item quantity="other">%d marcas. Só números, nunca som nem imagem.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Relatar um problema / marcar</string>
     <string name="remote_buttons_job_report_mark_desc">Abre o painel de relato. Durante a gravação, adiciona uma marca.</string>
     <string name="display_mode_measured">Medida</string>
@@ -4560,4 +4580,24 @@
     <string name="about_update_optimize_install_subtitle">Primeira abertura mais rápida após uma atualização, mas o app fecha por cerca de um minuto durante a instalação. Desative para usar a tela do instalador do Android</string>
     <string name="update_ready_closes">Download concluído. O app fecha enquanto a atualização é instalada, o que pode levar um minuto. Abra-o de novo depois.</string>
     <string name="update_ready_closes_and_reopens">Download concluído. O app fecha enquanto a atualização é instalada e abre de novo sozinho, o que pode levar um minuto.</string>
+    <string name="ambient_mode_subtitle">Exiba artes dos seus catálogos enquanto a TV estiver em espera</string>
+    <string name="audio_night_mode">Modo noturno</string>
+    <string name="audio_night_mode_sub">Destaca as falas e os sons mais baixos para você assistir com o volume reduzido</string>
+    <string name="audio_night_mode_desc">Deixa as falas e os sons baixos mais audíveis sem alterar o volume das cenas altas. Funciona apenas com áudio decodificado pelo app. Áudio Dolby e DTS enviado diretamente a um receiver ou soundbar não é alterado.</string>
+    <string name="audio_night_mode_value">Modo noturno: %1$s</string>
+    <string name="sub_hdr_dim_player_controls">Reduzir o brilho dos controles em HDR</string>
+    <string name="sub_hdr_dim_player_controls_sub">Aplicar o brilho definido para HDR aos controles e menus exibidos durante vídeos HDR e Dolby Vision</string>
+    <string name="sub_libass_mode">Modo de renderização Libass</string>
+    <string name="layout_trailer_4k">Trailers em 4K</string>
+    <string name="layout_trailer_4k_sub">Reproduza trailers acima de 1080p quando disponíveis. Usa bem mais memória; desativado por padrão em aparelhos com 2 GB de RAM ou menos.</string>
+    <string name="audio_downmix_lfe_level">Graves do subwoofer (LFE)</string>
+    <string name="audio_downmix_lfe_level_sub">Inclui os graves do canal LFE nos outros alto-falantes, em vez de descartá-los. Vale apenas para sistemas sem canal LFE, como estéreo 2.0.</string>
+    <string name="audio_downmix_lfe_level_desc">Usado quando a saída de áudio não tem canal LFE. A mudança vale a partir da próxima reprodução.</string>
+    <string name="audio_downmix_lfe_level_off">Desligado</string>
+    <string name="audio_downmix_lfe_level_half">50%</string>
+    <string name="audio_downmix_lfe_level_full">100%</string>
+    <string name="player_chapters_title">Capítulos (%1$d)</string>
+    <string name="player_chapter_remaining">faltam %1$s</string>
+    <string name="settings_home_screen_rows">Linhas da tela inicial</string>
+    <string name="settings_home_screen_rows_subtitle">Escolha a ordem das linhas na sua tela inicial</string>
 </resources>

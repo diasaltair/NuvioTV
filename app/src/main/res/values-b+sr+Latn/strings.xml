@@ -3179,9 +3179,12 @@
     <string name="stream_test_video_bitrate">Prosečni video bitrejt: %1$s</string>
     <string name="stream_test_error_connection">Povezivanje nije uspelo. Veza poslednje puštenog strima je možda istekla ili je nedostupna. Pustite video ponovo i pokušajte opet.</string>
 
-    <string name="settings_home_screen_rows">Redovi početnog ekrana</string>
-    <string name="settings_home_screen_rows_subtitle">Izaberite redosled redova na početnom ekranu</string>
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="one">Još %d</item>
+        <item quantity="few">Još %d</item>
+        <item quantity="other">Još %d</item>
+    </plurals>
     <string name="cw_no_artwork">Nema slike</string>
     <string name="detail_eyebrow_episodes">Epizode</string>
     <string name="detail_section_parental_guide">Roditeljski vodič</string>
@@ -3195,6 +3198,11 @@
     <string name="ambient_mode_timeout">Pokreni posle</string>
     <string name="ambient_mode_timeout_subtitle">Koliko čekati pre pokretanja Ambient režima</string>
     <plurals name="ambient_mode_timeout_minutes">
+        <item quantity="one">%1$d minut</item>
+        <item quantity="few">%1$d minuta</item>
+        <item quantity="many">%1$d minuta</item>
+        <item quantity="other">%1$d minuta</item>
+    </plurals>
     <string name="ambient_mode_catalogs">Katalozi</string>
     <string name="ambient_mode_catalogs_subtitle">Izaberite do 3 kataloga iz kojih se uzimaju slike</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Izaberite do 3 kataloga</string>
@@ -4245,7 +4253,15 @@
     <string name="report_sent_no_phone">Hvala na prijavi. Arc je hobi projekat, pa ne dobija svaka prijava odgovor.</string>
     <string name="report_sent_back">Nazad na gledanje</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Izaberite sve što odgovara. Arc je sačuvao poslednji minut.</item>
+        <item quantity="few">Izaberite sve što odgovara. Arc je sačuvao poslednja %1$d minuta.</item>
+        <item quantity="other">Izaberite sve što odgovara. Arc je sačuvao poslednjih %1$d minuta.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Podešavanja plejera i poslednji minut</item>
+        <item quantity="few">Podešavanja plejera i poslednja %1$d minuta</item>
+        <item quantity="other">Podešavanja plejera i poslednjih %1$d minuta</item>
+    </plurals>
     <string name="report_settings_subtitle">Recite šta nije u redu ili šta biste voleli da Arc radi</string>
     <string name="report_group_choose">Šta želite da prijavite?</string>
     <string name="report_group_options">Opcije</string>
@@ -4298,6 +4314,10 @@
     <string name="report_sent_kind_bug">Nešto ne radi</string>
     <string name="report_sent_kind_idea">Ideja ili zahtev</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d nova</item>
+        <item quantity="few">%1$d nove</item>
+        <item quantity="other">%1$d novih</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Proverava se jednom dnevno. Arc je hobi projekat, pa ne dobija svaka prijava odgovor.</string>
     <string name="report_my_reports_hint_off">Provera je isključena. Uključite Proveravaj moje prijave da vidite šta se dešava s vašim prijavama.</string>
@@ -4320,6 +4340,10 @@
     <string name="report_ready_follow_off">Da biste pratili ovu prijavu, skenirajte telefonom kod na sledećem ekranu.</string>
     <string name="report_notice_title">Ima novosti o vašoj prijavi</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">%1$d vaša prijava ima novosti</item>
+        <item quantity="few">%1$d vaše prijave imaju novosti</item>
+        <item quantity="other">%1$d vaših prijava ima novosti</item>
+    </plurals>
     <string name="report_notice_one">%1$s, poslato %2$s: %3$s.</string>
     <string name="report_notice_many">Otvorite Moje prijave da vidite šta se promenilo.</string>
     <string name="report_notice_open">Otvori Moje prijave</string>
@@ -4330,9 +4354,17 @@
     <string name="report_stop_recording">Zaustavi snimanje</string>
     <string name="report_recording_pill">Snimanje %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Snimanje %1$s · %2$d oznaka</item>
+        <item quantity="few">Snimanje %1$s · %2$d oznake</item>
+        <item quantity="other">Snimanje %1$s · %2$d oznaka</item>
+    </plurals>
     <string name="report_recording_no_space">Nema dovoljno slobodnog prostora za snimanje</string>
     <string name="report_item_recording">Snimanje, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d oznaka. Samo brojevi, nikad zvuk ni slika.</item>
+        <item quantity="few">%d oznake. Samo brojevi, nikad zvuk ni slika.</item>
+        <item quantity="other">%d oznaka. Samo brojevi, nikad zvuk ni slika.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Prijavi problem / označi</string>
     <string name="remote_buttons_job_report_mark_desc">Otvara ploču za prijavu. Tokom snimanja dodaje oznaku.</string>
     <string name="display_mode_measured">Izmereno</string>
@@ -4364,4 +4396,7 @@
     <string name="about_update_optimize_install_subtitle">Brže prvo pokretanje posle ažuriranja, ali se aplikacija zatvara na oko minut tokom instalacije. Isključi da bi se koristio Android ekran za instalaciju</string>
     <string name="update_ready_closes">Preuzimanje je završeno. Aplikacija se zatvara dok se ažuriranje instalira, što može trajati minut. Zatim je ponovo otvori.</string>
     <string name="update_ready_closes_and_reopens">Preuzimanje je završeno. Aplikacija se zatvara dok se ažuriranje instalira i sama se ponovo otvara, što može trajati minut.</string>
+    <string name="sub_libass_mode">Libass režim rendersanja</string>
+    <string name="settings_home_screen_rows">Redovi početnog ekrana</string>
+    <string name="settings_home_screen_rows_subtitle">Izaberite redosled redova na početnom ekranu</string>
 </resources>

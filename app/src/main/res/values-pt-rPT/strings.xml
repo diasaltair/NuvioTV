@@ -2585,9 +2585,13 @@
     <string name="profile_default_name">Perfil %1$d</string>
     <string name="detail_tmdb_fallback_title">TMDB %1$d</string>
     <string name="collections_editor_tmdb_collection_fallback">Coleção TMDB %1$d</string>
-    <string name="settings_home_screen_rows">Linhas do ecrã inicial</string>
-    <string name="settings_home_screen_rows_subtitle">Escolha a ordem das linhas no ecrã inicial</string>
+
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="one">Falta %d</item>
+        <item quantity="many">Faltam %d</item>
+        <item quantity="other">Faltam %d</item>
+    </plurals>
     <string name="cw_no_artwork">Sem ilustração</string>
     <string name="detail_eyebrow_episodes">Episódios</string>
     <string name="detail_section_parental_guide">Guia parental</string>
@@ -2601,6 +2605,10 @@
     <string name="ambient_mode_timeout">Iniciar após</string>
     <string name="ambient_mode_timeout_subtitle">Quanto tempo esperar antes de o Modo Ambiente iniciar</string>
     <plurals name="ambient_mode_timeout_minutes">
+        <item quantity="one">%1$d minuto</item>
+        <item quantity="many">%1$d minutos</item>
+        <item quantity="other">%1$d minutos</item>
+    </plurals>
     <string name="ambient_mode_catalogs">Catálogos</string>
     <string name="ambient_mode_catalogs_subtitle">Escolhe até 3 catálogos de onde obter as imagens</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Escolhe até 3 catálogos</string>
@@ -3686,7 +3694,15 @@
     <string name="report_sent_no_phone">Obrigado pelo relatório. O Arc é um projeto amador, por isso nem todos os relatórios têm resposta.</string>
     <string name="report_sent_back">Voltar a ver</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Escolhe tudo o que se aplica. O Arc guardou o último minuto.</item>
+        <item quantity="many">Escolhe tudo o que se aplica. O Arc guardou os últimos %1$d minutos.</item>
+        <item quantity="other">Escolhe tudo o que se aplica. O Arc guardou os últimos %1$d minutos.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Definições do leitor e o último minuto</item>
+        <item quantity="many">Definições do leitor e os últimos %1$d minutos</item>
+        <item quantity="other">Definições do leitor e os últimos %1$d minutos</item>
+    </plurals>
     <string name="report_settings_subtitle">Diz o que correu mal ou o que gostavas que o Arc fizesse</string>
     <string name="report_group_choose">O que queres reportar?</string>
     <string name="report_group_options">Opções</string>
@@ -3739,6 +3755,10 @@
     <string name="report_sent_kind_bug">Algo não funciona</string>
     <string name="report_sent_kind_idea">Ideia ou pedido</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d novo</item>
+        <item quantity="many">%1$d novos</item>
+        <item quantity="other">%1$d novos</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Verificado uma vez por dia. O Arc é um projeto amador, por isso nem todos os relatórios têm resposta.</string>
     <string name="report_my_reports_hint_off">A verificação está desligada. Liga Verificar os meus relatórios para veres o que acontece aos teus relatórios.</string>
@@ -3761,6 +3781,10 @@
     <string name="report_ready_follow_off">Para acompanhar este relatório, lê o código do ecrã seguinte com o telemóvel.</string>
     <string name="report_notice_title">O teu relatório tem novidades</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">%1$d dos teus relatórios tem novidades</item>
+        <item quantity="many">%1$d dos teus relatórios têm novidades</item>
+        <item quantity="other">%1$d dos teus relatórios têm novidades</item>
+    </plurals>
     <string name="report_notice_one">%1$s, enviado a %2$s: %3$s.</string>
     <string name="report_notice_many">Abre Os meus relatórios para veres o que mudou.</string>
     <string name="report_notice_open">Abrir Os meus relatórios</string>
@@ -3771,9 +3795,15 @@
     <string name="report_stop_recording">Parar a gravação</string>
     <string name="report_recording_pill">A gravar %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">A gravar %1$s · %2$d marca</item>
+        <item quantity="other">A gravar %1$s · %2$d marcas</item>
+    </plurals>
     <string name="report_recording_no_space">Sem espaço livre suficiente para gravar</string>
     <string name="report_item_recording">Gravação, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d marca. Só números, nunca som nem imagem.</item>
+        <item quantity="other">%d marcas. Só números, nunca som nem imagem.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Reportar um problema / marcar</string>
     <string name="remote_buttons_job_report_mark_desc">Abre o painel de reporte. Durante a gravação, acrescenta uma marca.</string>
     <string name="display_mode_measured">Medida</string>
@@ -3805,4 +3835,9 @@
     <string name="about_update_optimize_install_subtitle">Primeiro arranque mais rápido após uma atualização, mas a app fecha durante cerca de um minuto enquanto instala. Desative para usar o ecrã do instalador do Android</string>
     <string name="update_ready_closes">Transferência concluída. A app fecha enquanto a atualização é instalada, o que pode demorar um minuto. Volte a abri-la depois.</string>
     <string name="update_ready_closes_and_reopens">Transferência concluída. A app fecha enquanto a atualização é instalada e volta a abrir sozinha, o que pode demorar um minuto.</string>
+    <string name="sub_libass_mode">Modo de renderização Libass</string>
+    <string name="player_chapters_title">Capítulos (%1$d)</string>
+    <string name="player_chapter_remaining">faltam %1$s</string>
+    <string name="settings_home_screen_rows">Linhas do ecrã inicial</string>
+    <string name="settings_home_screen_rows_subtitle">Escolha a ordem das linhas no ecrã inicial</string>
 </resources>

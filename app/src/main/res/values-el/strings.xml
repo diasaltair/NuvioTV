@@ -3302,11 +3302,12 @@
   <string name="autosync_thorough_description">Συνεχίστε τη σύγκριση άλλων υποτίτλων και ενσωματωμένων κομματιών για ακριβέστερη αντιστοίχιση πριν από τον συγχρονισμό. Όταν είναι ανενεργό, χρησιμοποιείται νωρίτερα η πρώτη ισχυρή αντιστοίχιση. Εφαρμόζονται μόνο αντιστοιχίσεις υψηλής βεβαιότητας.</string>
   <string name="autosync_toast_no_fit">Ο συγχρονισμός απέτυχε: αυτοί οι υπότιτλοι δεν ταιριάζουν με αυτή την έκδοση του βίντεο.</string>
   <string name="autosync_label_synced">Αυτόματα συγχρονισμένος</string>
-  <string name="stream_resume_from_time">Συνέχεια από %1$s</string>
-  <string name="stream_resume_from_percent">Συνέχεια από %1$d%%</string>
-    <string name="settings_home_screen_rows">Σειρές αρχικής οθόνης</string>
-    <string name="settings_home_screen_rows_subtitle">Επιλέξτε τη σειρά των σειρών στην αρχική οθόνη</string>
+
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="one">Απομένει %d</item>
+        <item quantity="other">Απομένουν %d</item>
+    </plurals>
     <string name="cw_no_artwork">Χωρίς εικόνα</string>
     <string name="detail_eyebrow_episodes">Επεισόδια</string>
     <string name="detail_section_parental_guide">Γονική καθοδήγηση</string>
@@ -4144,6 +4145,8 @@
     <string name="detail_episode_synopsis_none">Δεν υπάρχει ακόμη σύνοψη για αυτό το επεισόδιο.</string>
     <string name="player_track_role_commentary">Σχολιασμός</string>
     <string name="player_track_role_audio_description">Ηχητική περιγραφή</string>
+    <string name="stream_resume_from_time">Συνέχεια από %1$s</string>
+    <string name="stream_resume_from_percent">Συνέχεια από %1$d%%</string>
     <string name="tvdb_metadata_credit">Τα μεταδεδομένα παρέχονται από το %1$s</string>
     <string name="player_source_rate_limited">Αυτός ο διακομιστής περιορίζει τα αιτήματα. Δοκιμάστε ξανά σε περίπου %1$d λεπτά ή επιλέξτε πηγή από άλλον διακομιστή.</string>
     <string name="format_check_title">Έλεγχος μορφών</string>
@@ -4337,7 +4340,13 @@
     <string name="report_sent_no_phone">Ευχαριστώ για την αναφορά. Το Arc είναι ερασιτεχνικό έργο, οπότε δεν απαντάται κάθε αναφορά.</string>
     <string name="report_sent_back">Επιστροφή στην προβολή</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Επιλέξτε ό,τι ισχύει. Το Arc κράτησε το τελευταίο λεπτό.</item>
+        <item quantity="other">Επιλέξτε ό,τι ισχύει. Το Arc κράτησε τα τελευταία %1$d λεπτά.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Ρυθμίσεις αναπαραγωγής και το τελευταίο λεπτό</item>
+        <item quantity="other">Ρυθμίσεις αναπαραγωγής και τα τελευταία %1$d λεπτά</item>
+    </plurals>
     <string name="report_settings_subtitle">Πείτε τι πήγε στραβά ή τι θα θέλατε να κάνει το Arc</string>
     <string name="report_group_choose">Τι θέλετε να αναφέρετε;</string>
     <string name="report_group_options">Επιλογές</string>
@@ -4390,6 +4399,9 @@
     <string name="report_sent_kind_bug">Κάτι δεν λειτουργεί</string>
     <string name="report_sent_kind_idea">Ιδέα ή αίτημα</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d νέα</item>
+        <item quantity="other">%1$d νέες</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Ελέγχεται μία φορά την ημέρα. Το Arc είναι ερασιτεχνικό έργο, οπότε δεν λαμβάνει απάντηση κάθε αναφορά.</string>
     <string name="report_my_reports_hint_off">Ο έλεγχος είναι ανενεργός. Ενεργοποιήστε το Έλεγχος των αναφορών μου για να βλέπετε τι γίνεται με τις αναφορές σας.</string>
@@ -4412,6 +4424,9 @@
     <string name="report_ready_follow_off">Για να παρακολουθείτε αυτή την αναφορά, σαρώστε τον κωδικό στην επόμενη οθόνη με το τηλέφωνό σας.</string>
     <string name="report_notice_title">Υπάρχουν νέα για την αναφορά σας</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">Υπάρχουν νέα για %1$d αναφορά σας</item>
+        <item quantity="other">Υπάρχουν νέα για %1$d αναφορές σας</item>
+    </plurals>
     <string name="report_notice_one">%1$s, στάλθηκε %2$s: %3$s.</string>
     <string name="report_notice_many">Ανοίξτε το Οι αναφορές μου για να δείτε τι άλλαξε.</string>
     <string name="report_notice_open">Άνοιγμα: Οι αναφορές μου</string>
@@ -4422,9 +4437,15 @@
     <string name="report_stop_recording">Διακοπή καταγραφής</string>
     <string name="report_recording_pill">Καταγραφή %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Καταγραφή %1$s · %2$d σήμανση</item>
+        <item quantity="other">Καταγραφή %1$s · %2$d σημάνσεις</item>
+    </plurals>
     <string name="report_recording_no_space">Δεν υπάρχει αρκετός ελεύθερος χώρος για καταγραφή</string>
     <string name="report_item_recording">Καταγραφή, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d σήμανση. Μόνο αριθμοί, ποτέ ήχος ή εικόνα.</item>
+        <item quantity="other">%d σημάνσεις. Μόνο αριθμοί, ποτέ ήχος ή εικόνα.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Αναφορά προβλήματος / σήμανση</string>
     <string name="remote_buttons_job_report_mark_desc">Ανοίγει τον πίνακα αναφοράς. Κατά την καταγραφή προσθέτει σήμανση.</string>
     <string name="display_mode_measured">Μέτρηση</string>
@@ -4456,4 +4477,24 @@
     <string name="about_update_optimize_install_subtitle">Ταχύτερη πρώτη εκκίνηση μετά από ενημέρωση, αλλά η εφαρμογή κλείνει για περίπου ένα λεπτό κατά την εγκατάσταση. Απενεργοποιήστε το για να χρησιμοποιείτε την οθόνη εγκατάστασης του Android</string>
     <string name="update_ready_closes">Η λήψη ολοκληρώθηκε. Η εφαρμογή κλείνει όσο εγκαθίσταται η ενημέρωση, κάτι που μπορεί να διαρκέσει ένα λεπτό. Ανοίξτε την ξανά μετά.</string>
     <string name="update_ready_closes_and_reopens">Η λήψη ολοκληρώθηκε. Η εφαρμογή κλείνει όσο εγκαθίσταται η ενημέρωση και ανοίγει ξανά μόνη της, κάτι που μπορεί να διαρκέσει ένα λεπτό.</string>
+  <string name="audio_night_mode">Λειτουργία νύχτας</string>
+  <string name="audio_night_mode_sub">Ανεβάζει τους διαλόγους και τους χαμηλούς ήχους, ώστε να μπορείτε να κρατάτε χαμηλή την ένταση</string>
+  <string name="audio_night_mode_desc">Ανεβάζει τους διαλόγους και τους χαμηλούς ήχους· οι δυνατές σκηνές παραμένουν όπως αναμίχθηκαν. Λειτουργεί στον ήχο που αποκωδικοποιεί η εφαρμογή. Το Dolby και το DTS που αποστέλλονται ως passthrough σε AV receiver ή soundbar παραμένουν ως έχουν.</string>
+  <string name="audio_night_mode_value">Λειτουργία νύχτας: %1$s</string>
+  <string name="sub_hdr_dim_player_controls">Μείωση φωτεινότητας χειριστηρίων σε HDR</string>
+  <string name="sub_hdr_dim_player_controls_sub">Εφαρμογή της φωτεινότητας HDR στα χειριστήρια και τα μενού του προγράμματος αναπαραγωγής που εμφανίζονται πάνω σε βίντεο HDR και Dolby Vision</string>
+  <string name="sub_libass_mode">Λειτουργία απόδοσης Libass</string>
+  <string name="layout_trailer_4k">Τρέιλερ 4K</string>
+  <string name="layout_trailer_4k_sub">Αναπαραγωγή τρέιλερ πάνω από 1080p όταν είναι διαθέσιμα. Χρησιμοποιεί πολύ περισσότερη μνήμη· ανενεργό από προεπιλογή σε συσκευές με 2 GB RAM ή λιγότερη.</string>
+  <string name="audio_downmix_lfe_level">Επίπεδο LFE στο downmix</string>
+  <string name="audio_downmix_lfe_level_sub">Αναμιγνύει το κανάλι του subwoofer (LFE) στα υπόλοιπα ηχεία αντί να το απορρίπτει. Μόνο για διατάξεις χωρίς LFE, όπως 2.0.</string>
+  <string name="audio_downmix_lfe_level_desc">Χρησιμοποιείται όταν η διάταξη downmix δεν έχει κανάλι LFE. Εφαρμόζεται από την επόμενη αναπαραγωγή.</string>
+  <string name="audio_downmix_lfe_level_off">Απενεργοποιημένο</string>
+  <string name="audio_downmix_lfe_level_half">50%</string>
+  <string name="audio_downmix_lfe_level_full">100%</string>
+  <string name="player_chapters_title">Κεφάλαια (%1$d)</string>
+  <string name="player_chapter_remaining">Απομένουν %1$s</string>
+  <string name="ambient_mode_subtitle">Εμφάνιση εικόνων από τους καταλόγους σας όταν η τηλεόραση είναι σε αδράνεια</string>
+    <string name="settings_home_screen_rows">Σειρές αρχικής οθόνης</string>
+    <string name="settings_home_screen_rows_subtitle">Επιλέξτε τη σειρά των σειρών στην αρχική οθόνη</string>
 </resources>

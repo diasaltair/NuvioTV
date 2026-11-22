@@ -2711,9 +2711,12 @@
     <string name="profile_default_name">Profil %1$d</string>
     <string name="detail_tmdb_fallback_title">TMDB %1$d</string>
     <string name="collections_editor_tmdb_collection_fallback">TMDB Collection %1$d</string>
-    <string name="settings_home_screen_rows">Rækker på startskærmen</string>
-    <string name="settings_home_screen_rows_subtitle">Vælg rækkefølgen af rækker på din startskærm</string>
+
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="one">%d tilbage</item>
+        <item quantity="other">%d tilbage</item>
+    </plurals>
     <string name="cw_no_artwork">Intet billede</string>
     <string name="detail_eyebrow_episodes">Episoder</string>
     <string name="detail_section_parental_guide">Forældrevejledning</string>
@@ -2727,6 +2730,9 @@
     <string name="ambient_mode_timeout">Start efter</string>
     <string name="ambient_mode_timeout_subtitle">Hvor længe der ventes, før Ambient-tilstand starter</string>
     <plurals name="ambient_mode_timeout_minutes">
+        <item quantity="one">%1$d minut</item>
+        <item quantity="other">%1$d minutter</item>
+    </plurals>
     <string name="ambient_mode_catalogs">Kataloger</string>
     <string name="ambient_mode_catalogs_subtitle">Vælg op til 3 kataloger, som billeder hentes fra</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Vælg op til 3 kataloger</string>
@@ -3811,7 +3817,13 @@
     <string name="report_sent_no_phone">Tak for rapporten. Arc er et hobbyprojekt, så ikke alle rapporter får svar.</string>
     <string name="report_sent_back">Tilbage til videoen</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Vælg alt, der passer. Arc har gemt det sidste minut.</item>
+        <item quantity="other">Vælg alt, der passer. Arc har gemt de sidste %1$d minutter.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Afspillerindstillinger og det sidste minut</item>
+        <item quantity="other">Afspillerindstillinger og de sidste %1$d minutter</item>
+    </plurals>
     <string name="report_settings_subtitle">Fortæl, hvad der gik galt, eller hvad du gerne vil have, at Arc kan</string>
     <string name="report_group_choose">Hvad vil du rapportere?</string>
     <string name="report_group_options">Valgmuligheder</string>
@@ -3864,6 +3876,9 @@
     <string name="report_sent_kind_bug">Noget virker ikke</string>
     <string name="report_sent_kind_idea">Idé eller ønske</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d ny</item>
+        <item quantity="other">%1$d nye</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Tjekkes én gang om dagen. Arc er et hobbyprojekt, så ikke alle rapporter får svar.</string>
     <string name="report_my_reports_hint_off">Tjek er slået fra. Slå Tjek mine rapporter til for at se, hvad der sker med dine rapporter.</string>
@@ -3886,6 +3901,9 @@
     <string name="report_ready_follow_off">Scan koden på næste skærm med din telefon for at følge denne rapport.</string>
     <string name="report_notice_title">Der er nyt om din rapport</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">Der er nyt om %1$d af dine rapporter</item>
+        <item quantity="other">Der er nyt om %1$d af dine rapporter</item>
+    </plurals>
     <string name="report_notice_one">%1$s, sendt %2$s: %3$s.</string>
     <string name="report_notice_many">Åbn Mine rapporter for at se, hvad der er ændret.</string>
     <string name="report_notice_open">Åbn Mine rapporter</string>
@@ -3896,9 +3914,15 @@
     <string name="report_stop_recording">Stop optagelsen</string>
     <string name="report_recording_pill">Optager %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Optager %1$s · %2$d markering</item>
+        <item quantity="other">Optager %1$s · %2$d markeringer</item>
+    </plurals>
     <string name="report_recording_no_space">Ikke nok ledig plads til at optage</string>
     <string name="report_item_recording">Optagelse, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d markering. Kun værdier, aldrig lyd eller billede.</item>
+        <item quantity="other">%d markeringer. Kun værdier, aldrig lyd eller billede.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Rapportér et problem / markér</string>
     <string name="remote_buttons_job_report_mark_desc">Åbner rapportpanelet. Under optagelse tilføjes en markering.</string>
     <string name="display_mode_measured">Målt</string>
@@ -3930,4 +3954,7 @@
     <string name="about_update_optimize_install_subtitle">Hurtigere første start efter en opdatering, men appen lukker i omkring et minut under installationen. Slå fra for at bruge Androids installationsskærm i stedet</string>
     <string name="update_ready_closes">Download færdig. Appen lukker, mens opdateringen installeres, hvilket kan tage et minut. Åbn den igen bagefter.</string>
     <string name="update_ready_closes_and_reopens">Download færdig. Appen lukker, mens opdateringen installeres, og åbner igen af sig selv, hvilket kan tage et minut.</string>
+    <string name="sub_libass_mode">Libass-gengivelsestilstand</string>
+    <string name="settings_home_screen_rows">Rækker på startskærmen</string>
+    <string name="settings_home_screen_rows_subtitle">Vælg rækkefølgen af rækker på din startskærm</string>
 </resources>

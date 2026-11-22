@@ -1655,9 +1655,11 @@
     <string name="collections_tab_all">Alla</string>
     <string name="collections_tab_combined">Kombinerat</string>
 
-    <string name="settings_home_screen_rows">Rader på startskärmen</string>
-    <string name="settings_home_screen_rows_subtitle">Välj ordningen på raderna på startskärmen</string>
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="one">%d kvar</item>
+        <item quantity="other">%d kvar</item>
+    </plurals>
     <string name="cw_no_artwork">Ingen bild</string>
     <string name="detail_eyebrow_episodes">Avsnitt</string>
     <string name="detail_section_parental_guide">Föräldraguide</string>
@@ -1672,6 +1674,9 @@
     <string name="ambient_mode_timeout">Starta efter</string>
     <string name="ambient_mode_timeout_subtitle">Hur länge det dröjer innan Ambient-läget startar</string>
     <plurals name="ambient_mode_timeout_minutes">
+        <item quantity="one">%1$d minut</item>
+        <item quantity="other">%1$d minuter</item>
+    </plurals>
     <string name="ambient_mode_catalogs">Kataloger</string>
     <string name="ambient_mode_catalogs_subtitle">Välj upp till 3 kataloger att hämta bilder från</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Välj upp till 3 kataloger</string>
@@ -2764,7 +2769,13 @@
     <string name="report_sent_no_phone">Tack för rapporten. Arc är ett hobbyprojekt, så inte alla rapporter får svar.</string>
     <string name="report_sent_back">Tillbaka till uppspelningen</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Välj allt som stämmer. Arc har sparat den senaste minuten.</item>
+        <item quantity="other">Välj allt som stämmer. Arc har sparat de senaste %1$d minuterna.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Spelarinställningar och den senaste minuten</item>
+        <item quantity="other">Spelarinställningar och de senaste %1$d minuterna</item>
+    </plurals>
     <string name="report_settings_subtitle">Berätta vad som gick fel eller vad du vill att Arc ska kunna</string>
     <string name="report_group_choose">Vad vill du rapportera?</string>
     <string name="report_group_options">Alternativ</string>
@@ -2817,6 +2828,9 @@
     <string name="report_sent_kind_bug">Något fungerar inte</string>
     <string name="report_sent_kind_idea">Idé eller önskemål</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d ny</item>
+        <item quantity="other">%1$d nya</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Kontrolleras en gång om dagen. Arc är ett hobbyprojekt, så inte alla rapporter får svar.</string>
     <string name="report_my_reports_hint_off">Kontrollen är av. Slå på Kontrollera mina rapporter för att se vad som händer med dina rapporter.</string>
@@ -2839,6 +2853,9 @@
     <string name="report_ready_follow_off">Skanna koden på nästa skärm med telefonen för att följa den här rapporten.</string>
     <string name="report_notice_title">Det finns nytt om din rapport</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">Det finns nytt om %1$d av dina rapporter</item>
+        <item quantity="other">Det finns nytt om %1$d av dina rapporter</item>
+    </plurals>
     <string name="report_notice_one">%1$s, skickad %2$s: %3$s.</string>
     <string name="report_notice_many">Öppna Mina rapporter för att se vad som har ändrats.</string>
     <string name="report_notice_open">Öppna Mina rapporter</string>
@@ -2849,9 +2866,15 @@
     <string name="report_stop_recording">Stoppa inspelningen</string>
     <string name="report_recording_pill">Inspelning %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Inspelning %1$s · %2$d markering</item>
+        <item quantity="other">Inspelning %1$s · %2$d markeringar</item>
+    </plurals>
     <string name="report_recording_no_space">Inte tillräckligt med ledigt utrymme för inspelning</string>
     <string name="report_item_recording">Inspelning, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d markering. Bara värden, aldrig ljud eller bild.</item>
+        <item quantity="other">%d markeringar. Bara värden, aldrig ljud eller bild.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Rapportera ett problem / markera</string>
     <string name="remote_buttons_job_report_mark_desc">Öppnar rapportpanelen. Under inspelning läggs en markering till.</string>
     <string name="display_mode_measured">Uppmätt</string>
@@ -2883,4 +2906,67 @@
     <string name="about_update_optimize_install_subtitle">Snabbare första start efter en uppdatering, men appen stängs i ungefär en minut medan den installeras. Stäng av för att använda Androids installationsskärm i stället</string>
     <string name="update_ready_closes">Nedladdning klar. Appen stängs medan uppdateringen installeras, vilket kan ta en minut. Öppna den igen efteråt.</string>
     <string name="update_ready_closes_and_reopens">Nedladdning klar. Appen stängs medan uppdateringen installeras och öppnas sedan igen av sig själv, vilket kan ta en minut.</string>
+    <string name="sub_libass_mode">Libass-renderingsläge</string>
+    <string name="party_settings_description">Anslut till gruppen med en kod</string>
+    <string name="party_start_description">Bjud in dina vänner. Alla spelar upp från sina egna källor och håller sig synkroniserade</string>
+    <string name="party_start_action">Starta watch party</string>
+    <string name="party_sign_in_required">Logga in på ditt Nuvio konto för att använda funktionen watch parties.</string>
+    <string name="party_unavailable">Watch parties är inte tillgänglig just nu.</string>
+    <string name="party_code_label">Grupp kod</string>
+    <string name="party_seats">%1$d av %2$d platser</string>
+    <string name="party_host">Värd</string>
+    <string name="party_you">Du</string>
+    <string name="party_status_ready">Tittar</string>
+    <string name="party_status_loading">Laddar</string>
+    <string name="party_status_choosing">Väljer uppspelningskälla</string>
+    <string name="party_status_elsewhere">Tittar på något annat</string>
+    <string name="party_remove">Ta bort</string>
+    <string name="party_remove_title">Ta bort %1$s?</string>
+    <string name="party_remove_message">De kommer inte att kunna ansluta till gruppen igen.</string>
+    <string name="party_end_title">Avsluta watch party?</string>
+    <string name="party_end_message">Alla kommer att kopplas bort från gruppen.</string>
+    <string name="party_switch">Byt grupp till %1$s</string>
+    <string name="party_switch_title">Byt grupp?</string>
+    <string name="party_switch_message">Alla kommer att börja titta på %1$s med dig.</string>
+    <string name="party_switch_confirm">Byt</string>
+    <string name="party_watch_with_party">Se tillsammans med gruppen</string>
+    <string name="party_waiting_for">Väntar på %1$s</string>
+    <string name="party_waiting">Väntar på alla</string>
+    <string name="party_member_joined">%1$s har gått med i watch party.</string>
+    <string name="party_member_left">%1$s lämnade watch party</string>
+    <string name="party_removed">Du har tagits bort från watch party</string>
+    <string name="party_ended">Detta watch party har avslutats</string>
+    <string name="party_media_changed">Gruppen kollar just nu på %1$s</string>
+    <string name="party_join_action">Anslut</string>
+    <string name="party_error_not_found">Ingen watch party hittades med den koden</string>
+    <string name="party_error_full">Denna watch party är full.</string>
+    <string name="party_error_removed">Du kan inte ansluta till denna watch party.</string>
+    <string name="party_error_ended">Denna watch party har avslutats.</string>
+    <string name="party_error_rate_limited">För många försök. Försök igen om några minuter.</string>
+    <string name="party_error_network">Kunde inte nå watch party. Kontrollera din anslutning.</string>
+    <string name="party_source">Gruppens källa</string>
+    <string name="party_host_only_title">Endast jag kan styra uppspelningen</string>
+    <string name="party_host_only_description">"Övriga deltagare kan fortfarande pausa eller spola tillbaka för egen del. "</string>
+    <string name="party_host_only_note">Endast värden kan styra uppspelningen</string>
+    <string name="party_control_host_only">Endast värden kan styra uppspelningen nu</string>
+    <string name="party_control_everyone">Alla kan styra uppspelningen nu</string>
+    <string name="party_paused_for_you">Pausad för dig</string>
+    <string name="party_caught_up">Tillbaka i synk med gruppen</string>
+    <string name="party_action_paused">%1$s pausade</string>
+    <string name="party_action_resumed">%1$s fortsatte</string>
+    <string name="party_action_seeked">%1$s hoppade till %2$s</string>
+    <string name="party_action_speed">%1$s ändrade hastigheten till %2$s</string>
+    <string name="party_joined_title">Du är inne</string>
+    <string name="party_hosted_by">Anordnas av %1$s</string>
+    <string name="party_open_seat">Bjud in en vän</string>
+    <string name="party_host_hint">För att vara värd startar du en grupp från spelaren.</string>
+    <string name="party_share_title">Dela min länk</string>
+    <string name="party_share_description">Dina vänner kan använda din uppspelningslänk i stället för att välja en egen. Länken kan även innehålla din debrid-nyckel.</string>
+    <string name="party_share_unavailable">Den här strömmen kan inte delas.</string>
+    <string name="party_shared_by">Delad av %1$s</string>
+    <string name="party_invite_scan">Skanna med telefonen för att ansluta</string>
+    <string name="party_invite_share">Eller dela koden. Dina vänner kan ange den under Watch party i valfri Nuvio-app.</string>
+    <string name="party_phone_chat_note">Öppna Watch Party på din telefon med den här profilen för att chatta.</string>
+    <string name="settings_home_screen_rows">Rader på startskärmen</string>
+    <string name="settings_home_screen_rows_subtitle">Välj ordningen på raderna på startskärmen</string>
 </resources>

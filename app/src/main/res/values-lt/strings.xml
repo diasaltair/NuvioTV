@@ -4500,6 +4500,22 @@
     <string name="autosync_thorough_description">Prieš sinchronizuojant toliau lyginti kitus subtitrus ir įterptus takelius, ieškant tikslesnės atitikties. Išjungus greičiau naudojama pirma gera atitiktis. Taikomos tik patikimos atitiktys.</string>
     <string name="autosync_toast_no_fit">Nepavyko sinchronizuoti: šie subtitrai neatitinka šios vaizdo įrašo versijos.</string>
     <string name="autosync_label_synced">Sinchronizuota automatiškai</string>
+    <string name="sub_libass_mode">„Libass“ atvaizdavimo režimas</string>
+    <string name="ambient_mode_subtitle">Nenaudojant televizoriaus rodyti katalogų iliustracijas</string>
+    <string name="audio_night_mode">Naktinis režimas</string>
+    <string name="audio_night_mode_sub">Pagarsina dialogus ir tylius garsus, kad galėtumėte klausytis mažesniu garsumu</string>
+    <string name="audio_night_mode_desc">Pagarsina dialogus ir tylius garsus; garsios scenos lieka tokios, kaip buvo sumaišytos. Veikia programos dekoduojamą garsą. „Dolby“ ir DTS garsas, tiesiogiai siunčiamas į imtuvą ar garso juostą, nekeičiamas.</string>
+    <string name="audio_night_mode_value">Naktinis režimas: %1$s</string>
+    <string name="layout_trailer_4k">4K anonsai</string>
+    <string name="layout_trailer_4k_sub">Kai galima, leisti didesnės nei 1080p raiškos anonsus. Naudoja daug daugiau atminties; įrenginiuose su 2 GB RAM ar mažiau pagal numatytuosius nustatymus išjungta.</string>
+    <string name="audio_downmix_lfe_level_off">Išjungta</string>
+    <string name="audio_downmix_lfe_level">LFE lygis suvedant kanalus</string>
+    <string name="audio_downmix_lfe_level_sub">Žemųjų dažnių (LFE) kanalą įmaišo į kitus garsiakalbius, užuot jį pašalinęs. Tik išdėstymams be LFE, pvz., 2.0.</string>
+    <string name="audio_downmix_lfe_level_desc">Naudojama, kai suvestame išdėstyme nėra LFE kanalo. Taikoma nuo kito atkūrimo.</string>
+    <string name="audio_downmix_lfe_level_half">50%</string>
+    <string name="audio_downmix_lfe_level_full">100%</string>
+    <string name="player_chapters_title">Skyriai (%1$d)</string>
+    <string name="player_chapter_remaining">Liko %1$s</string>
     <string name="settings_home_screen_rows">Pradžios ekrano eilutės</string>
     <string name="settings_home_screen_rows_subtitle">Pasirinkite eilučių tvarką pradžios ekrane</string>
 </resources>

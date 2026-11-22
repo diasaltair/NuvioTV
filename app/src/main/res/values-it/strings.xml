@@ -3376,8 +3376,6 @@
     <string name="autosync_label_synced">Sincronizzato automaticamente</string>
     <string name="stream_resume_from_time">Riprendi da %1$s</string>
     <string name="stream_resume_from_percent">Riprendi dal %1$d%%</string>
-    <string name="settings_home_screen_rows">Righe della schermata Home</string>
-    <string name="settings_home_screen_rows_subtitle">Scegli l\'ordine delle righe nella schermata Home</string>
     <string name="cw_no_artwork">Nessuna immagine</string>
     <string name="detail_eyebrow_episodes">Episodi</string>
     <string name="detail_trailer_error_age_restricted">Questo trailer è soggetto a limiti di età su YouTube e non può essere riprodotto qui.</string>
@@ -4103,7 +4101,13 @@
     <string name="detail_episode_synopsis_none">Ancora nessuna descrizione per questo episodio.</string>
     <string name="player_track_role_commentary">Commento</string>
     <string name="player_track_role_audio_description">Audiodescrizione</string>
+
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="one">Ne resta %d</item>
+        <item quantity="many">Ne restano %d</item>
+        <item quantity="other">Ne restano %d</item>
+    </plurals>
     <string name="detail_section_parental_guide">Guida per i genitori</string>
     <string name="about_update_auto_install_title">Installa aggiornamenti automaticamente</string>
     <string name="about_update_auto_install_subtitle">Scarica le nuove versioni in background e installale quando il dispositivo è inattivo</string>
@@ -4419,7 +4423,15 @@
     <string name="report_sent_no_phone">Grazie per la segnalazione. Arc è un progetto amatoriale, quindi non tutte le segnalazioni ricevono risposta.</string>
     <string name="report_sent_back">Torna alla visione</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Scegli tutte le voci adatte. Arc ha conservato l\'ultimo minuto.</item>
+        <item quantity="many">Scegli tutte le voci adatte. Arc ha conservato gli ultimi %1$d minuti.</item>
+        <item quantity="other">Scegli tutte le voci adatte. Arc ha conservato gli ultimi %1$d minuti.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Impostazioni del lettore e ultimo minuto</item>
+        <item quantity="many">Impostazioni del lettore e ultimi %1$d minuti</item>
+        <item quantity="other">Impostazioni del lettore e ultimi %1$d minuti</item>
+    </plurals>
     <string name="report_settings_subtitle">Racconta cosa è andato storto o cosa vorresti che Arc facesse</string>
     <string name="report_group_choose">Cosa vuoi segnalare?</string>
     <string name="report_group_options">Opzioni</string>
@@ -4472,6 +4484,10 @@
     <string name="report_sent_kind_bug">Qualcosa non funziona</string>
     <string name="report_sent_kind_idea">Idea o richiesta</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d nuova</item>
+        <item quantity="many">%1$d nuove</item>
+        <item quantity="other">%1$d nuove</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Controllato una volta al giorno. Arc è un progetto amatoriale, quindi non tutte le segnalazioni ricevono risposta.</string>
     <string name="report_my_reports_hint_off">Il controllo è disattivato. Attiva Controlla le mie segnalazioni per vedere cosa succede alle tue segnalazioni.</string>
@@ -4494,6 +4510,10 @@
     <string name="report_ready_follow_off">Per seguire questa segnalazione, inquadra il codice nella schermata successiva con il telefono.</string>
     <string name="report_notice_title">Novità sulla tua segnalazione</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">%1$d tua segnalazione ha novità</item>
+        <item quantity="many">%1$d tue segnalazioni hanno novità</item>
+        <item quantity="other">%1$d tue segnalazioni hanno novità</item>
+    </plurals>
     <string name="report_notice_one">%1$s, inviata il %2$s: %3$s.</string>
     <string name="report_notice_many">Apri Le mie segnalazioni per vedere cosa è cambiato.</string>
     <string name="report_notice_open">Apri Le mie segnalazioni</string>
@@ -4504,9 +4524,15 @@
     <string name="report_stop_recording">Interrompi la registrazione</string>
     <string name="report_recording_pill">Registrazione %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Registrazione %1$s · %2$d segno</item>
+        <item quantity="other">Registrazione %1$s · %2$d segni</item>
+    </plurals>
     <string name="report_recording_no_space">Spazio libero insufficiente per registrare</string>
     <string name="report_item_recording">Registrazione, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d segno. Solo valori, mai audio o video.</item>
+        <item quantity="other">%d segni. Solo valori, mai audio o video.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Segnala un problema / segna</string>
     <string name="remote_buttons_job_report_mark_desc">Apre il pannello di segnalazione. Durante la registrazione aggiunge un segno.</string>
     <string name="display_mode_measured">Misurata</string>
@@ -4538,4 +4564,10 @@
     <string name="about_update_optimize_install_subtitle">Primo avvio più veloce dopo un aggiornamento, ma l\'app si chiude per circa un minuto durante l\'installazione. Disattiva per usare la schermata di installazione di Android</string>
     <string name="update_ready_closes">Download completato. L\'app si chiude durante l\'installazione dell\'aggiornamento, che può richiedere un minuto. Riaprila al termine.</string>
     <string name="update_ready_closes_and_reopens">Download completato. L\'app si chiude durante l\'installazione dell\'aggiornamento e si riapre da sola, il che può richiedere un minuto.</string>
+<string name="sub_libass_mode">Modalità rendering Libass</string>
+    <string name="ambient_mode_subtitle">Mostra le immagini dei cataloghi quando la TV è inattiva.</string>
+    <string name="layout_trailer_4k">Trailer in 4K</string>
+    <string name="layout_trailer_4k_sub">Riproduci trailer oltre 1080p quando disponibili. Richiedono molta più memoria; l\'opzione è disattivata per impostazione predefinita sui dispositivi con 2 GB di RAM o meno.</string>
+    <string name="settings_home_screen_rows">Righe della schermata Home</string>
+    <string name="settings_home_screen_rows_subtitle">Scegli l\'ordine delle righe nella schermata Home</string>
 </resources>

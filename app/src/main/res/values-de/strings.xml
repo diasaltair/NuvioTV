@@ -2283,9 +2283,11 @@
     <string name="trakt_comments_error_request_failed">Trakt comments request failed</string>
     <string name="trakt_library_error_fetch_list_items">Failed to fetch list items</string>
 
-    <string name="settings_home_screen_rows">Startbildschirm-Reihen</string>
-    <string name="settings_home_screen_rows_subtitle">Lege die Reihenfolge der Reihen auf deinem Startbildschirm fest</string>
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="one">Noch %d</item>
+        <item quantity="other">Noch %d</item>
+    </plurals>
     <string name="cw_no_artwork">Kein Bild</string>
     <string name="detail_eyebrow_episodes">Folgen</string>
     <string name="detail_section_parental_guide">Elternratgeber</string>
@@ -2299,6 +2301,9 @@
     <string name="ambient_mode_timeout">Starten nach</string>
     <string name="ambient_mode_timeout_subtitle">Wie lange gewartet wird, bis der Ambient-Modus startet</string>
     <plurals name="ambient_mode_timeout_minutes">
+        <item quantity="one">%1$d Minute</item>
+        <item quantity="other">%1$d Minuten</item>
+    </plurals>
     <string name="ambient_mode_catalogs">Kataloge</string>
     <string name="ambient_mode_catalogs_subtitle">Wählen Sie bis zu 3 Kataloge für die Bilder aus</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Wählen Sie bis zu 3 Kataloge aus</string>
@@ -3383,7 +3388,13 @@
     <string name="report_sent_no_phone">Danke für Ihre Meldung. Arc ist ein Hobbyprojekt, daher bekommt nicht jede Meldung eine Antwort.</string>
     <string name="report_sent_back">Zurück zum Video</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Alles Zutreffende auswählen. Arc hat die letzte Minute aufbewahrt.</item>
+        <item quantity="other">Alles Zutreffende auswählen. Arc hat die letzten %1$d Minuten aufbewahrt.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Player-Einstellungen und die letzte Minute</item>
+        <item quantity="other">Player-Einstellungen und die letzten %1$d Minuten</item>
+    </plurals>
     <string name="report_settings_subtitle">Sagen Sie, was schiefgelaufen ist oder was Arc können soll</string>
     <string name="report_group_choose">Was möchten Sie melden?</string>
     <string name="report_group_options">Optionen</string>
@@ -3436,6 +3447,9 @@
     <string name="report_sent_kind_bug">Etwas funktioniert nicht</string>
     <string name="report_sent_kind_idea">Idee oder Wunsch</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d neu</item>
+        <item quantity="other">%1$d neu</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Wird einmal täglich geprüft. Arc ist ein Hobbyprojekt, daher bekommt nicht jede Meldung eine Antwort.</string>
     <string name="report_my_reports_hint_off">Die Prüfung ist aus. Schalten Sie Meine Meldungen prüfen ein, um zu sehen, was aus Ihren Meldungen wird.</string>
@@ -3458,6 +3472,9 @@
     <string name="report_ready_follow_off">Um diese Meldung zu verfolgen, scannen Sie den Code auf dem nächsten Bildschirm mit Ihrem Smartphone.</string>
     <string name="report_notice_title">Ihre Meldung hat einen neuen Stand</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">%1$d Ihrer Meldungen hat einen neuen Stand</item>
+        <item quantity="other">%1$d Ihrer Meldungen haben einen neuen Stand</item>
+    </plurals>
     <string name="report_notice_one">%1$s, gesendet am %2$s: %3$s.</string>
     <string name="report_notice_many">Öffnen Sie Meine Meldungen, um zu sehen, was sich geändert hat.</string>
     <string name="report_notice_open">Meine Meldungen öffnen</string>
@@ -3468,9 +3485,15 @@
     <string name="report_stop_recording">Aufnahme beenden</string>
     <string name="report_recording_pill">Aufnahme %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Aufnahme %1$s · %2$d Markierung</item>
+        <item quantity="other">Aufnahme %1$s · %2$d Markierungen</item>
+    </plurals>
     <string name="report_recording_no_space">Nicht genug freier Speicher für die Aufnahme</string>
     <string name="report_item_recording">Aufnahme, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d Markierung. Nur Werte, nie Ton oder Bild.</item>
+        <item quantity="other">%d Markierungen. Nur Werte, nie Ton oder Bild.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Problem melden / markieren</string>
     <string name="remote_buttons_job_report_mark_desc">Öffnet den Meldebereich. Während der Aufnahme wird eine Markierung gesetzt.</string>
     <string name="display_mode_measured">Gemessen</string>
@@ -3502,4 +3525,7 @@
     <string name="about_update_optimize_install_subtitle">Schnellerer erster Start nach einem Update, aber die App schließt sich während der Installation für etwa eine Minute. Ausschalten, um stattdessen den Installationsbildschirm von Android zu verwenden</string>
     <string name="update_ready_closes">Update heruntergeladen. Die App schließt sich, während das Update installiert wird, was eine Minute dauern kann. Öffnen Sie sie danach erneut.</string>
     <string name="update_ready_closes_and_reopens">Update heruntergeladen. Die App schließt sich, während das Update installiert wird, und öffnet sich danach von selbst wieder. Das kann eine Minute dauern.</string>
+    <string name="sub_libass_mode">Libass-Rendering-Modus</string>
+    <string name="settings_home_screen_rows">Startbildschirm-Reihen</string>
+    <string name="settings_home_screen_rows_subtitle">Lege die Reihenfolge der Reihen auf deinem Startbildschirm fest</string>
 </resources>

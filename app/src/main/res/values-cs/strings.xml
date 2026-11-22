@@ -2846,9 +2846,13 @@
     <string name="stream_test_video_bitrate">Průměrný datový tok videa: %1$s</string>
     <string name="stream_test_error_connection">Připojení selhalo. Platnost posledního přehraného odkazu na stream mohla vypršet, nebo je nedostupný. Přehrajte prosím video znovu a zkuste to opět.</string>
 
-    <string name="settings_home_screen_rows">Řádky domovské obrazovky</string>
-    <string name="settings_home_screen_rows_subtitle">Vyberte pořadí řádků na domovské obrazovce</string>
+    <!-- Nuvio-test additions -->
     <plurals name="cw_episodes_left">
+        <item quantity="one">Zbývá %d</item>
+        <item quantity="few">Zbývají %d</item>
+        <item quantity="many">Zbývá %d</item>
+        <item quantity="other">Zbývá %d</item>
+    </plurals>
     <string name="cw_no_artwork">Bez obrázku</string>
     <string name="detail_eyebrow_episodes">Epizody</string>
     <string name="detail_section_parental_guide">Rodičovský průvodce</string>
@@ -2862,6 +2866,11 @@
     <string name="ambient_mode_timeout">Spustit po</string>
     <string name="ambient_mode_timeout_subtitle">Jak dlouho čekat před spuštěním režimu Ambient</string>
     <plurals name="ambient_mode_timeout_minutes">
+        <item quantity="one">%1$d minuta</item>
+        <item quantity="few">%1$d minuty</item>
+        <item quantity="many">%1$d minuty</item>
+        <item quantity="other">%1$d minut</item>
+    </plurals>
     <string name="ambient_mode_catalogs">Katalogy</string>
     <string name="ambient_mode_catalogs_subtitle">Vyberte až 3 katalogy, ze kterých se načtou obrázky</string>
     <string name="ambient_mode_catalogs_dialog_subtitle">Vyberte až 3 katalogy</string>
@@ -3945,7 +3954,17 @@
     <string name="report_sent_no_phone">Díky za hlášení. Arc je hobby projekt, proto ne každé hlášení dostane odpověď.</string>
     <string name="report_sent_back">Zpět ke sledování</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="one">Vyberte vše, co platí. Arc uchoval poslední minutu.</item>
+        <item quantity="few">Vyberte vše, co platí. Arc uchoval poslední %1$d minuty.</item>
+        <item quantity="many">Vyberte vše, co platí. Arc uchoval posledních %1$d minuty.</item>
+        <item quantity="other">Vyberte vše, co platí. Arc uchoval posledních %1$d minut.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="one">Nastavení přehrávače a poslední minuta</item>
+        <item quantity="few">Nastavení přehrávače a poslední %1$d minuty</item>
+        <item quantity="many">Nastavení přehrávače a posledních %1$d minuty</item>
+        <item quantity="other">Nastavení přehrávače a posledních %1$d minut</item>
+    </plurals>
     <string name="report_settings_subtitle">Napište, co se pokazilo nebo co byste chtěli, aby Arc uměl</string>
     <string name="report_group_choose">Co chcete nahlásit?</string>
     <string name="report_group_options">Možnosti</string>
@@ -3998,6 +4017,11 @@
     <string name="report_sent_kind_bug">Něco nefunguje</string>
     <string name="report_sent_kind_idea">Nápad nebo přání</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d nové</item>
+        <item quantity="few">%1$d nová</item>
+        <item quantity="many">%1$d nového</item>
+        <item quantity="other">%1$d nových</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Kontroluje se jednou denně. Arc je hobby projekt, proto ne každé hlášení dostane odpověď.</string>
     <string name="report_my_reports_hint_off">Kontrola je vypnutá. Zapněte Kontrolovat moje hlášení a uvidíte, co se s vašimi hlášeními děje.</string>
@@ -4020,6 +4044,11 @@
     <string name="report_ready_follow_off">Chcete-li toto hlášení sledovat, naskenujte telefonem kód na další obrazovce.</string>
     <string name="report_notice_title">U vašeho hlášení je novinka</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">U %1$d vašeho hlášení je novinka</item>
+        <item quantity="few">U %1$d vašich hlášení jsou novinky</item>
+        <item quantity="many">U %1$d vašeho hlášení jsou novinky</item>
+        <item quantity="other">U %1$d vašich hlášení jsou novinky</item>
+    </plurals>
     <string name="report_notice_one">%1$s, odesláno %2$s: %3$s.</string>
     <string name="report_notice_many">Otevřete Moje hlášení a uvidíte, co se změnilo.</string>
     <string name="report_notice_open">Otevřít Moje hlášení</string>
@@ -4030,9 +4059,19 @@
     <string name="report_stop_recording">Zastavit nahrávání</string>
     <string name="report_recording_pill">Nahrávání %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Nahrávání %1$s · %2$d značka</item>
+        <item quantity="few">Nahrávání %1$s · %2$d značky</item>
+        <item quantity="many">Nahrávání %1$s · %2$d značky</item>
+        <item quantity="other">Nahrávání %1$s · %2$d značek</item>
+    </plurals>
     <string name="report_recording_no_space">Není dost volného místa pro nahrávání</string>
     <string name="report_item_recording">Nahrávání, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d značka. Jen čísla, nikdy zvuk ani obraz.</item>
+        <item quantity="few">%d značky. Jen čísla, nikdy zvuk ani obraz.</item>
+        <item quantity="many">%d značky. Jen čísla, nikdy zvuk ani obraz.</item>
+        <item quantity="other">%d značek. Jen čísla, nikdy zvuk ani obraz.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Nahlásit problém / označit</string>
     <string name="remote_buttons_job_report_mark_desc">Otevře panel hlášení. Během nahrávání přidá značku.</string>
     <string name="display_mode_measured">Naměřeno</string>
@@ -4064,4 +4103,7 @@
     <string name="about_update_optimize_install_subtitle">Rychlejší první spuštění po aktualizaci, ale aplikace se během instalace asi na minutu zavře. Vypnutím použijete instalační obrazovku Androidu</string>
     <string name="update_ready_closes">Stahování dokončeno. Aplikace se během instalace aktualizace zavře, což může trvat minutu. Poté ji znovu otevřete.</string>
     <string name="update_ready_closes_and_reopens">Stahování dokončeno. Aplikace se během instalace aktualizace zavře a sama se znovu otevře, což může trvat minutu.</string>
+    <string name="sub_libass_mode">Režim vykreslování Libass</string>
+    <string name="settings_home_screen_rows">Řádky domovské obrazovky</string>
+    <string name="settings_home_screen_rows_subtitle">Vyberte pořadí řádků na domovské obrazovce</string>
 </resources>

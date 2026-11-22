@@ -3195,8 +3195,6 @@
         <item quantity="one">%1$d মিনিট</item>
         <item quantity="other">%1$d মিনিট</item>
     </plurals>
-    <string name="settings_home_screen_rows">হোম স্ক্রিনের সারি</string>
-    <string name="settings_home_screen_rows_subtitle">আপনার হোম স্ক্রিনে সারিগুলোর ক্রম বেছে নিন</string>
     <string name="party_title">ওয়াচ পার্টি</string>
     <string name="party_leave">পার্টি ত্যাগ করুন</string>
     <string name="settings_media_servers">মিডিয়া সার্ভার</string>
@@ -3255,4 +3253,29 @@
     <string name="library_servers_empty_title">কোনো লাইব্রেরি নির্বাচন করা হয়নি</string>
     <string name="library_servers_empty_message">সেটিংস-এ কন্টেন্ট ও ডিসকভারি-র অধীনে মিডিয়া সার্ভার থেকে কোন লাইব্রেরিগুলো দেখাবেন তা বাছুন।</string>
     <string name="library_server_load_failed">%1$s লোড করা যায়নি</string>
+    <string name="sub_libass_mode">libass রেন্ডার মোড</string>
+    <string name="ambient_mode_subtitle">টিভি নিষ্ক্রিয় অবস্থায় থাকলে ক্যাটালগ থেকে আর্টওয়ার্ক প্রদর্শন করুন</string>
+    <string name="audio_night_mode">নাইট মোড</string>
+    <string name="audio_night_mode_sub">ডায়লগ ও শান্ত শব্দগুলো বৃদ্ধি করে, যাতে আপনি ভলিউম কম রাখতে পারেন</string>
+    <string name="audio_night_mode_desc">ডায়লগ ও শান্ত শব্দগুলো বৃদ্ধি করে; তীব্র শব্দের দৃশ্যগুলো আগের মতোই থাকে। অ্যাপ দ্বারা ডিকোড করা অডিওতে কাজ করে। পাসথ্রু হিসেবে রিসিভার বা সাউন্ডবারে পাঠানো Dolby ও DTS অপরিবর্তিত থাকে।</string>
+    <string name="audio_night_mode_value">নাইট মোড: %1$s</string>
+    <string name="audio_night_mode_light_desc">মৃদু বৃদ্ধি, +6 dB পর্যন্ত</string>
+    <string name="audio_night_mode_medium_desc">ডায়লগ স্পষ্টভাবে বৃদ্ধি পায়, +10 dB পর্যন্ত</string>
+    <string name="audio_night_mode_strong_desc">+15 dB পর্যন্ত, কম ভলিউমে গভীর রাতে দেখার জন্য</string>
+    <string name="sub_hdr_brightness">HDR উজ্জ্বলতা</string>
+    <string name="sub_hdr_dim_player_controls">HDR-এ প্লেয়ার কন্ট্রোল মৃদু করুন</string>
+    <string name="sub_hdr_dim_player_controls_sub">HDR এবং Dolby Vision ভিডিওর উপরে প্রদর্শিত প্লেয়ার কন্ট্রোল ও মেনুতে HDR উজ্জ্বলতা প্রয়োগ করুন</string>
+    <string name="layout_trailer_4k">4K ট্রেলার</string>
+    <string name="layout_trailer_4k_sub">উপলব্ধ থাকলে 1080p-এর উপরের ট্রেলারগুলো প্লে করুন। অনেক বেশি মেমরি ব্যবহার করে; ২ GB বা তার কম RAM যুক্ত ডিভাইসে ডিফল্টভাবে বন্ধ থাকে।</string>
+    <string name="settings_stream_badges_in_player_description">প্লেয়ার টাইটেলের নিচে চলমান ভিডিও এবং অডিওর ব্যাজ দেখান। এর জন্য এমন একটি ব্যাজ প্যাক প্রয়োজন যা 2160p বা Atmos-এর মতো প্লেইন টেক্সটের সাথে মেলে।</string>
+    <string name="audio_downmix_lfe_level">ডাউনমিক্সে LFE লেভেল</string>
+    <string name="audio_downmix_lfe_level_sub">সাবউফার (LFE) চ্যানেলটি বাদ না দিয়ে অন্য স্পিকারগুলোতে মিক্স করে। কেবল LFE বিহীন লেআউট যেমন 2.0-এর জন্য প্রযোজ্য।</string>
+    <string name="audio_downmix_lfe_level_desc">ডাউনমিক্স লেআউটে কোনো LFE চ্যানেল না থাকলে ব্যবহৃত হয়। পরবর্তী প্লেব্যাক থেকে প্রযোজ্য।</string>
+    <string name="audio_downmix_lfe_level_off">বন্ধ</string>
+    <string name="audio_downmix_lfe_level_half">50%</string>
+    <string name="audio_downmix_lfe_level_full">100%</string>
+    <string name="player_chapters_title">চ্যাপ্টার (%1$d)</string>
+    <string name="player_chapter_remaining">%1$s বাকি</string>
+    <string name="settings_home_screen_rows">হোম স্ক্রিনের সারি</string>
+    <string name="settings_home_screen_rows_subtitle">আপনার হোম স্ক্রিনে সারিগুলোর ক্রম বেছে নিন</string>
 </resources>

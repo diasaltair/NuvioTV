@@ -4257,8 +4257,6 @@
     <string name="player_track_role_audio_description">Sesli betimleme</string>
     <string name="stream_resume_from_time">%1$s konumundan devam et</string>
     <string name="stream_resume_from_percent">%1$d%% konumundan devam et</string>
-    <string name="settings_home_screen_rows">Ana Ekran Satırları</string>
-    <string name="settings_home_screen_rows_subtitle">Ana ekranınızdaki satırların sırasını seçin</string>
     <string name="tvdb_metadata_credit">Meta veriler %1$s tarafından sağlanmaktadır</string>
     <string name="player_source_rate_limited">Bu sunucu istekleri sınırlıyor. Yaklaşık %1$d dk sonra yeniden deneyin veya başka bir sunucudan kaynak seçin.</string>
     <string name="format_check_title">Biçim kontrolü</string>
@@ -4452,7 +4450,11 @@
     <string name="report_sent_no_phone">Rapor için teşekkürler. Arc bir hobi projesi, bu yüzden her rapora yanıt verilemiyor.</string>
     <string name="report_sent_back">İzlemeye dön</string>
     <plurals name="report_panel_what_hint_kept">
+        <item quantity="other">Uygun olanların hepsini seç. Arc son %1$d dakikayı sakladı.</item>
+    </plurals>
     <plurals name="report_item_playback_kept">
+        <item quantity="other">Oynatıcı ayarları ve son %1$d dakika</item>
+    </plurals>
     <string name="report_settings_subtitle">Neyin ters gittiğini veya Arc\'ın ne yapmasını istediğini anlat</string>
     <string name="report_group_choose">Ne bildirmek istiyorsun?</string>
     <string name="report_group_options">Seçenekler</string>
@@ -4505,6 +4507,9 @@
     <string name="report_sent_kind_bug">Çalışmayan bir şey</string>
     <string name="report_sent_kind_idea">Fikir veya istek</string>
     <plurals name="report_my_reports_new">
+        <item quantity="one">%1$d yeni</item>
+        <item quantity="other">%1$d yeni</item>
+    </plurals>
     <string name="report_my_reports_latest">%1$s: %2$s</string>
     <string name="report_my_reports_hint">Günde bir kez kontrol edilir. Arc bir hobi projesi, bu yüzden her rapora yanıt verilemiyor.</string>
     <string name="report_my_reports_hint_off">Kontrol kapalı. Raporlarına ne olduğunu görmek için Raporlarımı kontrol et seçeneğini aç.</string>
@@ -4527,6 +4532,9 @@
     <string name="report_ready_follow_off">Bu raporu takip etmek için sonraki ekrandaki kodu telefonunla tara.</string>
     <string name="report_notice_title">Raporunda yenilik var</string>
     <plurals name="report_notice_many_title">
+        <item quantity="one">%1$d raporunda yenilik var</item>
+        <item quantity="other">%1$d raporunda yenilik var</item>
+    </plurals>
     <string name="report_notice_one">%1$s, %2$s tarihinde gönderildi: %3$s.</string>
     <string name="report_notice_many">Neyin değiştiğini görmek için Raporlarım bölümünü aç.</string>
     <string name="report_notice_open">Raporlarım\'ı aç</string>
@@ -4537,9 +4545,15 @@
     <string name="report_stop_recording">Kaydı durdur</string>
     <string name="report_recording_pill">Kayıt %1$s</string>
     <plurals name="report_recording_pill_marks">
+        <item quantity="one">Kayıt %1$s · %2$d işaret</item>
+        <item quantity="other">Kayıt %1$s · %2$d işaret</item>
+    </plurals>
     <string name="report_recording_no_space">Kayıt için yeterli boş alan yok</string>
     <string name="report_item_recording">Kayıt, %1$s</string>
     <plurals name="report_item_recording_hint">
+        <item quantity="one">%d işaret. Yalnızca sayılar, ses veya görüntü asla.</item>
+        <item quantity="other">%d işaret. Yalnızca sayılar, ses veya görüntü asla.</item>
+    </plurals>
     <string name="remote_buttons_job_report_mark">Sorun bildir / işaretle</string>
     <string name="remote_buttons_job_report_mark_desc">Bildirim panelini açar. Kayıt sırasında bir işaret ekler.</string>
     <string name="display_mode_measured">Ölçülen</string>
@@ -4571,4 +4585,24 @@
     <string name="about_update_optimize_install_subtitle">Güncellemeden sonra ilk açılış daha hızlı olur, ancak uygulama kurulum sırasında yaklaşık bir dakika kapanır. Bunun yerine Android yükleyici ekranını kullanmak için kapatın</string>
     <string name="update_ready_closes">İndirme tamamlandı. Güncelleme yüklenirken uygulama kapanır, bu bir dakika sürebilir. Ardından uygulamayı yeniden açın.</string>
     <string name="update_ready_closes_and_reopens">İndirme tamamlandı. Güncelleme yüklenirken uygulama kapanır ve ardından kendiliğinden yeniden açılır, bu bir dakika sürebilir.</string>
+    <string name="ambient_mode_subtitle">TV boştayken kataloglarınızdan görseller gösterin</string>
+    <string name="audio_night_mode">Gece Modu</string>
+    <string name="audio_night_mode_sub">Sesi düşük seviyede tutabilmeniz için diyalogları ve kısık sesleri yükseltir</string>
+    <string name="audio_night_mode_desc">Diyalogları ve kısık sesleri yükseltir; yüksek sesli sahneler ise mikslendiği gibi kalır. Uygulama tarafından kodu çözülen seslerde çalışır. Bir alıcıya veya soundbar\'a doğrudan aktarımla (passthrough) iletilen Dolby ve DTS sesler olduğu gibi bırakılır.</string>
+    <string name="audio_night_mode_value">Gece modu: %1$s</string>
+    <string name="sub_hdr_dim_player_controls">HDR\'de oynatıcı kontrollerini kıs</string>
+    <string name="sub_hdr_dim_player_controls_sub">HDR ve Dolby Vision videolarda gösterilen oynatıcı kontrollerine ve menülerine de HDR parlaklığını uygula</string>
+    <string name="sub_libass_mode">Libass Görüntüleme Modu</string>
+    <string name="layout_trailer_4k">4K Fragmanlar</string>
+    <string name="layout_trailer_4k_sub">Kullanılabilir olduğunda 1080p üzerindeki fragmanları oynatın. Çok daha fazla bellek kullanır; 2 GB veya daha az RAM\'e sahip cihazlarda varsayılan olarak kapalıdır.</string>
+    <string name="audio_downmix_lfe_level">Downmix\'te LFE seviyesi</string>
+    <string name="audio_downmix_lfe_level_sub">Subwoofer (LFE) kanalını yok saymak yerine diğer hoparlörlere miksler. Yalnızca 2.0 gibi LFE kanalı bulunmayan hoparlör düzenleri içindir.</string>
+    <string name="audio_downmix_lfe_level_desc">Downmix düzeninde LFE kanalı bulunmadığında kullanılır. Sonraki oynatmadan itibaren geçerli olur.</string>
+    <string name="audio_downmix_lfe_level_off">Kapalı</string>
+    <string name="audio_downmix_lfe_level_half">%50</string>
+    <string name="audio_downmix_lfe_level_full">%100</string>
+    <string name="player_chapters_title">Sahneler (%1$d)</string>
+    <string name="player_chapter_remaining">%1$s kaldı</string>
+    <string name="settings_home_screen_rows">Ana Ekran Satırları</string>
+    <string name="settings_home_screen_rows_subtitle">Ana ekranınızdaki satırların sırasını seçin</string>
 </resources>
