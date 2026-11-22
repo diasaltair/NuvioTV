@@ -1,0 +1,126 @@
+package com.nuvio.vpn.android;
+
+import android.net.VpnService;
+import android.os.ParcelFileDescriptor;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.regex.Pattern;
+import java.nio.charset.StandardCharsets;
+
+/** A single official OpenVPN 3 client. The core receives either an app-only
+ * Android TUN fd or the packet boundary of the playback proxy's private stack. */
+final class OpenVpnSession implements OpenVpnEngine {
+    static { System.loadLibrary("nuvio-openvpn"); }
+    private static final Pattern CERT = Pattern.compile("(?im)^\\s*<(?:cert|pkcs12)>\\s*$");
+    private static final Pattern AES_CBC = Pattern.compile("(?im)^\\s*(?:--)?cipher\\s+AES-(?:128|192|256)-CBC(?:\\s*(?:[;#].*)?)$");
+    private final VpnConnectionService service;
+    private final HttpStreamTunnel proxy;
+    private long handle;
+
+    private OpenVpnSession(VpnConnectionService service, HttpStreamTunnel proxy) {
+        this.service = service;
+        this.proxy = proxy;
+    }
+
+    static int evaluate(char[] text) throws IOException {
+        return OpenVpnSessions.evaluate(text);
+    }
+    static int evaluateCore3(char[] text) throws IOException {
+        String profile = new String(text);
+        Arrays.fill(text, '\0');
+        byte[] bytes = profile.getBytes(StandardCharsets.UTF_8);
+        try {
+            int result = evaluateNative(bytes, !CERT.matcher(profile).find(), AES_CBC.matcher(profile).find());
+            if (result == 0) throw new IOException("Unsupported or invalid OpenVPN profile.");
+            return result;
+        } finally { Arrays.fill(bytes, (byte)0); }
+    }
+    static void requireReady(char[] text) throws IOException {
+        if (evaluate(text) != 1) throw new IOException("Set the OpenVPN service credentials in VPN profiles.");
+    }
+    static OpenVpnEngine selected(VpnConnectionService service, String id, HttpStreamTunnel proxy) throws Exception {
+        return OpenVpnSessions.selected(service, id, proxy);
+    }
+    static OpenVpnSession selectedCore3(VpnConnectionService service, char[] text, HttpStreamTunnel proxy) throws Exception {
+        try {
+            String profile = new String(text);
+            Arrays.fill(text, '\0');
+            byte[] bytes = profile.getBytes(StandardCharsets.UTF_8);
+            try {
+                OpenVpnSession session = new OpenVpnSession(service, proxy);
+                session.handle = session.startNative(bytes, !CERT.matcher(profile).find(), AES_CBC.matcher(profile).find());
+                if (session.handle == 0) throw new IOException("OpenVPN could not start. Check the profile and service credentials.");
+                return session;
+            } finally { Arrays.fill(bytes,(byte)0); }
+        } finally { Arrays.fill(text, '\0'); }
+    }
+    // Called by the core before connecting its transport socket. In stream modes
+    // there is no OS VPN route to protect the underlying socket from.
+    private boolean protectSocket(int fd) { return proxy != null || service.protect(fd); }
+    private int establish(String[] addresses, String[] dns, int mtu) {
+        try {
+            if (addresses.length == 0) {
+                VpnConnectionService.noteFailure("The VPN server didn't give this device an address.");
+                return -1;
+            }
+            if (dns.length == 0) {
+                VpnConnectionService.noteFailure("The VPN server didn't send a DNS address, which this app needs.");
+                return -1;
+            }
+            if (proxy != null) {
+                int result = proxy.attachOpenVpn(addresses, dns, mtu);
+                if (result < 0) VpnConnectionService.noteFailure("The VPN tunnel could not be set up inside the app.");
+                return result;
+            }
+            VpnService.Builder builder = service.new Builder().setSession("OpenVPN").setMtu(mtu);
+            builder.addAllowedApplication(service.getPackageName());
+            boolean ipv4 = false, ipv6 = false;
+            for (String cidr : addresses) {
+                int slash = cidr.lastIndexOf('/');
+                String ip = cidr.substring(0,slash);
+                builder.addAddress(ip,Integer.parseInt(cidr.substring(slash+1)));
+                if (ip.contains(":")) ipv6 = true; else ipv4 = true;
+            }
+            for (String server : dns) {
+                if (server.contains(":") ? !ipv6 : !ipv4) return -1;
+                builder.addDnsServer(server);
+            }
+            // Everything, except a home network folder the app saves recordings to (see VpnHomeBypass).
+            if (ipv4) for (HomeBypassRoutes.Cidr route : VpnHomeBypass.ipv4Routes(service, java.util.Arrays.asList(addresses), java.util.Arrays.asList(dns)))
+                builder.addRoute(HomeBypassRoutes.format(route.network), route.prefix);
+            if (ipv6) builder.addRoute("::",0);
+            ParcelFileDescriptor tun = builder.establish();
+            if (tun == null) VpnConnectionService.noteFailure("Android would not set up the VPN connection.");
+            return tun == null ? -1 : tun.detachFd();
+        } catch (Exception failure) {
+            VpnConnectionService.noteFailure("The VPN tunnel could not be set up.");
+            return -1;
+        }
+    }
+    @Override public boolean isUp() {
+        return handle != 0 && statsNative(handle)[2] >= 0;
+    }
+    @Override public boolean authRejected() { return handle != 0 && statsNative(handle)[2] == -2; }
+    @Override public String lastDetail() {
+        long current = handle;
+        if (current == 0) return null;
+        try { String text = detailNative(current); return text == null || text.isEmpty() ? null : text; }
+        catch (RuntimeException | UnsatisfiedLinkError ignored) { return null; }
+    }
+    @Override public TunnelTraffic statistics() {
+        long[] values = statsNative(handle);
+        return new TunnelTraffic(values[0], values[1], values[2] > 0, values[2]);
+    }
+    @Override public boolean probe() { return AppVpnProbe.verify(service); }
+    @Override public String egress() { return AppVpnProbe.egress(service); }
+    @Override public void close() {
+        long old = handle;
+        handle = 0;
+        if (old != 0) stopNative(old);
+    }
+    private static native int evaluateNative(byte[] profile, boolean noCert, boolean aesCbc);
+    private native long startNative(byte[] profile, boolean noCert, boolean aesCbc);
+    private static native long[] statsNative(long handle);
+    private static native String detailNative(long handle);
+    private static native void stopNative(long handle);
+}

@@ -2262,8 +2262,8 @@
     <string name="trakt_comments_error_request_failed">Trakt comments request failed</string>
     <string name="trakt_library_error_fetch_list_items">Failed to fetch list items</string>
 
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
+    <string name="settings_home_screen_rows">Startbildschirm-Reihen</string>
+    <string name="settings_home_screen_rows_subtitle">Lege die Reihenfolge der Reihen auf deinem Startbildschirm fest</string>
     <string name="library_type_items">Elemente</string>
     <string name="library_empty_local_title">Noch keine %1$s</string>
     <string name="library_empty_trakt_title">Keine %1$s in dieser Liste</string>

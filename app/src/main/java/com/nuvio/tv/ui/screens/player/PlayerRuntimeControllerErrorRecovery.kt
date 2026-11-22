@@ -39,7 +39,7 @@ internal fun PlayerRuntimeController.attemptStartupRecovery(
         return false
     }
     if (hasRenderedFirstFrame) return false
-    if (!isRetryablePlaybackError(error)) return false
+    if (!isRetryablePlaybackError(error) && !canRenewStalkerTemporaryLink(error)) return false
     if (startupRetryCount >= MAX_STARTUP_AUTO_RETRIES) return false
 
     val paused = userPausedManually
@@ -106,7 +106,9 @@ internal fun isRetryablePlaybackError(error: PlaybackException): Boolean {
         PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
         PlaybackException.ERROR_CODE_DECODING_FAILED,
         PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
-        PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED -> true
+        PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+        // The TV took the video decoder away (another app or a second player needed it).
+        PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED -> true
 
         // --- Behind-the-scenes / unexpected errors (often IllegalStateException / NPE) ---
         PlaybackException.ERROR_CODE_UNSPECIFIED -> {
@@ -118,9 +120,65 @@ internal fun isRetryablePlaybackError(error: PlaybackException): Boolean {
     }
 }
 
+/** Video decoder failures that a software decoder may get past. */
+internal val VIDEO_DECODER_ERROR_CODES = setOf(
+    PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+    PlaybackException.ERROR_CODE_DECODING_FAILED,
+    PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+    PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+    PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED,
+)
+
+/**
+ * After the TV's hardware video decoder failed, rebuilds the stream once with Android's software
+ * decoder only. Kept per stream link, so the next stream starts on hardware again. If the TV has
+ * no software decoder for the format (Dolby Vision, say), the rebuild fails and the normal error
+ * screen (with its MPV button) follows.
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+internal fun PlayerRuntimeController.trySoftwareVideoDecoderFallback(error: PlaybackException): Boolean {
+    if (currentInternalPlayerEngine != com.nuvio.tv.data.local.InternalPlayerEngine.EXOPLAYER) return false
+    if (error.errorCode !in VIDEO_DECODER_ERROR_CODES) return false
+    if (currentStreamUrl.isBlank() || forceSoftwareVideoForStreamUrl == currentStreamUrl) return false
+    // A decoder taken away for a moment gets a normal retry first.
+    if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED &&
+        errorRetryCount == 0 && startupRetryCount == 0
+    ) return false
+
+    forceSoftwareVideoForStreamUrl = currentStreamUrl
+    val paused = userPausedManually
+    val savedPosition = _exoPlayer?.currentPosition?.takeIf { it > 0L } ?: 0L
+    Log.i(PlayerRuntimeController.TAG, "Video decoder failed (${error.errorCodeName}); retrying with a software decoder at ${savedPosition}ms")
+    resetErrorRetryState()
+    errorRetryJob = scope.launch {
+        showRecoveryOverlay()
+        releasePlayer(flushPlaybackState = false)
+        if (savedPosition > 0L) {
+            _uiState.update { it.copy(pendingSeekPosition = savedPosition) }
+        }
+        reinitializeCurrentStream(startPaused = paused)
+    }
+    return true
+}
+
+/** A short message for decoder failures; the full technical detail stays in the playback report. */
+internal fun PlaybackException.toUserFacingMessage(context: android.content.Context, detailedError: String): String =
+    if (errorCode in VIDEO_DECODER_ERROR_CODES) context.getString(R.string.player_error_decoder_message) else detailedError
+
 /** HTTP statuses a retry of the same request gets again, so retrying only delays the error. */
 internal fun isPermanentHttpStatus(code: Int): Boolean =
     code == 400 || code == 401 || code == 403 || code == 404 || code == 410
+
+/** A temporary provider link may have expired; renew it once, keeping ordinary HTTP rules intact. */
+internal fun shouldRenewStalkerTemporaryLink(isStalker: Boolean, status: Int?, attempts: Int): Boolean =
+    isStalker && attempts == 0 && status in setOf(401, 403, 404, 410)
+
+private fun PlayerRuntimeController.canRenewStalkerTemporaryLink(error: PlaybackException): Boolean =
+    shouldRenewStalkerTemporaryLink(
+        com.nuvio.tv.core.player.isStalkerPlaybackAddress(currentStreamUrl),
+        error.findCause<HttpDataSource.InvalidResponseCodeException>()?.responseCode,
+        startupRetryCount + errorRetryCount
+    )
 
 /**
  * Audio-track failures that the safe-audio → audio-disabled fallback ladder can recover from.
@@ -251,7 +309,7 @@ internal fun PlayerRuntimeController.attemptAutoRetry(
     ) {
         return false
     }
-    if (!isRetryablePlaybackError(error)) return false
+    if (!isRetryablePlaybackError(error) && !canRenewStalkerTemporaryLink(error)) return false
     if (errorRetryCount >= MAX_AUTO_RETRIES) return false
 
     val paused = userPausedManually
@@ -279,7 +337,7 @@ internal fun PlayerRuntimeController.attemptAutoRetry(
 
         delay(RETRY_DELAY_MS)
 
-        if (isFirstAttempt) {
+        if (isFirstAttempt && !com.nuvio.tv.core.player.isStalkerPlaybackAddress(currentStreamUrl)) {
             // Lightweight recovery: re-prepare the same source without destroying the player.
             val player = _exoPlayer
             if (player != null) {
@@ -483,6 +541,8 @@ internal fun PlayerRuntimeController.tryParsingErrorProbeFallback(
     paused: Boolean = userPausedManually,
     onRefreshFailure: (() -> Unit)? = null
 ): Boolean {
+    // Generic probes cannot carry a portal's per-request credential policy.
+    if (com.nuvio.tv.core.player.isStalkerPlaybackAddress(currentStreamUrl) || mediaSourceFactory.stalkerMediaPolicy != null) return false
     if (currentVideoTrackIsLikelyVc1 ||
         Vc1VideoFormatHeuristics.isLikelyVc1(streamName = _uiState.value.currentStreamName ?: streamName)
     ) {

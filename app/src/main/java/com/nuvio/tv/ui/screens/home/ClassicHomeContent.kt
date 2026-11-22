@@ -112,6 +112,8 @@ fun ClassicHomeContent(
     scrollToTopTrigger: Int = 0,
     onRequestLazyCatalogLoad: (String) -> Unit = {}
 ) {
+    // Live TV fork: where the Live TV row goes (null = hidden).
+    val liveTvRowAbove = com.nuvio.tv.livetv.home.rememberLiveTvHomeRowPosition()
     val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
     val density = LocalDensity.current
     val classicCatalogPosterCardStyle = remember(posterCardStyle) {
@@ -285,6 +287,7 @@ fun ClassicHomeContent(
                 is HomeRow.Catalog -> row.row.stableKey()
                 is HomeRow.CollectionRow -> "collection_${row.collection.id}"
                 is HomeRow.PlaceholderCatalog -> row.stableCatalogKey
+                is HomeRow.LiveRow -> row.key
             }
         }
     }
@@ -624,8 +627,13 @@ fun ClassicHomeContent(
             }
         }
 
+        // Live TV fork: the Live TV row, above Continue watching (when set so).
+        if (liveTvRowAbove == true) item(key = "live_tv_home_above", contentType = "live_tv_home") {
+            com.nuvio.tv.livetv.home.LiveTvHomeRow(above = true, startPadding = NuvioTheme.spacing.xxxl, titleStyle = MaterialTheme.typography.headlineMedium)
+        }
         if (uiState.continueWatchingEnabled && uiState.continueWatchingItems.isNotEmpty()) {
             item(key = "continue_watching", contentType = "continue_watching") {
+            androidx.compose.runtime.CompositionLocalProvider(com.nuvio.tv.livetv.home.LocalLiveTvHintHere provides (liveTvRowAbove == true)) {
                 LaunchedEffect(cwPendingScrollToStart.intValue) {
                     if (cwPendingScrollToStart.intValue > 0) {
                         cwListState.scrollToItem(0, 0)
@@ -709,8 +717,13 @@ fun ClassicHomeContent(
                     listState = cwListState
                 )
             }
+}
         }
 
+        // Live TV fork: the Live TV row, below Continue watching (the default).
+        if (liveTvRowAbove == false) item(key = "live_tv_home_below", contentType = "live_tv_home") {
+            com.nuvio.tv.livetv.home.LiveTvHomeRow(above = false, startPadding = NuvioTheme.spacing.xxxl, titleStyle = MaterialTheme.typography.headlineMedium)
+        }
         if (uiState.continueWatchingEnabled && uiState.upcomingItems.isNotEmpty()) {
             item(key = "upcoming_section", contentType = "upcoming_section") {
                 LaunchedEffect(upcomingPendingScrollToStart.intValue) {
@@ -804,6 +817,7 @@ fun ClassicHomeContent(
                     }
                     is HomeRow.CollectionRow -> "collection_${item.collection.id}"
                     is HomeRow.PlaceholderCatalog -> "${item.stableCatalogKey}_$index"
+                    is HomeRow.LiveRow -> item.key
                 }
             },
             contentType = { _, item ->
@@ -811,6 +825,7 @@ fun ClassicHomeContent(
                     is HomeRow.Catalog -> "catalog_row"
                     is HomeRow.CollectionRow -> "collection_row"
                     is HomeRow.PlaceholderCatalog -> "catalog_row"
+                    is HomeRow.LiveRow -> "live_home_row"
                 }
             }
         ) { index, homeRow ->
@@ -834,7 +849,8 @@ fun ClassicHomeContent(
                         shouldRequestInitialFocus &&
                             !heroVisible &&
                             (!uiState.continueWatchingEnabled || uiState.continueWatchingItems.isEmpty()) &&
-                            index == 0
+                            // Live TV fork: the first poster row (a Live TV row may be above it).
+                            index == visibleHomeRows.indexOfFirst { it is HomeRow.Catalog }
                     val focusedItemIndex = when {
                         shouldRestoreFocus -> focusState.focusedItemIndex
                         shouldInitialFocusFirstCatalogRow -> 0
@@ -848,6 +864,7 @@ fun ClassicHomeContent(
                     }
                     val rowFocusRequester = rowFocusRequesters.getOrPut(catalogKey) { FocusRequester() }
 
+                    androidx.compose.runtime.CompositionLocalProvider(com.nuvio.tv.livetv.home.LocalLiveTvHintHere provides (liveTvRowAbove == true && index == 0 && !(uiState.continueWatchingEnabled && uiState.continueWatchingItems.isNotEmpty()))) {
                     CatalogRowSection(
                         catalogRow = catalogRow,
                         posterCardStyle = classicCatalogPosterCardStyle,
@@ -893,6 +910,7 @@ fun ClassicHomeContent(
                             }
                         }
                     )
+                    }
                 }
 
                 is HomeRow.CollectionRow -> {
@@ -935,6 +953,21 @@ fun ClassicHomeContent(
                 }
 
                 is HomeRow.PlaceholderCatalog -> { }
+
+                // Live TV fork: a Live TV or Sports row, sized like this layout's posters.
+                is HomeRow.LiveRow -> {
+                    com.nuvio.tv.livetv.home.HomeLiveRowSection(
+                        rowKey = homeRow.key,
+                        style = com.nuvio.tv.livetv.home.HomeLiveRowStyle.fromPoster(
+                            posterWidth = classicCatalogPosterCardStyle.width,
+                            posterHeight = classicCatalogPosterCardStyle.height,
+                            startPadding = NuvioTheme.spacing.xxxl,
+                            cornerRadius = classicCatalogPosterCardStyle.cornerRadius,
+                            titleStyle = MaterialTheme.typography.headlineMedium,
+                            cardSpacing = NuvioTheme.spacing.lg
+                        ).copy(landscape = globalLandscape)
+                    )
+                }
             }
         }
     }

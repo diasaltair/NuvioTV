@@ -3393,11 +3393,11 @@
     <string name="stream_resume_from_time">Hervatten vanaf %1$s</string>
     <string name="stream_resume_from_percent">Hervatten vanaf %1$d%%</string>
 
+    <string name="settings_home_screen_rows">Rijen op startscherm</string>
+    <string name="settings_home_screen_rows_subtitle">Kies de volgorde van de rijen op je startscherm</string>
     <string name="playback_net_http2">HTTP/2 inschakelen</string>
     <string name="playback_net_http2_sub">Schakel het HTTP/2-protocol in voor netwerkverbindingen, met multiplexing van verzoeken en snellere handshakes.</string>
     <string name="playback_chapters_label">Hoofdstukken</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">items</string>
     <string name="library_empty_local_title">Nog geen %1$s</string>
     <string name="library_empty_trakt_title">Geen %1$s in deze lijst</string>

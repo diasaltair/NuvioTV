@@ -40,6 +40,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -188,6 +189,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import com.nuvio.tv.libass.media.widget.AssSubtitleSurfaceView
 import kotlin.math.abs
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 private const val PLAYER_CONTROLS_FADE_DURATION_MS = 200
@@ -224,6 +227,8 @@ fun PlayerScreen(
     onOpenPartyMedia: (PartyMedia) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    // Live TV fork: seek thumbnails (off unless turned on in Settings > Playback).
+    PlayerSeekThumbsHook(viewModel)
     val playerBadges = rememberPlayerBadges(viewModel, uiState)
     val partyState by viewModel.party.state.collectAsState()
     val partyPlayback by viewModel.party.playback.collectAsState()
@@ -241,6 +246,8 @@ fun PlayerScreen(
     val postPlayRecommendationState by viewModel.postPlayRecommendationUiState.collectAsState()
     val effectiveAutoplayEnabled by viewModel.effectiveAutoplayEnabled.collectAsState(initial = false)
     val lifecycleOwner = LocalLifecycleOwner.current
+    // A keyboard left open on the page before (Search) never stays over the video.
+    com.nuvio.tv.livetv.ui.HideKeyboardOn(onOpen = true)
     val context = LocalContext.current
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val containerFocusRequester = remember { FocusRequester() }
@@ -2351,6 +2358,9 @@ private fun ExoPlayerSurface(
         if (playerView.player !== player) {
             playerView.player = player
         }
+        // Shown again in case the player was stopped and this view kept for the next video
+        // (see PlayerViewModel.stopAndRelease).
+        if (playerView.visibility != View.VISIBLE) playerView.visibility = View.VISIBLE
         latestBindSubtitleView(playerView.subtitleView)
         onDispose {
             latestBindSubtitleView(null)
@@ -3270,24 +3280,64 @@ private fun PlayerControlsProgressBarHost(
     if (showChapterTitle) {
         ChapterTitle(chapters = chapters, positionMs = playbackTimeline.currentPosition)
     }
-    ProgressBar(
-        chapters = chapters,
-        currentPosition = playbackTimeline.currentPosition,
-        duration = playbackTimeline.duration,
-        onSeekPreview = { delta ->
-            viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(delta))
-        },
-        onSeekCommit = {
-            viewModel.onEvent(PlayerEvent.OnCommitPreviewSeek)
-        },
-        focusRequester = focusRequester,
-        upFocusRequester = upFocusRequester,
-        downFocusRequester = downFocusRequester,
-        onUpKey = onUpKey,
-        onFocused = onFocused,
-        onClick = onClick,
-        bufferedPosition = playbackTimeline.bufferedPosition,
-        overlay = { SeekPreviewCueTicks(viewModel, playbackTimeline.duration, Modifier.matchParentSize()) }
+    Box {
+        ProgressBar(
+            chapters = chapters,
+            currentPosition = playbackTimeline.currentPosition,
+            duration = playbackTimeline.duration,
+            onSeekPreview = { delta ->
+                viewModel.onEvent(PlayerEvent.OnPreviewSeekBy(delta))
+            },
+            onSeekCommit = {
+                viewModel.onEvent(PlayerEvent.OnCommitPreviewSeek)
+            },
+            focusRequester = focusRequester,
+            upFocusRequester = upFocusRequester,
+            downFocusRequester = downFocusRequester,
+            onUpKey = onUpKey,
+            onFocused = onFocused,
+            onClick = onClick,
+            bufferedPosition = playbackTimeline.bufferedPosition,
+            overlay = { SeekPreviewCueTicks(viewModel, playbackTimeline.duration, Modifier.matchParentSize()) }
+        )
+        SeekThumbOverBar(viewModel, playbackTimeline.currentPosition, playbackTimeline.duration)
+    }
+}
+
+/**
+ * Live TV fork: true while a seek is under way and for a moment after the button is let go,
+ * so a single tap still shows the picture (as the seek bar does).
+ */
+@Composable
+private fun rememberSeekThumbShown(viewModel: PlayerViewModel): Boolean {
+    val pending by remember(viewModel) {
+        viewModel.uiState.map { it.pendingPreviewSeekPosition != null }.distinctUntilChanged()
+    }.collectAsState(initial = false)
+    var lingering by remember { mutableStateOf(false) }
+    LaunchedEffect(pending) {
+        if (pending) {
+            lingering = true
+        } else if (lingering) {
+            delay(SEEK_THUMB_LINGER_MS)
+            lingering = false
+        }
+    }
+    return pending || lingering
+}
+
+private const val SEEK_THUMB_LINGER_MS = 1_500L
+
+/** Live TV fork: the seek thumbnail above the bar while a seek is under way. */
+@Composable
+private fun BoxScope.SeekThumbOverBar(viewModel: PlayerViewModel, positionMs: Long, durationMs: Long) {
+    val pending = rememberSeekThumbShown(viewModel)
+    com.nuvio.tv.livetv.thumbs.SeekThumbAbove(
+        owner = com.nuvio.tv.livetv.thumbs.SeekThumbs.Owner.MAIN,
+        positionMs = positionMs,
+        fraction = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
+        timeLabel = com.nuvio.tv.livetv.thumbs.seekThumbTime(positionMs),
+        visible = pending && durationMs > 0,
+        modifier = Modifier.align(Alignment.TopStart)
     )
 }
 
@@ -3637,6 +3687,7 @@ private fun SeekOverlay(
     preview: @Composable () -> Unit = {},
     progressOverlay: @Composable BoxScope.() -> Unit = {},
     chapters: List<PlayerChapter> = emptyList(),
+    thumbVisible: Boolean = false,
     showChapterTitle: Boolean = true
 ) {
     Column(
@@ -3649,15 +3700,26 @@ private fun SeekOverlay(
             if (showChapterTitle) {
                 ChapterTitle(chapters = chapters, positionMs = currentPosition)
             }
-            ProgressBar(
-                currentPosition = currentPosition,
-                duration = duration,
-                onSeekPreview = {},
-                onSeekCommit = {},
-                bufferedPosition = bufferedPosition,
-                overlay = progressOverlay,
-                chapters = chapters
-            )
+            Box {
+                ProgressBar(
+                    currentPosition = currentPosition,
+                    duration = duration,
+                    onSeekPreview = {},
+                    onSeekCommit = {},
+                    bufferedPosition = bufferedPosition,
+                    overlay = progressOverlay,
+                    chapters = chapters
+                )
+                // Live TV fork: this overlay only shows while seeking.
+                com.nuvio.tv.livetv.thumbs.SeekThumbAbove(
+                    owner = com.nuvio.tv.livetv.thumbs.SeekThumbs.Owner.MAIN,
+                    positionMs = currentPosition,
+                    fraction = if (duration > 0) currentPosition.toFloat() / duration else 0f,
+                    timeLabel = com.nuvio.tv.livetv.thumbs.seekThumbTime(currentPosition),
+                    visible = thumbVisible && duration > 0,
+                    modifier = Modifier.align(Alignment.TopStart)
+                )
+            }
 
             Spacer(modifier = Modifier.height(NuvioTheme.spacing.md))
 
@@ -3684,6 +3746,7 @@ private fun SeekOverlayHost(
 ) {
     val playbackTimeline by viewModel.playbackTimeline.collectAsState()
 
+    val pending = rememberSeekThumbShown(viewModel)
     SeekOverlay(
         currentPosition = playbackTimeline.currentPosition,
         duration = playbackTimeline.duration,
@@ -3691,6 +3754,7 @@ private fun SeekOverlayHost(
         preview = { SeekPreviewThumbnailHost(viewModel = viewModel) },
         progressOverlay = { SeekPreviewCueTicks(viewModel, playbackTimeline.duration, Modifier.matchParentSize()) },
         chapters = chapters,
+        thumbVisible = pending,
         showChapterTitle = showChapterTitle
     )
 }

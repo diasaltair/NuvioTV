@@ -1,0 +1,169 @@
+package com.nuvio.tv.livetv.sports
+
+/**
+ * My Teams as rows: what's on now and next across everything you follow, then a row per team
+ * (and country) you follow, a row per league on your top bar, a row per whole league or sport you
+ * follow, and one per name you follow. Each row runs left to right in date order, opening on the
+ * game that's on or next (results are to the left of it).
+ */
+internal class SportsRow(
+    val key: String,
+    val title: String,
+    val kind: Kind,
+    /** For a team row: whose it is. */
+    val team: FollowedTeam? = null,
+    /** For a league row. */
+    val league: League? = null,
+    val events: List<SportsEvent>,
+    /** Where the row opens: the first game that isn't over. */
+    val startIndex: Int = 0
+) {
+    enum class Kind { UPCOMING, TEAM, LEAGUE, WORD }
+}
+
+/** [heroes]: the big card's games (on now first, then the next ones); left and right go through them. */
+internal class MyTeamsPage(val heroes: List<SportsEvent>, val rows: List<SportsRow>)
+
+internal object SportsRows {
+    private const val HOUR = 3_600_000L
+    private const val DAY = 24 * HOUR
+    /** Results kept at the start of a team's row. */
+    private const val RESULTS = 5
+    /** Results kept at the start of a league's row: a full NFL week (16 games); busy leagues show their last few days. */
+    private const val LEAGUE_RESULTS = 16
+    /** Results kept in an event league's row (races, fight cards, tournaments): a whole season. */
+    private const val SEASON_RESULTS = 80
+
+    /** The keys of My Sports' rows (not Live & Upcoming), in your order (see [SportsFollows.order]). */
+    fun rowKeys(f: SportsFollows): List<String> {
+        val all = LinkedHashSet<String>()
+        f.teams.forEach { all += "t:${it.key}" }
+        (f.pins + f.leagues).forEach { all += "l:$it" }
+        f.words.forEach { all += "w:$it" }
+        val placed = f.order.filter { it in all }
+        return placed + all.filter { it !in placed }
+    }
+
+    /** Sports you follow something in (a team, a whole league, a league on the top bar). */
+    fun followedSports(follows: SportsFollows, order: List<Sport>): List<Sport> {
+        val ids = follows.teams.map { it.leagueId } + follows.leagues + follows.pins
+        val sports = ids.mapNotNull { SportsCatalog.league(it)?.sport }.toSet()
+        return sports.sortedBy { s -> order.indexOf(s).let { if (it < 0) 99 else it } }
+    }
+
+    /**
+     * The rows; with [sport], only that sport's: its teams, its leagues and its games ("Football"
+     * from the top bar shows Arsenal, England and the Premier League, not the NFL).
+     */
+    fun build(known: List<SportsEvent>, follows: SportsFollows, now: Long, sport: Sport? = null, isMine: (SportsEvent) -> Boolean): MyTeamsPage {
+        if (sport != null) {
+            fun of(id: String) = SportsCatalog.league(id)?.sport == sport
+            val f = follows.copy(
+                teams = follows.teams.filter { of(it.leagueId) },
+                leagues = follows.leagues.filter { of(it) }.toSet(),
+                pins = follows.pins.filter { of(it) },
+                words = emptyList()
+            )
+            return build(known.filter { of(it.leagueId) }, f, now, null, isMine)
+        }
+        val rows = ArrayList<SportsRow>()
+
+        // ---- Live & Upcoming: everything you follow, on now or in the next week
+        val soon = known.filter { ev ->
+            // A league on your top bar counts too: its live games belong up here, not only in its own row.
+            (isMine(ev) || ev.leagueId in follows.pins) && (ev.state == GameState.LIVE ||
+                (ev.state == GameState.PRE && ev.startMs in (now - 3 * HOUR)..(now + 8 * DAY)))
+        }.sortedWith(compareBy<SportsEvent> { if (it.state == GameState.LIVE) 0 else 1 }.thenBy { it.startMs })
+            .take(24)
+        if (soon.isNotEmpty()) rows += SportsRow("up", "Live & Upcoming", SportsRow.Kind.UPCOMING, events = soon)
+
+        // Only the followed rows, for this build. The same team id in unrelated sports stays separate.
+        val teamGames = if (follows.teams.isEmpty()) emptyMap()
+            else HashMap<String, MutableMap<String, ArrayList<SportsEvent>>>().apply {
+                follows.teams.forEach { t ->
+                    getOrPut(t.teamId) { HashMap() }
+                        .getOrPut(SportsCatalog.teamFamily(t.leagueId)) { ArrayList() }
+                }
+            }
+        val leagueIds = LinkedHashSet<String>().apply { addAll(follows.pins); addAll(follows.leagues) }
+        val leagueGames = if (leagueIds.isEmpty()) emptyMap() else leagueIds.associateWith { ArrayList<SportsEvent>() }
+        val wordGames = if (follows.words.isEmpty()) emptyMap() else follows.words.associateWith { ArrayList<SportsEvent>() }
+
+        if (teamGames.isNotEmpty() || leagueGames.isNotEmpty() || wordGames.isNotEmpty()) for (ev in known) {
+            if (teamGames.isNotEmpty()) {
+                val away = ev.away?.team?.id
+                val home = ev.home?.team?.id
+                if (away != null) teamGames[away]?.get(SportsCatalog.teamFamily(ev.leagueId))?.add(ev)
+                // The old sides.any predicate adds a game only once when both sides have the same id.
+                if (home != null && home != away) teamGames[home]?.get(SportsCatalog.teamFamily(ev.leagueId))?.add(ev)
+            }
+            leagueGames[ev.leagueId]?.add(ev)
+            val word = ev.word
+            if (word != null && wordGames.isNotEmpty()) {
+                // Keep String.equals(ignoreCase = true), including its Unicode behavior.
+                for ((w, games) in wordGames) if (word.equals(w, ignoreCase = true)) games += ev
+            }
+        }
+
+        // ---- a row per team or country
+        for (t in follows.teams) {
+            val games = teamGames[t.teamId]?.get(SportsCatalog.teamFamily(t.leagueId)).orEmpty()
+            rows += timeline("t:${t.key}", t.name, SportsRow.Kind.TEAM, games, now, team = t)
+        }
+
+        // ---- a row per top-bar league, then whole leagues and sports you follow
+        for (id in leagueIds) {
+            val l = SportsCatalog.league(id) ?: continue
+            val all = leagueGames[id].orEmpty()
+            // The last week's results (a weekly league like the NFL keeps its whole last round,
+            // midweek too), or the last round when there were none this week; then every game
+            // ahead we have (up to five weeks; capped so a busy league like MLB stays a row you can get through).
+            val done = all.filter { (it.state == GameState.POST || it.state == GameState.OFF) && it.startMs < now }
+            // A league that hasn't played this week (Formula 1, the Champions League): its last
+            // race or round instead (the last results within a few days of the newest).
+            val eventLeague = l.kind == LeagueKind.EVENT
+            val recent = when {
+                // Races, fight cards and tournaments: the whole season back (a few dozen), so you
+                // can go back to any of them for its highlights and replays.
+                eventLeague -> done.filter { it.startMs >= now - SportsRepository.SEASON_MONTHS * 31L * DAY }
+                else -> done.filter { it.startMs >= now - 7 * DAY }.ifEmpty {
+                    val newest = done.maxOfOrNull { it.startMs } ?: 0L
+                    done.filter { it.startMs >= now - SportsRepository.LEAGUE_BACK_DAYS * DAY && it.startMs >= newest - 4 * DAY }
+                }
+            }
+            val ahead = all.filter { it.state == GameState.LIVE || ((it.state == GameState.PRE || it.state == GameState.OFF) && it.startMs >= now - 3 * HOUR) }
+                .sortedBy { it.startMs }.take(60)
+            val games = recent + ahead
+            if (games.isEmpty()) continue
+            rows += timeline("l:$id", l.name, SportsRow.Kind.LEAGUE, games.distinctBy { it.id }, now, league = l, results = if (eventLeague) SEASON_RESULTS else LEAGUE_RESULTS)
+        }
+
+        // ---- names you follow
+        for (w in follows.words) {
+            val games = wordGames[w].orEmpty()
+            if (games.isEmpty()) continue
+            rows += timeline("w:$w", "“$w”", SportsRow.Kind.WORD, games, now)
+        }
+
+        // The big card: games and events at a set time (not a week-long tournament).
+        val heroes = soon.filter { it.hasTime && (it.state == GameState.LIVE || (it.state == GameState.PRE && it.startMs >= now - HOUR)) }.take(8)
+        // Your order (Arrange My Sports); Live & Upcoming always first.
+        val rank = rowKeys(follows).withIndex().associate { (i, k) -> k to i }
+        val sorted = rows.filter { it.kind == SportsRow.Kind.UPCOMING } +
+            rows.filter { it.kind != SportsRow.Kind.UPCOMING }.sortedBy { rank[it.key] ?: Int.MAX_VALUE }
+        return MyTeamsPage(heroes, sorted)
+    }
+
+    /** Games in date order: the last few results, then what's on and what's next. */
+    private fun timeline(
+        key: String, title: String, kind: SportsRow.Kind, games: List<SportsEvent>, now: Long,
+        team: FollowedTeam? = null, league: League? = null, results: Int = RESULTS
+    ): SportsRow {
+        val sorted = games.sortedBy { it.startMs }
+        val done = sorted.filter { it.state == GameState.POST || (it.state == GameState.OFF && it.startMs < now) }
+        val doneIds = done.mapTo(HashSet()) { it.id }
+        val ahead = sorted.filter { it.id !in doneIds }
+        val past = done.takeLast(results)
+        return SportsRow(key, title, kind, team, league, past + ahead, startIndex = if (ahead.isEmpty()) (past.size - 1).coerceAtLeast(0) else past.size)
+    }
+}

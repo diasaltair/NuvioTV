@@ -68,6 +68,19 @@ data class CachedInProgressItem(
     val ratingVisible: Boolean = true
 )
 
+/**
+ * Live TV fork: whether a cached item read back with every required value. Gson fills a missing
+ * value with null even where Kotlin says it can't be, which crashed the app at start-up after an
+ * update (the update kept the real field names; the old cache had the shortened ones).
+ */
+internal fun allPresent(vararg values: Any?): Boolean = values.all { it != null }
+
+internal fun CachedNextUpItem.intact(): Boolean =
+    allPresent(contentId, contentType, name, videoId, genres)
+
+internal fun CachedInProgressItem.intact(): Boolean =
+    allPresent(contentId, contentType, name, videoId, genres)
+
 @Singleton
 class ContinueWatchingEnrichmentCache @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -107,8 +120,12 @@ class ContinueWatchingEnrichmentCache @Inject constructor(
             try {
                 val file = nextUpFile()
                 if (!file.exists()) return@withContext emptyList()
-                gson.fromJson(file.readText(), object : TypeToken<List<CachedNextUpItem>>() {}.type)
-                    ?: emptyList()
+                val items: List<CachedNextUpItem> =
+                    gson.fromJson(file.readText(), object : TypeToken<List<CachedNextUpItem>>() {}.type)
+                        ?: emptyList()
+                // Live TV fork: a cache written by another build of the app (its field names
+                // differ) reads back with missing values; drop it, it's rebuilt straight away.
+                if (items.all { it.intact() }) items else { file.delete(); emptyList() }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to read next-up cache: ${e.message}")
                 emptyList()
@@ -119,7 +136,9 @@ class ContinueWatchingEnrichmentCache @Inject constructor(
     /**
      * @param force bypass throttle and content-change check (use at end of pipeline or for clears)
      */
-    suspend fun saveNextUpSnapshot(items: List<CachedNextUpItem>, force: Boolean = false) = withContext(Dispatchers.IO) {
+    suspend fun saveNextUpSnapshot(allItems: List<CachedNextUpItem>, force: Boolean = false) = withContext(Dispatchers.IO) {
+        // Live TV fork: the Calendar's cards aren't kept (the Calendar puts them in again).
+        val items = allItems.filterNot { com.nuvio.tv.livetv.calendar.CalendarHomeFeed.isInjected(it.contentId, it.videoId) }
         val contentHash = items.hashCode()
         if (!force) {
             if (contentHash == lastNextUpHash) return@withContext
@@ -153,8 +172,11 @@ class ContinueWatchingEnrichmentCache @Inject constructor(
             try {
                 val file = inProgressFile()
                 if (!file.exists()) return@withContext emptyList()
-                gson.fromJson(file.readText(), object : TypeToken<List<CachedInProgressItem>>() {}.type)
-                    ?: emptyList()
+                val items: List<CachedInProgressItem> =
+                    gson.fromJson(file.readText(), object : TypeToken<List<CachedInProgressItem>>() {}.type)
+                        ?: emptyList()
+                // Live TV fork: see getNextUpSnapshot.
+                if (items.all { it.intact() }) items else { file.delete(); emptyList() }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to read in-progress cache: ${e.message}")
                 emptyList()
@@ -165,7 +187,9 @@ class ContinueWatchingEnrichmentCache @Inject constructor(
     /**
      * @param force bypass throttle and content-change check (use at end of pipeline or for clears)
      */
-    suspend fun saveInProgressSnapshot(items: List<CachedInProgressItem>, force: Boolean = false) = withContext(Dispatchers.IO) {
+    suspend fun saveInProgressSnapshot(allItems: List<CachedInProgressItem>, force: Boolean = false) = withContext(Dispatchers.IO) {
+        // Live TV fork: the Calendar's movie cards aren't kept (the Calendar puts them in again).
+        val items = allItems.filterNot { com.nuvio.tv.livetv.calendar.CalendarHomeFeed.isInjectedMovie(it.contentId) }
         val contentHash = items.hashCode()
         if (!force) {
             if (contentHash == lastInProgressHash) return@withContext

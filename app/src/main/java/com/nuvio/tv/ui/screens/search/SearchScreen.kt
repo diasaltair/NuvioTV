@@ -138,7 +138,11 @@ fun SearchScreen(
     viewModel: SearchViewModel = hiltViewModel(),
     onNavigateToDetail: (String, String, String) -> Unit,
     onNavigateToSeeAll: (catalogId: String, addonId: String, type: String) -> Unit = { _, _, _ -> },
-    onOpenDiscover: () -> Unit = {}
+    onOpenDiscover: () -> Unit = {},
+    onOpenLiveTv: () -> Unit = {},
+    // Live TV fork: your provider's On Demand titles (the On Demand row).
+    onOpenOnDemand: (itemId: String, itemType: String, addonBaseUrl: String?, onDemandUid: String) -> Unit = { _, _, _, _ -> },
+    onPlayOnDemand: (url: String, title: String, type: String, poster: String?, contentId: String, contentName: String, season: Int?, episode: Int?, episodeName: String?) -> Unit = { _, _, _, _, _, _, _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val watchedMovieIds by viewModel.watchedMovieIds.collectAsState()
@@ -146,6 +150,8 @@ fun SearchScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    // Leaving Search (a details page, the player): don't let the keyboard follow.
+    com.nuvio.tv.livetv.ui.HideKeyboardOn(onClose = true)
     val strVoiceNoSpeech = stringResource(R.string.search_voice_no_speech)
     val strVoiceMicPermission = stringResource(R.string.search_voice_mic_permission)
     val strVoiceFailed = stringResource(R.string.search_voice_failed)
@@ -322,6 +328,27 @@ fun SearchScreen(
 
     val trimmedQuery = remember(uiState.query) { uiState.query.trim() }
     val trimmedSubmittedQuery = remember(uiState.submittedQuery) { uiState.submittedQuery.trim() }
+    // Live TV fork: what this search shows (by where it was opened from: the guide and On Demand
+    // as set in Live TV settings; from anywhere else, everything).
+    val searchScope = com.nuvio.tv.livetv.ui.rememberSearchScope()
+    // Live TV fork: matching IPTV channels and programmes.
+    val liveTvResults = com.nuvio.tv.livetv.ui.rememberLiveTvSearchResults(
+        query = trimmedSubmittedQuery,
+        onOpened = onOpenLiveTv,
+        enabled = searchScope.live
+    )
+    val liveTvRowFocusRequester = remember { FocusRequester() }
+    val hasLiveTvResults = trimmedSubmittedQuery.length >= MIN_SEARCH_QUERY_LENGTH && liveTvResults.hits.isNotEmpty()
+    // Live TV fork: your provider's own movies and series (also ones none of your addons have).
+    val onDemandResults = com.nuvio.tv.livetv.ondemand.rememberOnDemandSearchResults(
+        query = trimmedSubmittedQuery,
+        enabled = searchScope.onDemand
+    )
+    val onDemandRowFocusRequester = remember { FocusRequester() }
+    val hasOnDemandResults = trimmedSubmittedQuery.length >= MIN_SEARCH_QUERY_LENGTH && onDemandResults.items.isNotEmpty()
+    // The first of the fork's rows (above the addon rows): where Down from the field goes.
+    val hasForkResults = hasLiveTvResults || hasOnDemandResults
+    val forkEntryFocusRequester = if (hasLiveTvResults) liveTvRowFocusRequester else onDemandRowFocusRequester
 
     // Stable per-row state maps — mirrors ClassicHomeContent pattern so
     // CatalogRowSection keeps focus when placeholder→real data transitions.
@@ -356,9 +383,46 @@ fun SearchScreen(
     }
     // Stable list of non-empty catalog rows — mirrors ClassicHomeContent's
     // visibleHomeRows pattern so the LazyColumn receives a remember'd list.
-    val visibleCatalogRows = remember(uiState.catalogRows) {
-        uiState.catalogRows.filter { it.items.isNotEmpty() }
+    // Live TV fork: every search shows everything (Live TV, movies and series), wherever it
+    // was opened from, unless set otherwise for the guide and On Demand in Live TV settings.
+    // Back to "everything" once this search is closed for good (not while a details page it
+    // opened is on top, so coming back keeps the same results).
+    val searchLifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    remember(searchLifecycle) {
+        searchLifecycle.lifecycle.addObserver(androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_DESTROY) {
+                com.nuvio.tv.livetv.ui.LiveTvSearchBridge.origin.value = com.nuvio.tv.livetv.ui.LiveTvSearchBridge.HOME
+            }
+        })
+        true
     }
+    val visibleCatalogRows = remember(uiState.catalogRows, searchScope.catalog) {
+        if (!searchScope.catalog) emptyList() else uiState.catalogRows.filter { it.items.isNotEmpty() }
+    }
+    // Live TV fork: the sections in the order set in Live TV settings (Search & Streams), only
+    // the ones with results. Down from the field goes to the first; Up from each to the one above.
+    val presentSections = searchScope.order.filter { kind ->
+        when (kind) {
+            "live" -> hasLiveTvResults
+            "ondemand" -> hasOnDemandResults
+            else -> visibleCatalogRows.isNotEmpty()
+        }
+    }
+    fun sectionEntry(kind: String): FocusRequester? = when (kind) {
+        "live" -> liveTvRowFocusRequester
+        "ondemand" -> onDemandRowFocusRequester
+        else -> null // the addon rows: their own focus handling
+    }
+    /** What Up from a section's first row goes to: the section above it, or the search field. */
+    fun sectionUp(kind: String): FocusRequester? {
+        val i = presentSections.indexOf(kind)
+        if (i <= 0) return lastInputFocusRequester
+        // Below the addon rows: plain Up reaches their last row.
+        return sectionEntry(presentSections[i - 1])
+    }
+    val catalogIndexInOrder = searchScope.order.indexOf("catalog").coerceAtLeast(0)
+    val forkBeforeCatalog = searchScope.order.take(catalogIndexInOrder)
+    val forkAfterCatalog = searchScope.order.drop(catalogIndexInOrder + 1)
     LaunchedEffect(visibleRowKeys) {
         searchRowStates.keys.retainAll(visibleRowKeys)
         searchRowFocusRequesters.keys.retainAll(visibleRowKeys)
@@ -416,6 +480,15 @@ fun SearchScreen(
             pendingFocusMoveToResultsQuery = null
             pendingFocusMoveSawSearching = false
             pendingFocusMoveHadExistingSearchRows = false
+        }
+    }
+    // Live TV fork: a programme sent from the TV guide ("Find & stream in Nuvio").
+    LaunchedEffect(Unit) {
+        com.nuvio.tv.livetv.ui.LiveTvSearchBridge.pending.collect { title ->
+            if (title == null) return@collect
+            com.nuvio.tv.livetv.ui.LiveTvSearchBridge.consume()
+            viewModel.onEvent(SearchEvent.QueryChanged(title))
+            submitCurrentQuery(title)
         }
     }
     val handleQueryChanged: (String) -> Unit = { nextQuery ->
@@ -571,6 +644,8 @@ fun SearchScreen(
             .background(NuvioTheme.colors.Background),
         contentAlignment = Alignment.TopCenter
     ) {
+        // Live TV fork: a channel picked in the results plays behind them (TiviMate style).
+        com.nuvio.tv.livetv.ui.LiveTvSearchPreview(liveTvResults, Modifier.matchParentSize())
         val listState = rememberLazyListState()
 
         // Step back within Search before falling through to the root handler.
@@ -634,7 +709,7 @@ fun SearchScreen(
                 SearchInputField(
                     modifier = Modifier.onFocusChanged { inputRowHasFocus = it.hasFocus },
                     query = uiState.query,
-                    canMoveToResults = canMoveToResults,
+                    canMoveToResults = (canMoveToResults && searchScope.catalog) || hasForkResults,
                     voiceFocusRequester = if (isVoiceSearchAvailable) voiceFocusRequester else null,
                     searchFocusRequester = searchFocusRequester,
                     onSearchFieldFocusChanged = { focused ->
@@ -654,7 +729,14 @@ fun SearchScreen(
                         // D-pad down from the text field is the user's confirmation that the
                         // live-search results are useful, even before a particular card opens.
                         viewModel.onEvent(SearchEvent.RememberSearchFromTextInput)
-                        focusResults = true
+                        // Live TV fork: to the first section in the set order (Live TV or On Demand
+                        // when they come first; otherwise the addon rows, as usual).
+                        val firstEntry = presentSections.firstOrNull()?.let { sectionEntry(it) }
+                        if (firstEntry != null && runCatching { firstEntry.requestFocus() }.isSuccess) {
+                            focusResults = false
+                        } else {
+                            focusResults = true
+                        }
                     },
                     onOpenDiscover = {
                         // Arm the restore so coming back lands on this button rather than the
@@ -702,6 +784,36 @@ fun SearchScreen(
                 // instruction is wrong, and it was re-appearing on every keystroke. Neither the
                 // mobile nor the desktop client shows an equivalent message.
 
+                // Live TV fork: the Live TV and On Demand rows, above or below the addon rows as
+                // set in Live TV settings (Search & Streams).
+                fun androidx.compose.foundation.lazy.LazyListScope.forkSection(kind: String) {
+                    when (kind) {
+                        "live" -> if (hasLiveTvResults) {
+                            item(key = "live_tv_results") {
+                                com.nuvio.tv.livetv.ui.LiveTvSearchRow(
+                                    results = liveTvResults,
+                                    entryFocusRequester = liveTvRowFocusRequester,
+                                    upFocusRequester = sectionUp("live"),
+                                    posterCardStyle = posterCardStyle
+                                )
+                            }
+                        }
+                        "ondemand" -> if (hasOnDemandResults) {
+                            item(key = "on_demand_results") {
+                                com.nuvio.tv.livetv.ondemand.OnDemandSearchRow(
+                                    results = onDemandResults,
+                                    entryFocusRequester = onDemandRowFocusRequester,
+                                    upFocusRequester = sectionUp("ondemand"),
+                                    onOpenDetail = onOpenOnDemand,
+                                    onPlay = onPlayOnDemand,
+                                    posterCardStyle = posterCardStyle
+                                )
+                            }
+                        }
+                    }
+                }
+                forkBeforeCatalog.forEach { forkSection(it) }
+
                 when {
                     trimmedSubmittedQuery.length < MIN_SEARCH_QUERY_LENGTH && !hasPendingUnsubmittedQuery -> {
                         item {
@@ -741,7 +853,7 @@ fun SearchScreen(
                     // mobile it only applies with an empty screen: mobile swaps results out for
                     // skeletons on every keystroke, which on a remote reads as flicker because each
                     // letter outlasts the debounce, so existing results are kept instead.
-                    (hasPendingUnsubmittedQuery || uiState.isSearching) && visibleCatalogRows.isEmpty() -> {
+                    searchScope.catalog && (hasPendingUnsubmittedQuery || uiState.isSearching) && visibleCatalogRows.isEmpty() -> {
                         items(SEARCH_SKELETON_ROW_COUNT, key = { "search_skeleton_$it" }) { index ->
                             val skeletonRow = remember(index) {
                                 com.nuvio.tv.domain.model.CatalogRow(
@@ -779,7 +891,7 @@ fun SearchScreen(
                         }
                     }
 
-                    uiState.error != null && uiState.catalogRows.isEmpty() -> {
+                    searchScope.catalog && uiState.error != null && uiState.catalogRows.isEmpty() -> {
                         item {
                             ErrorState(
                                 message = uiState.error ?: stringResource(R.string.search_error_failed),
@@ -788,7 +900,23 @@ fun SearchScreen(
                         }
                     }
 
-                    !uiState.isSearching && !hasPendingUnsubmittedQuery && visibleCatalogRows.isEmpty() -> {
+                    // Live TV fork: On Demand is still looking (big providers take a few seconds):
+                    // say so, instead of "no results" until its row turns up.
+                    (!searchScope.catalog || (!uiState.isSearching && !hasPendingUnsubmittedQuery)) &&
+                        visibleCatalogRows.isEmpty() &&
+                        liveTvResults.hits.isEmpty() && onDemandResults.items.isEmpty() && onDemandResults.searching -> {
+                        item {
+                            EmptyScreenState(
+                                title = "Still searching…",
+                                subtitle = "Looking through your On Demand movies and series",
+                                icon = Icons.Default.Search
+                            )
+                        }
+                    }
+
+                    (!searchScope.catalog || (!uiState.isSearching && !hasPendingUnsubmittedQuery)) &&
+                        visibleCatalogRows.isEmpty() &&
+                        liveTvResults.hits.isEmpty() && onDemandResults.items.isEmpty() -> {
                         item {
                             EmptyScreenState(
                                 title = stringResource(R.string.search_no_results_title),
@@ -832,7 +960,7 @@ fun SearchScreen(
                                 rowFocusRequester = rowFocusRequester,
                                 entryFocusRequester = entryFocusRequester,
                                 // Anchor Up to the field; geometric focus varies with the card.
-                                upFocusRequester = if (index == 0) lastInputFocusRequester else null,
+                                upFocusRequester = if (index == 0) sectionUp("catalog") else null,
                                 listState = listState,
                                 restorerFocusedIndex = if (restoringSearchFocus.value && catalogKey == viewModel.savedFocusRowKey) {
                                     viewModel.savedFocusItemIndex
@@ -940,12 +1068,15 @@ fun SearchScreen(
                         }
                     }
                 }
+                // Live TV fork: sections set to come after the addon rows.
+                forkAfterCatalog.forEach { forkSection(it) }
             }
         }
     }
 
     val posterOptionsState by viewModel.posterOptions.state.collectAsState()
     com.nuvio.tv.ui.components.posteroptions.PosterOptionsHost(
+        calendarBell = true,
         state = posterOptionsState,
         controller = viewModel.posterOptions,
         onNavigateToDetail = { id, type, addonBaseUrl ->

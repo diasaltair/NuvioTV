@@ -9,6 +9,7 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import com.nuvio.tv.core.image.CustomPosterFallbackInterceptor
 import com.nuvio.tv.core.image.HardwareBitmapSettingInterceptor
+import com.nuvio.tv.core.image.PlaybackImageCache
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.gif.GifDecoder
@@ -98,11 +99,19 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         // Before super.onCreate(): Hilt creates injected services there, and the budget is read once.
         MemoryBudget.init(this)
+        com.nuvio.tv.core.player.PlaybackDeviceSupport.init(this)
         super.onCreate()
         SentryInitializer.start(this, sentrySettingsDataStore)
         PluginRuntimeHooks.onApplicationCreate(this)
         com.nuvio.tv.reshaped.subtitlefont.SubtitleFontStore.warmUp(this) // Nuvio RS hook: custom subtitle font, loaded off the main thread
         com.nuvio.tv.reshaped.sync.ReshapedSync.onAppStart(this) // Nuvio RS hook: sync through the viewer's Google account
+        // Live TV fork: VPN progress lines go into the start-up report.
+        com.nuvio.vpn.android.VpnPlaybackProtection.diagnostics =
+            java.util.function.Consumer { line -> com.nuvio.tv.livetv.model.LiveTvLoadReport.add(line) }
+        // ...and whether it's on and which profile (at start and whenever it changes).
+        com.nuvio.tv.livetv.data.VpnReportLines.start()
+        // The DNS setting (Live TV settings), before any Live TV or player request.
+        com.nuvio.tv.livetv.data.ForkDns.init(this)
         androidTvChannelSyncService.start()
         serverUserStateProjection.start()
         // Load locale synchronously so it's available before Activity.attachBaseContext.
@@ -191,7 +200,7 @@ class NuvioApplication : Application(), SingletonImageLoader.Factory {
                 } else {
                     builder.maxSizePercent(context, cachePercent)
                 }
-                builder.build()
+                builder.build().also(PlaybackImageCache::attach)
             }
             .diskCache {
                 DiskCache.Builder()

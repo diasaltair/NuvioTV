@@ -149,17 +149,27 @@ fun HomeScreen(
     val isCatalogItemWatched: (MetaPreview) -> Boolean = remember {
         { item: MetaPreview -> latestMovieWatchedStatus.value[homeItemStatusKey(item.id, item.apiType)] == true }
     }
-    val onCatalogItemLongPress: (MetaPreview, String) -> Unit = remember {
+    // Live TV fork: On Demand rows' cards open and show options like on the On Demand page.
+    val vodActions = com.nuvio.tv.livetv.home.LocalHomeVodActions.current
+    val onCatalogItemLongPress: (MetaPreview, String) -> Unit = remember(vodActions) {
         { item, addonBaseUrl ->
-            posterOptionsTarget = HomePosterOptionsTarget(item, addonBaseUrl)
-            viewModel.refreshPosterLibraryStatus(item)
+            val handled = vodActions.longPress(item) { meta, base ->
+                posterOptionsTarget = HomePosterOptionsTarget(meta, base)
+                viewModel.refreshPosterLibraryStatus(meta)
+            }
+            if (!handled) {
+                posterOptionsTarget = HomePosterOptionsTarget(item, addonBaseUrl)
+                viewModel.refreshPosterLibraryStatus(item)
+            }
         }
     }
 
-    val onNavigateToDetailStable = remember(onNavigateToDetail, viewModel) {
+    val onNavigateToDetailStable = remember(onNavigateToDetail, viewModel, vodActions) {
         { itemId: String, itemType: String, addonBaseUrl: String ->
-            viewModel.beginTrailerHandoff(itemId)
-            onNavigateToDetail(itemId, itemType, addonBaseUrl)
+            if (!vodActions.open(itemId)) {
+                viewModel.beginTrailerHandoff(itemId)
+                onNavigateToDetail(itemId, itemType, addonBaseUrl)
+            }
         }
     }
     val latestContinueWatchingClickAction = androidx.compose.runtime.rememberUpdatedState(uiState.continueWatchingClickAction)
@@ -177,7 +187,11 @@ fun HomeScreen(
     }
     val onContinueWatchingStartFromBeginningStable = remember(onContinueWatchingStartFromBeginning) { onContinueWatchingStartFromBeginning }
     val onContinueWatchingPlayManuallyStable = remember(onContinueWatchingPlayManually) { onContinueWatchingPlayManually }
-    val onNavigateToCatalogSeeAllStable = remember(onNavigateToCatalogSeeAll) { onNavigateToCatalogSeeAll }
+    val onNavigateToCatalogSeeAllStable = remember(onNavigateToCatalogSeeAll, vodActions) {
+        { catalogId: String, addonId: String, type: String ->
+            if (!vodActions.seeAll(addonId)) onNavigateToCatalogSeeAll(catalogId, addonId, type)
+        }
+    }
     val onNavigateToFolderDetailStable = remember(onNavigateToFolderDetail) { onNavigateToFolderDetail }
     val onRemoveContinueWatchingStable = remember(viewModel) {
         { contentId: String, season: Int?, episode: Int?, isNextUp: Boolean ->

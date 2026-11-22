@@ -3526,4 +3526,6 @@
     <string name="mdblist_subtitle">Nastavenie externých hodnotení zobrazených v detaile</string>
     <string name="mdblist_rating_order_subtitle">First 3 enabled and available ratings are shown on the modern hero. Use the reorder button to change their order.</string>
     <string name="autosync_toast_no_fit">Synchronizácia zlyhala: tieto titulky sa nezhodujú s touto verziou videa.</string>
+    <string name="settings_home_screen_rows">Riadky domovskej obrazovky</string>
+    <string name="settings_home_screen_rows_subtitle">Vyberte poradie riadkov na domovskej obrazovke</string>
 </resources>

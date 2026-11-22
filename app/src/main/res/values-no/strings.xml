@@ -1113,8 +1113,8 @@
     <string name="watchlist_removed">Fjernet fra ønskelisten</string>
     <string name="playback_player_auto">Automatisk (Best for innhold)</string>
     <string name="playback_player_auto_desc">ExoPlayer for filmer og serier · MPV for anime</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
+    <string name="settings_home_screen_rows">Rader på startskjermen</string>
+    <string name="settings_home_screen_rows_subtitle">Velg rekkefølgen på radene på startskjermen</string>
     <string name="library_type_items">elementer</string>
     <string name="library_empty_local_title">Ingen %1$s ennå</string>
     <string name="library_empty_trakt_title">Ingen %1$s i denne listen</string>

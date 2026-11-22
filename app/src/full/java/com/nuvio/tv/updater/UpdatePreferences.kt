@@ -86,7 +86,7 @@ class UpdatePreferences @Inject constructor(
 
     /** Whether updates the user installs carry dex metadata, or go through the system installer screen instead. */
     val optimizeDuringInstall: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[optimizeDuringInstallKey] ?: true
+        prefs[optimizeDuringInstallKey] ?: false
     }
 
     suspend fun setOptimizeDuringInstall(enabled: Boolean) {

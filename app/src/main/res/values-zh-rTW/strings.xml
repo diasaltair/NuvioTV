@@ -3219,10 +3219,10 @@
     <string name="stream_test_video_bitrate">平均影片位元率：%1$s</string>
     <string name="stream_test_error_connection">連線失敗。上次播放的串流連結可能已過期或無法存取。請重新播放影片並重試。</string>
 
+    <string name="settings_home_screen_rows">主畫面列</string>
+    <string name="settings_home_screen_rows_subtitle">選擇主畫面上各列的順序</string>
     <string name="playback_net_http2">啟用 HTTP/2</string>
     <string name="playback_net_http2_sub">為網路連線啟用 HTTP/2 協定，支援請求多工和更快的握手時間。</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">項目</string>
     <string name="library_empty_local_title">尚無 %1$s</string>
     <string name="library_empty_trakt_title">此清單中沒有 %1$s</string>

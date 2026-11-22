@@ -17,6 +17,13 @@ object StreamAutoPlaySelector {
         preferredNames: Set<String> = emptySet()
     ): List<AddonStreams> {
         if (streams.isEmpty()) return streams
+        // Live TV fork: the On Demand tab goes where it's set in Live TV settings (first, after
+        // the first addon, or last), not wherever sorting by installed addons would put it.
+        val onDemand = streams.firstOrNull { it.addonName == com.nuvio.tv.livetv.ondemand.OnDemandStreams.GROUP_NAME }
+        if (onDemand != null) {
+            val rest = orderAddonStreams(streams.filter { it !== onDemand }, installedOrder, preferredNames)
+            return com.nuvio.tv.livetv.ondemand.OnDemandStreams.placeTab(rest, onDemand)
+        }
         if (preferredNames.isNotEmpty()) {
             val (preferred, rest) = streams.partition { it.addonName in preferredNames }
             return preferred + orderAddonStreams(rest, installedOrder)
@@ -142,7 +149,9 @@ object StreamAutoPlaySelector {
         bingeGroupOnly: Boolean = false,
         rankedRegexPatterns: List<String> = emptyList(),
         rankedRegexCheckCancelled: () -> Unit = {},
-        bingeKeepsFilters: Boolean = false // Nuvio RS: source recovery retries stay inside the user's filters
+        bingeKeepsFilters: Boolean = false, // Nuvio RS: source recovery retries stay inside the user's filters
+        qualityRules: com.nuvio.tv.domain.model.DebridStreamPreferences? = null,
+        lowQualityGroups: LowQualityGroups = LowQualityGroups.PUSH_DOWN
     ): Stream? {
         if (streams.isEmpty()) return null
 
@@ -156,6 +165,13 @@ object StreamAutoPlaySelector {
             StreamAutoPlaySource.ALL_SOURCES -> streams
             StreamAutoPlaySource.INSTALLED_ADDONS_ONLY -> streams.filter { it.serverTarget != null || it.addonName in installedAddonNames }
             StreamAutoPlaySource.ENABLED_PLUGINS_ONLY -> streams.filter { it.addonName !in installedAddonNames }
+        }.filterNot {
+            // Live TV fork: provider copies (📡 On Demand) aren't picked automatically, except to
+            // carry on a show you're already watching from your provider (same binge group), or
+            // when set to be allowed in Live TV settings (with On Demand as the first tab).
+            it.addonName == com.nuvio.tv.livetv.ondemand.OnDemandStreams.GROUP_NAME &&
+                !com.nuvio.tv.livetv.ondemand.OnDemandStreams.autoPlayAllowed &&
+                preferredBingeGroup?.trim() != com.nuvio.tv.livetv.ondemand.OnDemandStreams.BINGE_GROUP
         }
         val candidateStreams = sourceScopedStreams.filter { stream ->
             val isAddonStream = stream.addonName in installedAddonNames
@@ -174,7 +190,17 @@ object StreamAutoPlaySelector {
         // filter would otherwise drop a plugin result set and open the sidebar.
         val targetBingeGroup = preferredBingeGroup?.trim().orEmpty()
         if (preferBingeGroupInSelection && targetBingeGroup.isNotEmpty()) {
-            val bingeGroupMatch = selectBingeGroupMatch(if (bingeKeepsFilters) candidateStreams else streams, targetBingeGroup)
+            // Best quality: when several links share the binge group, take the best of them.
+            val sameGroup = if (mode == StreamAutoPlayMode.QUALITY_RANK) {
+                streams.filter { !it.isExternal() && it.behaviorHints?.bingeGroup == targetBingeGroup && isPlayable(it) }
+            } else {
+                emptyList()
+            }
+            val bingeGroupMatch = if (sameGroup.size > 1) {
+                StreamQualityRank.rank(sameGroup, qualityRules, lowQualityGroups).firstOrNull()
+            } else {
+                selectBingeGroupMatch(if (bingeKeepsFilters) candidateStreams else streams, targetBingeGroup)
+            }
             if (bingeGroupMatch != null) return bingeGroupMatch
             // When bingeGroupOnly is set (MANUAL mode with only binge-group
             // preference enabled), don't fall back to a non-matching stream —
@@ -191,6 +217,8 @@ object StreamAutoPlaySelector {
         return when (mode) {
             StreamAutoPlayMode.MANUAL -> null
             StreamAutoPlayMode.FIRST_STREAM -> candidateStreams.firstOrNull { isPlayable(it) }
+            StreamAutoPlayMode.QUALITY_RANK ->
+                StreamQualityRank.rank(candidateStreams.filter { isPlayable(it) }, qualityRules, lowQualityGroups).firstOrNull()
             StreamAutoPlayMode.REGEX_MATCH -> {
                 if (rankedRegexPatterns.isNotEmpty()) {
                     return StreamRegexRanking.rank(

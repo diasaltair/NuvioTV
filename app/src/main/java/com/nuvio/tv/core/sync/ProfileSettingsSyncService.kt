@@ -218,6 +218,9 @@ class ProfileSettingsSyncService @Inject constructor(
         AmbientModeDataStore.FEATURE
     )
 
+    /** The settings this service keeps per profile (Live TV fork: matched profiles follow these). */
+    internal val syncedFeatureNames: List<String> get() = syncedFeatures
+
     init {
         observeLocalSettingsChangesAndSync()
     }

@@ -820,8 +820,8 @@
     <string name="update_ignore">Ignoră</string>
       <string name="playback_player_auto">Automat (Cel mai bun pentru conținut)</string>
     <string name="playback_player_auto_desc">ExoPlayer pentru Filme și Seriale · MPV pentru Anime</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
+    <string name="settings_home_screen_rows">Rândurile ecranului de pornire</string>
+    <string name="settings_home_screen_rows_subtitle">Alege ordinea rândurilor de pe ecranul de pornire</string>
     <string name="library_type_items">elemente</string>
     <string name="library_empty_local_title">Încă nu există %1$s</string>
     <string name="library_empty_trakt_title">Nu există %1$s în această listă</string>

@@ -3493,11 +3493,11 @@
     <string name="autosync_label_synced">Synchronisé automatiquement</string>
     <string name="stream_resume_from_time">Reprendre à %1$s</string>
     <string name="stream_resume_from_percent">Reprendre à %1$d&#160;%%</string>
+    <string name="settings_home_screen_rows">Rangées de l\'écran d\'accueil</string>
+    <string name="settings_home_screen_rows_subtitle">Choisissez l\'ordre des rangées sur votre écran d\'accueil</string>
     <string name="playback_net_http2">Activer HTTP/2</string>
     <string name="playback_net_http2_sub">Active le protocole HTTP/2 pour les connexions réseau, permettant le multiplexage des requêtes et des établissements de connexion plus rapides.</string>
     <string name="playback_chapters_label">Chapitres</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">éléments</string>
     <string name="library_empty_local_title">%1$s&#160;: aucun élément pour le moment</string>
     <string name="library_empty_trakt_title">%1$s&#160;: aucun élément dans cette liste</string>

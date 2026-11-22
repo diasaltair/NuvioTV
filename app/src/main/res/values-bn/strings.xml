@@ -3214,11 +3214,12 @@
         <item quantity="one">%1$d মিনিট</item>
         <item quantity="other">%1$d মিনিট</item>
     </plurals>
+    <string name="settings_home_screen_rows">হোম স্ক্রিনের সারি</string>
+    <string name="settings_home_screen_rows_subtitle">আপনার হোম স্ক্রিনে সারিগুলোর ক্রম বেছে নিন</string>
+</resources>
         <string name="playback_net_http2">HTTP/2 এনাবল করুন</string>
     <string name="playback_net_http2_sub">নেটওয়ার্ক কানেকশনের জন্য HTTP/2 প্রোটোকল এনাবল করুন, যা রিকোয়েস্ট মাল্টিপ্লেক্সিং এবং দ্রুত হ্যান্ডশেক টাইম অ্যালাও করে।</string>
     <string name="playback_chapters_label">চ্যাপ্টার</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">আইটেম</string>
     <string name="library_empty_local_title">এখনও কোনো %1$s নেই</string>
     <string name="library_empty_trakt_title">এই লিস্টে কোনো %1$s নেই</string>
@@ -3229,4 +3230,3 @@
     <string name="mdblist_subtitle">ডিটেইল হিরোতে দেখানো এক্সটার্নাল রেটিং কনফিগার করুন</string>
     <string name="mdblist_rating_order_subtitle">First 3 enabled and available ratings are shown on the modern hero. Use the reorder button to change their order.</string>
     <string name="autosync_toast_no_fit">সিঙ্ক ব্যর্থ হয়েছে: এই সাবটাইটেলগুলো ভিডিওর এই সংস্করণের সাথে মেলে না।</string>
-</resources>

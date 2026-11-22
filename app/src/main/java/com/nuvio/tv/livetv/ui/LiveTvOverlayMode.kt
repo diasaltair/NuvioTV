@@ -1,0 +1,1362 @@
+package com.nuvio.tv.livetv.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.Composable
+import com.nuvio.tv.livetv.model.effectiveGuideSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nuvio.tv.livetv.data.CatchupUrlBuilder
+import com.nuvio.tv.livetv.model.ChannelGroup
+import com.nuvio.tv.livetv.model.EpgProgram
+import com.nuvio.tv.livetv.model.LiveChannel
+import com.nuvio.tv.ui.theme.NuvioTheme
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+
+/** Where you are in overlay mode (TiviMate's name for it). */
+private enum class OverlayLevel { CHANNELS, GROUPS, SCHEDULE, DATES }
+
+/** A row of a channel's schedule: a day heading, or a program. */
+private sealed interface ScheduleRow {
+    data class Day(val label: String, val dayStart: Long) : ScheduleRow
+    data class Show(val program: EpgProgram, val dayStart: Long) : ScheduleRow
+}
+
+/**
+ * Overlay mode: a see-through guide over the playing video.
+ *  - Channels (Left from full screen): the group's channels, with the highlighted channel's
+ *    schedule beside them and the current show's details top right.
+ *  - Groups (Left again): the group list; the channels move right, the schedule hides.
+ *  - Schedule (Right from channels): that channel's shows, earlier and later, with a column
+ *    of dates; Right again moves into the dates to jump to another day.
+ */
+@Composable
+internal fun LiveTvOverlayMode(
+    viewModel: LiveTvViewModel,
+    onClose: () -> Unit,
+    onFindInNuvio: (String) -> Unit
+) {
+    // Guide Size (Settings → Live TV) sets the size of overlay mode too: text, icons and rows.
+    val sizeSettings by viewModel.settings.collectAsStateWithLifecycle()
+    val (textScale, rowScale) = when (sizeSettings.effectiveGuideSize) {
+        "COMPACT" -> 0.93f to 0.85f
+        "LARGE" -> 1.2f to 1.2f
+        "XLARGE" -> 1.4f to 1.4f
+        else -> 1f to 1f
+    }
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalOverlayScale provides textScale,
+        LocalOverlayRowScale provides rowScale
+    ) {
+        OverlayModeContent(viewModel, onClose, onFindInNuvio)
+    }
+}
+
+/** Text and icon size scale for overlay mode, from Guide Size; 1 = Standard. */
+private val LocalOverlayScale = androidx.compose.runtime.compositionLocalOf { 1f }
+/** Row height scale for overlay mode, from Guide Size; 1 = Standard. */
+private val LocalOverlayRowScale = androidx.compose.runtime.compositionLocalOf { 1f }
+
+@Composable
+@androidx.compose.runtime.ReadOnlyComposable
+private fun osp(v: Float): androidx.compose.ui.unit.TextUnit = (v * LocalOverlayScale.current).sp
+
+@Composable
+@androidx.compose.runtime.ReadOnlyComposable
+private fun orow(v: Float): androidx.compose.ui.unit.Dp = (v * LocalOverlayRowScale.current).dp
+
+@Composable
+@androidx.compose.runtime.ReadOnlyComposable
+private fun odp(v: Float): androidx.compose.ui.unit.Dp = (v * LocalOverlayScale.current.coerceAtLeast(1f)).dp
+
+@Composable
+private fun OverlayModeContent(
+    viewModel: LiveTvViewModel,
+    onClose: () -> Unit,
+    onFindInNuvio: (String) -> Unit
+) {
+    val ui by viewModel.uiState.collectAsStateWithLifecycle()
+    val programs by viewModel.programs.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    val user by viewModel.userState.collectAsStateWithLifecycle()
+    val now by viewModel.now.collectAsStateWithLifecycle()
+    val playlistNames by viewModel.playlistNames.collectAsStateWithLifecycle()
+    val collapsed by viewModel.collapsedPlaylists.collectAsStateWithLifecycle()
+    val use24h = settings.use24HourClock
+
+    val channels = ui.channels
+    val groups = remember(ui.groups) { ui.groups.filter { it.id != ChannelGroup.SEARCH } }
+
+    var level by remember { mutableStateOf(OverlayLevel.CHANNELS) }
+    // Widths of the whole overlay and of its panels, for sizing the show card beside them.
+    var overlayWidthPx by remember { mutableStateOf(0) }
+    var panelsWidthPx by remember { mutableStateOf(0) }
+    var chIndex by remember { mutableIntStateOf(channels.indexOfFirst { it.key == playback.channelKey }.coerceAtLeast(0)) }
+    var groupIndex by remember { mutableIntStateOf(groups.indexOfFirst { it.id == ui.selectedGroupId }.coerceAtLeast(0)) }
+    // Group by Playlist (more than one playlist): playlist headings in the group list, which
+    // OK folds and unfolds like in the guide. [headingAt] is the heading highlighted, if any.
+    val headed = settings.groupPlaylistHeadings && groups.mapNotNull { it.sourceId }.distinct().size > 1
+    val groupRows = remember(groups, headed, collapsed) { overlayGroupRows(groups, headed, collapsed) }
+    var headingAt by remember { mutableStateOf<String?>(null) }
+    var scheduleChannel by remember { mutableStateOf<LiveChannel?>(null) }
+    var rowIndex by remember { mutableIntStateOf(0) }
+    var dateIndex by remember { mutableIntStateOf(0) }
+    var activity by remember { mutableIntStateOf(0) }
+    var futurePrompt by remember { mutableStateOf<Pair<LiveChannel, EpgProgram>?>(null) }
+    // Holding OK on a channel or a show: Record / Record series, as in the guide.
+    var recordMenu by remember { mutableStateOf<Pair<LiveChannel, EpgProgram>?>(null) }
+    // "Program info" from that menu: the show's whole description; Back goes back to the menu.
+    var infoMenu by remember { mutableStateOf<Pair<LiveChannel, EpgProgram>?>(null) }
+    // Back from Program info: the menu opens again with Program info highlighted.
+    var menuOnInfo by remember { mutableStateOf(false) }
+    val recordingsList by viewModel.recordings.collectAsStateWithLifecycle()
+    val schedulesList by viewModel.schedules.collectAsStateWithLifecycle()
+    val seriesList by viewModel.seriesRules.collectAsStateWithLifecycle()
+    val okScope = rememberCoroutineScope()
+    var okPending by remember { mutableStateOf(false) }
+    var okHoldJob by remember { mutableStateOf<Job?>(null) }
+    val focus = remember { FocusRequester() }
+
+    // Opening: the cursor on the playing channel. Picking another group: its first channel
+    // (it used to stay at the same position as in the last group, somewhere in the middle).
+    var shownGroup by remember { mutableStateOf<String?>(null) }
+    // Set while opening switches to the playing channel's group: the cursor goes on that channel.
+    var landOnPlaying by remember { mutableStateOf(false) }
+    LaunchedEffect(ui.selectedGroupId, channels.size) {
+        val changed = shownGroup != null && shownGroup != ui.selectedGroupId
+        shownGroup = ui.selectedGroupId
+        val playing = channels.indexOfFirst { it.key == playback.channelKey }
+        chIndex = when {
+            changed && landOnPlaying && playing >= 0 -> { landOnPlaying = false; playing }
+            changed -> 0
+            playing >= 0 -> playing
+            else -> chIndex.coerceIn(0, (channels.size - 1).coerceAtLeast(0))
+        }
+    }
+    // Opening: always on the group the playing channel was watched in, as the guide does when it
+    // goes back to what's playing (it used to open on whatever group was browsed last time).
+    LaunchedEffect(Unit) {
+        val playing = viewModel.channelByKey(playback.channelKey) ?: return@LaunchedEffect
+        val group = runCatching { viewModel.groupToShow(playing) }.getOrNull() ?: return@LaunchedEffect
+        if (group != viewModel.uiState.value.selectedGroupId) {
+            landOnPlaying = true
+            viewModel.selectGroup(group)
+        }
+    }
+    LaunchedEffect(Unit) { delay(60); runCatching { focus.requestFocus() } }
+    // Closes itself after a while without a key press.
+    LaunchedEffect(activity) {
+        delay(15_000)
+        if (futurePrompt == null && recordMenu == null && infoMenu == null) onClose()
+    }
+
+    val focusedChannel = channels.getOrNull(chIndex)
+    // The schedule preview and show details follow the highlight once it settles, not on
+    // every step while scrolling (that redrew both panels many times a second).
+    var settledChannel by remember { mutableStateOf(focusedChannel) }
+    LaunchedEffect(focusedChannel?.key) {
+        if (settledChannel != null) delay(200)
+        settledChannel = focusedChannel
+    }
+
+    // ---- schedule of one channel, grouped by day
+    val schedule: List<ScheduleRow> = remember(scheduleChannel, programs) {
+        val ch = scheduleChannel ?: return@remember emptyList()
+        val out = ArrayList<ScheduleRow>()
+        var lastDay = Long.MIN_VALUE
+        // Real listings only: the guide's empty catch-up hours filled the top of this list with
+        // days of "No Program Guide Available" on channels with no past listings.
+        programs[ch.key].orEmpty().forEach { p ->
+            val day = startOfDay(p.startMs)
+            if (day != lastDay) {
+                out += ScheduleRow.Day(dayLabel(day, now), day)
+                lastDay = day
+            }
+            out += ScheduleRow.Show(p, day)
+        }
+        out
+    }
+    val days: List<Long> = remember(schedule) { schedule.filterIsInstance<ScheduleRow.Day>().map { it.dayStart } }
+
+    fun openSchedule(ch: LiveChannel) {
+        scheduleChannel = ch
+        level = OverlayLevel.SCHEDULE
+    }
+    // Land on what's on now when a schedule opens.
+    // The full schedule (all days) for the channel being browsed, from the guide database.
+    LaunchedEffect(scheduleChannel?.key) { scheduleChannel?.let { viewModel.ensureChannelSchedule(it.key) } }
+    LaunchedEffect(scheduleChannel, schedule.size) {
+        if (schedule.isEmpty()) return@LaunchedEffect
+        val live = schedule.indexOfFirst { it is ScheduleRow.Show && now >= it.program.startMs && now < it.program.stopMs }
+        val next = schedule.indexOfFirst { it is ScheduleRow.Show && it.program.startMs >= now }
+        rowIndex = when {
+            live >= 0 -> live
+            next >= 0 -> next
+            else -> schedule.indexOfLast { it is ScheduleRow.Show }.coerceAtLeast(0)
+        }
+    }
+    val focusedShow = (schedule.getOrNull(rowIndex) as? ScheduleRow.Show)
+    LaunchedEffect(level, focusedShow?.dayStart) {
+        if (level != OverlayLevel.DATES) focusedShow?.let { s -> dateIndex = days.indexOf(s.dayStart).coerceAtLeast(0) }
+    }
+
+    fun moveShow(delta: Int) {
+        if (schedule.isEmpty()) return
+        var i = rowIndex
+        repeat(kotlin.math.abs(delta)) {
+            var j = i + if (delta > 0) 1 else -1
+            while (j in schedule.indices && schedule[j] !is ScheduleRow.Show) j += if (delta > 0) 1 else -1
+            if (j in schedule.indices) i = j
+        }
+        rowIndex = i
+    }
+
+    fun jumpToDate(index: Int) {
+        val day = days.getOrNull(index) ?: return
+        dateIndex = index
+        val first = schedule.indexOfFirst { it is ScheduleRow.Show && it.dayStart == day }
+        if (first >= 0) rowIndex = first
+    }
+
+    fun activateShow() {
+        val ch = scheduleChannel ?: return
+        val p = focusedShow?.program ?: return
+        when {
+            now >= p.startMs && now < p.stopMs -> { viewModel.preview(ch); onClose() }
+            p.stopMs <= now && CatchupUrlBuilder.isAvailable(ch, p, now) -> {
+                if (viewModel.playCatchup(ch, p)) onClose()
+            }
+            p.startMs > now -> futurePrompt = ch to p
+            else -> Unit // already over, and this channel has no catch-up
+        }
+    }
+
+    // Scrolling the group list moves only the highlight; the channel list switches to that group
+    // once the highlight rests (or straight away on Right / OK / Back). Switching on every step
+    // rebuilt the channel list over every channel and started loading its listings and pictures
+    // each time, so scrolling through the groups lagged and froze.
+    var pendingGroupId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(pendingGroupId) {
+        val id = pendingGroupId ?: return@LaunchedEffect
+        delay(500)
+        if (id != viewModel.uiState.value.selectedGroupId) viewModel.selectGroup(id)
+        pendingGroupId = null
+    }
+    fun applyPendingGroup() {
+        val id = pendingGroupId ?: return
+        pendingGroupId = null
+        if (id != viewModel.uiState.value.selectedGroupId) viewModel.selectGroup(id)
+    }
+
+    fun selectGroupAt(index: Int) {
+        if (groups.isEmpty()) return
+        groupIndex = index.coerceIn(0, groups.lastIndex)
+        pendingGroupId = groups[groupIndex].id
+    }
+
+    /** Up / Down in the group list: onto the next group or playlist heading. */
+    fun moveGroup(delta: Int) {
+        if (groupRows.isEmpty()) return
+        val at = headingAt
+        val pos = if (at != null) groupRows.indexOfFirst { it.group < 0 && it.source == at }
+        else groupRows.indexOfFirst { it.group == groupIndex }
+        val next = groupRows[(pos.coerceAtLeast(0) + delta).coerceIn(0, groupRows.lastIndex)]
+        if (next.group < 0) headingAt = next.source
+        else { headingAt = null; selectGroupAt(next.group) }
+    }
+
+    fun pickChannel(ch: LiveChannel) {
+        // "Keep list open": switch and stay on the list; OK on the playing one closes it.
+        if (settings.overlayKeepOpen && ch.key != playback.channelKey) viewModel.preview(ch)
+        else {
+            if (ch.key != playback.channelKey) viewModel.preview(ch)
+            onClose()
+        }
+    }
+    /** The show the record menu is for: the highlighted show, or what's on now on the highlighted channel. */
+    fun openRecordMenu() {
+        val target: Pair<LiveChannel, EpgProgram> = when (level) {
+            OverlayLevel.SCHEDULE -> scheduleChannel?.let { c -> focusedShow?.program?.let { c to it } }
+            OverlayLevel.CHANNELS -> focusedChannel?.let { c ->
+                programs[c.key]?.firstOrNull { now >= it.startMs && now < it.stopMs }?.let { c to it }
+            }
+            else -> null
+        } ?: return
+        recordMenu = target
+    }
+    /** OK is acted on when released, so holding it can open the record menu instead. */
+    fun armOk() {
+        okPending = true
+        okHoldJob?.cancel()
+        okHoldJob = okScope.launch {
+            delay(LONG_PRESS_MS)
+            if (okPending) { okPending = false; openRecordMenu() }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .focusRequester(focus)
+            .onPreviewKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown) {
+                    val isOk = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                    if (isOk && e.type == KeyEventType.KeyUp) {
+                        okHoldJob?.cancel()
+                        if (okPending) {
+                            okPending = false
+                            activity++
+                            when (level) {
+                                OverlayLevel.CHANNELS -> focusedChannel?.let { pickChannel(it) }
+                                OverlayLevel.SCHEDULE -> activateShow()
+                                else -> Unit
+                            }
+                        }
+                    }
+                    return@onPreviewKeyEvent isOk || e.key == Key.Back
+                }
+                activity++
+                val isOk = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                when (level) {
+                    OverlayLevel.CHANNELS -> when {
+                        e.key == Key.DirectionUp -> chIndex = (chIndex - 1).let { if (it < 0) channels.lastIndex else it }.coerceAtLeast(0)
+                        e.key == Key.DirectionDown -> chIndex = (chIndex + 1).let { if (it > channels.lastIndex) 0 else it }
+                        e.key == Key.PageUp || e.key == Key.ChannelUp -> chIndex = (chIndex - 8).coerceAtLeast(0)
+                        e.key == Key.PageDown || e.key == Key.ChannelDown -> chIndex = (chIndex + 8).coerceAtMost((channels.size - 1).coerceAtLeast(0))
+                        e.key == Key.DirectionLeft -> {
+                            groupIndex = groups.indexOfFirst { it.id == ui.selectedGroupId }.coerceAtLeast(0)
+                            headingAt = null
+                            // The group showing is in a folded playlist: unfold it, so it can be seen.
+                            groups.getOrNull(groupIndex)?.sourceId?.let { src ->
+                                if (headed && src in collapsed) viewModel.togglePlaylistCollapsed(src)
+                            }
+                            level = OverlayLevel.GROUPS
+                        }
+                        e.key == Key.DirectionRight -> focusedChannel?.let { openSchedule(it) }
+                        isOk -> if (e.nativeKeyEvent.repeatCount == 0) armOk()
+                        e.key == Key.Back -> onClose()
+                    }
+                    OverlayLevel.GROUPS -> when {
+                        e.key == Key.DirectionUp -> moveGroup(-1)
+                        e.key == Key.DirectionDown -> moveGroup(1)
+                        // OK on a playlist heading: fold or unfold it (the highlight stays on it).
+                        isOk && headingAt != null -> headingAt?.let { viewModel.togglePlaylistCollapsed(it) }
+                        e.key == Key.DirectionRight || isOk || e.key == Key.Back -> { applyPendingGroup(); headingAt = null; level = OverlayLevel.CHANNELS }
+                        // Left: straight back to the top of the group list.
+                        e.key == Key.DirectionLeft -> if (e.nativeKeyEvent.repeatCount == 0) moveGroup(-groupRows.size)
+                    }
+                    OverlayLevel.SCHEDULE -> when {
+                        e.key == Key.DirectionUp -> moveShow(-1)
+                        e.key == Key.DirectionDown -> moveShow(1)
+                        e.key == Key.PageUp || e.key == Key.ChannelUp -> moveShow(-8)
+                        e.key == Key.PageDown || e.key == Key.ChannelDown -> moveShow(8)
+                        e.key == Key.DirectionRight -> if (days.isNotEmpty()) level = OverlayLevel.DATES
+                        e.key == Key.DirectionLeft || e.key == Key.Back -> level = OverlayLevel.CHANNELS
+                        isOk -> if (e.nativeKeyEvent.repeatCount == 0) armOk()
+                    }
+                    OverlayLevel.DATES -> when {
+                        e.key == Key.DirectionUp -> jumpToDate((dateIndex - 1).coerceAtLeast(0))
+                        e.key == Key.DirectionDown -> jumpToDate((dateIndex + 1).coerceAtMost(days.lastIndex))
+                        e.key == Key.DirectionLeft || isOk || e.key == Key.Back -> level = OverlayLevel.SCHEDULE
+                        e.key == Key.DirectionRight -> Unit
+                    }
+                }
+                true
+            }
+            .onSizeChanged { overlayWidthPx = it.width }
+            .focusable()
+    ) {
+        Row(modifier = Modifier.fillMaxHeight().onSizeChanged { panelsWidthPx = it.width }) {
+            when (level) {
+                OverlayLevel.GROUPS -> {
+                    GroupsPanel(groups, groupRows, groupIndex, headingAt, settings.showGroupCounts, playlistNames, collapsed)
+                    ChannelsPanel(ui.groups.firstOrNull { it.id == ui.selectedGroupId }?.title ?: "Channels",
+                        channels, chIndex, focused = false, playback.channelKey, programs, now, user.favorites, settings.showChannelNumbers, settings.showChannelLogos)
+                }
+                OverlayLevel.CHANNELS -> {
+                    ChannelsPanel(ui.groups.firstOrNull { it.id == ui.selectedGroupId }?.title ?: "Channels",
+                        channels, chIndex, focused = true, playback.channelKey, programs, now, user.favorites, settings.showChannelNumbers, settings.showChannelLogos)
+                    if (settings.overlayShowDetails) settledChannel?.let { SchedulePreview(it, programs[it.key].orEmpty(), now, use24h) }
+                }
+                OverlayLevel.SCHEDULE, OverlayLevel.DATES -> scheduleChannel?.let { ch ->
+                    SchedulePanel(ch, schedule, rowIndex, focused = level == OverlayLevel.SCHEDULE, playback.channelKey, now, use24h)
+                    DatesPanel(days, dateIndex, focused = level == OverlayLevel.DATES, today = startOfDay(now))
+                }
+            }
+        }
+
+        // Details of the highlighted show, top right, in the space the panels leave (it used to be
+        // a fixed width and covered the schedule on narrower screens or with a bigger guide size).
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val cardWidth = with(density) { (overlayWidthPx - panelsWidthPx).coerceAtLeast(0).toDp() } - 24.dp - 16.dp
+        val cardFits = overlayWidthPx > 0 && cardWidth >= 200.dp
+        val cardW = if (cardWidth > 360.dp) 360.dp else cardWidth
+        val card: EpgProgram? = when (level) {
+            // "Show schedule and details" off: on the channel list only Right brings the details up.
+            OverlayLevel.CHANNELS -> if (!settings.overlayShowDetails) null
+                else settledChannel?.let { ch -> programs[ch.key]?.firstOrNull { now >= it.startMs && now < it.stopMs } }
+            OverlayLevel.SCHEDULE, OverlayLevel.DATES -> focusedShow?.program
+            OverlayLevel.GROUPS -> null
+        }
+        val cardChannelKey = if (level == OverlayLevel.CHANNELS) settledChannel?.key else scheduleChannel?.key
+        // 24/7 channels with no listing: what the channel plays, as the card.
+        val about = if (level == OverlayLevel.CHANNELS && settings.overlayShowDetails) rememberChannelAbout(settledChannel, card) else null
+        if (cardFits && card == null && about != null && !about.description.isNullOrBlank()) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 24.dp, end = 24.dp)
+                    .width(cardW)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(16.dp)
+            ) {
+                LiveText(about.name, size = osp(20f), weight = FontWeight.Bold, marquee = true, modifier = Modifier.fillMaxWidth())
+                aboutLine(about).takeIf { it.isNotBlank() }?.let {
+                    Spacer(Modifier.height(6.dp))
+                    LiveText(it, size = osp(13f), color = Color.White.copy(alpha = 0.75f))
+                }
+                Spacer(Modifier.height(8.dp))
+                ScrollingDescription(about.description.orEmpty(), size = osp(13f), color = Color.White.copy(alpha = 0.85f), maxLines = 6)
+            }
+        }
+        rememberShowDetails(cardChannelKey, card)?.takeIf { cardFits }?.let { p ->
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 24.dp, end = 24.dp)
+                    .width(cardW)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .padding(16.dp)
+            ) {
+                LiveText(titleMarks(p.title).title, size = osp(20f), weight = FontWeight.Bold, marquee = true, modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(6.dp))
+                val live = now >= p.startMs && now < p.stopMs
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val range = (if (startOfDay(p.startMs) != startOfDay(now)) "${dayLabel(startOfDay(p.startMs), now)}, " else "") +
+                        formatRange(p.startMs, p.stopMs, use24h)
+                    LiveText(range, color = NuvioTheme.colors.TextSecondary, size = osp(14f))
+                    if (live) {
+                        Spacer(Modifier.width(10.dp))
+                        ProgressBar(p.progress(now), Modifier.width(60.dp))
+                        Spacer(Modifier.width(10.dp))
+                        LiveText(minutesLeftLabel(p.stopMs, now), color = NuvioTheme.colors.TextSecondary, size = osp(14f))
+                    }
+                }
+                p.description?.let {
+                    Spacer(Modifier.height(8.dp))
+                    ScrollingDescription(it, color = NuvioTheme.colors.TextSecondary, size = osp(14f), maxLines = 4)
+                }
+            }
+        }
+    }
+
+    futurePrompt?.let { (ch, p) ->
+        val first = remember { FocusRequester() }
+        val bell = com.nuvio.tv.livetv.calendar.rememberLiveBell(p, ch)
+        LiveDialog(onDismiss = { futurePrompt = null; activity++ }, width = 460.dp) {
+            LiveText(titleMarks(p.title).title, size = osp(20f), weight = FontWeight.Bold, maxLines = 2)
+            LiveText(
+                "${dayLabel(startOfDay(p.startMs), now)}, ${formatRange(p.startMs, p.stopMs, use24h)} · ${ch.name}",
+                color = NuvioTheme.colors.TextSecondary, size = osp(13f)
+            )
+            Spacer(Modifier.height(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                MenuItem("Find & stream in Nuvio", Modifier.focusRequester(first)) {
+                    futurePrompt = null
+                    onFindInNuvio(com.nuvio.tv.livetv.data.LiveTvPosterResolver.searchTitleFor(p, ch))
+                }
+                MenuItem(
+                    if (user.reminders.any { it.channelKey == ch.key && it.startMs == p.startMs }) "Cancel reminder" else "Remind me"
+                ) {
+                    viewModel.toggleReminder(ch, p)
+                    futurePrompt = null
+                    activity++
+                }
+                if (bell != null) MenuItem(bell.label) {
+                    bell.toggle()
+                    futurePrompt = null
+                    activity++
+                }
+                MenuItem("Watch this channel now") {
+                    futurePrompt = null
+                    viewModel.preview(ch)
+                    onClose()
+                }
+                MenuItem("Close") { futurePrompt = null; activity++ }
+            }
+        }
+        LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
+    }
+    LaunchedEffect(futurePrompt) {
+        if (futurePrompt == null) { delay(60); runCatching { focus.requestFocus() } }
+    }
+    recordMenu?.let { (ch, p) ->
+        val first = remember { FocusRequester() }
+        val infoItem = remember { FocusRequester() }
+        val onNow = now >= p.startMs && now < p.stopMs
+        val recordingNow = recordingsList.any { it.channelKey == ch.key && it.isRecording }
+        val recordLabel = when {
+            onNow && recordingNow -> "Stop recording"
+            schedulesList.any { it.channel.key == ch.key && it.startMs == p.startMs } -> "Cancel recording"
+            p.stopMs <= now -> if (CatchupUrlBuilder.isAvailable(ch, p, now)) "Save to Recordings" else null
+            else -> "Record"
+        }
+        val seriesLabel = if (p.stopMs <= now) null else {
+            val n = com.nuvio.tv.livetv.data.LiveTvRepository.normalize(titleMarks(p.title).title)
+            if (seriesList.any { it.channel.key == ch.key && it.norm == n }) "Stop recording series" else "Record series"
+        }
+        LiveDialog(onDismiss = { recordMenu = null; activity++ }, width = 460.dp) {
+            LiveText(titleMarks(p.title).title, size = osp(20f), weight = FontWeight.Bold, maxLines = 2)
+            LiveText(
+                "${dayLabel(startOfDay(p.startMs), now)}, ${formatRange(p.startMs, p.stopMs, use24h)} · ${ch.name}",
+                color = NuvioTheme.colors.TextSecondary, size = osp(13f)
+            )
+            Spacer(Modifier.height(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (recordLabel != null) MenuItem(recordLabel, Modifier.focusRequester(first)) {
+                    val msg = if (onNow && recordingNow) viewModel.toggleRecording(ch) else viewModel.toggleScheduled(ch, p)
+                    com.nuvio.tv.livetv.record.LiveTvNotice.show(msg)
+                    recordMenu = null
+                    activity++
+                }
+                if (seriesLabel != null) MenuItem(seriesLabel, if (recordLabel == null) Modifier.focusRequester(first) else Modifier) {
+                    com.nuvio.tv.livetv.record.LiveTvNotice.show(viewModel.toggleSeries(ch, p))
+                    recordMenu = null
+                    activity++
+                }
+                if (seriesLabel == "Record series") MenuItem("Record new episodes only") {
+                    com.nuvio.tv.livetv.record.LiveTvNotice.show(viewModel.toggleSeries(ch, p, newOnly = true))
+                    recordMenu = null
+                    activity++
+                }
+                MenuItem("Program info", Modifier.focusRequester(infoItem)) {
+                    recordMenu = null
+                    infoMenu = ch to p
+                    activity++
+                }
+                MenuItem("Close", if (recordLabel == null && seriesLabel == null) Modifier.focusRequester(first) else Modifier) {
+                    recordMenu = null
+                    activity++
+                }
+            }
+        }
+        LaunchedEffect(Unit) {
+            delay(60)
+            val onInfo = menuOnInfo
+            menuOnInfo = false
+            runCatching { (if (onInfo) infoItem else first).requestFocus() }
+        }
+    }
+    LaunchedEffect(recordMenu) {
+        if (recordMenu == null) {
+            delay(60)
+            if (recordMenu == null && infoMenu == null) runCatching { focus.requestFocus() }
+        }
+    }
+    infoMenu?.let { (ch, listed) ->
+        val p = rememberShowDetails(ch.key, listed) ?: listed
+        val close = remember { FocusRequester() }
+        val scroll = androidx.compose.foundation.rememberScrollState()
+        val scope = rememberCoroutineScope()
+        val lineSize = osp(16f)
+        val stepPx = with(androidx.compose.ui.platform.LocalDensity.current) { (lineSize * 1.3f).toPx() } * 3
+        // Back (or Close) goes back to the hold-OK menu, one step at a time.
+        val back: () -> Unit = {
+            infoMenu = null
+            menuOnInfo = true
+            recordMenu = ch to listed
+            activity++
+        }
+        LiveDialog(onDismiss = back, width = 640.dp) {
+            Column(
+                Modifier.dpadScrollsText(scroll, scope, stepPx).onPreviewKeyEvent { e ->
+                    // Reading counts as using the overlay: it doesn't close itself meanwhile.
+                    if (e.type == KeyEventType.KeyDown) activity++
+                    false
+                }
+            ) {
+                LiveText(titleMarks(p.title).title, size = osp(22f), weight = FontWeight.Bold, maxLines = 2)
+                Spacer(Modifier.height(6.dp))
+                val meta = listOfNotNull(
+                    "${dayLabel(startOfDay(p.startMs), now)}, ${formatRange(p.startMs, p.stopMs, use24h)}",
+                    ch.name,
+                    p.episode?.takeIf { settings.showEpisodeNumbers && it.isNotBlank() },
+                    p.category?.takeIf { it.isNotBlank() }
+                ).joinToString("  ·  ")
+                LiveText(meta, color = NuvioTheme.colors.TextSecondary, size = osp(14f), maxLines = 2)
+                Spacer(Modifier.height(12.dp))
+                ReadableDescription(
+                    p.description?.takeIf { it.isNotBlank() } ?: "No description available.",
+                    scroll,
+                    size = lineSize,
+                    maxLines = 12
+                )
+                Spacer(Modifier.height(16.dp))
+                LiveFocusRow(modifier = Modifier.focusRequester(close), onClick = back) { f ->
+                    LiveText("Close", color = focusedTextColor(f))
+                }
+            }
+        }
+        LaunchedEffect(Unit) { delay(60); runCatching { close.requestFocus() } }
+    }
+}
+
+// ==================================================================== panels
+
+private val PanelDark = Color(0xE6141416)
+private val PanelMid = Color(0x99141416)
+
+/**
+ * Keeps the highlighted row on screen the way a normal list does: the list moves one row at a
+ * time once the highlight reaches the top or bottom row (with the next row peeking in), instead
+ * of jumping so the highlight sat near the middle again. A big jump (wrapping round, a page at
+ * a time, another group) lands it with a few rows above it.
+ */
+@Composable
+private fun keepVisible(state: LazyListState, index: Int, instant: Boolean = false) {
+    // When the last move was a moment ago (holding the button, quick presses), the list moves
+    // at once instead of sliding: a slide that's cut short by the next press never finished, so
+    // the highlight could run off the bottom of the panel faster than the list followed.
+    val lastMove = remember { longArrayOf(0L) }
+    LaunchedEffect(index) {
+        if (index < 0) return@LaunchedEffect
+        val nowMs = android.os.SystemClock.uptimeMillis()
+        val quick = instant || nowMs - lastMove[0] < 400
+        lastMove[0] = nowMs
+        val info = state.layoutInfo
+        val visible = info.visibleItemsInfo
+        if (visible.isEmpty()) {
+            state.scrollToItem((index - 3).coerceAtLeast(0))
+            return@LaunchedEffect
+        }
+        // Rows fully on screen.
+        val full = visible.filter { it.offset >= info.viewportStartOffset && it.offset + it.size <= info.viewportEndOffset }
+        val first = full.firstOrNull()?.index ?: visible.first().index
+        val last = full.lastOrNull()?.index ?: visible.last().index
+        val rows = (last - first + 1).coerceAtLeast(1)
+        val lastItem = info.totalItemsCount - 1
+        when {
+            index in (first + 1) until last -> Unit
+            index == first && first == 0 -> Unit
+            index == last && last == lastItem -> Unit
+            index > last + rows || index < first - rows -> state.scrollToItem((index - 3).coerceAtLeast(0))
+            index >= last -> (index - rows + 2).coerceIn(0, maxOf(0, lastItem - rows + 1)).let {
+                if (quick) state.scrollToItem(it) else state.animateScrollToItem(it)
+            }
+            else -> (index - 1).coerceAtLeast(0).let {
+                if (quick) state.scrollToItem(it) else state.animateScrollToItem(it)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PanelHeader(content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(orow(56f))
+            .background(Color.White.copy(alpha = 0.05f))
+            .padding(horizontal = 18.dp),
+        contentAlignment = Alignment.CenterStart
+    ) { content() }
+}
+
+@Composable
+private fun ChannelsPanel(
+    title: String,
+    channels: List<LiveChannel>,
+    index: Int,
+    focused: Boolean,
+    playingKey: String?,
+    programs: Map<String, List<EpgProgram>>,
+    now: Long,
+    favorites: List<String>,
+    showNumbers: Boolean,
+    showLogos: Boolean
+) {
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = (index - 3).coerceAtLeast(0))
+    keepVisible(state, index)
+    // Digits in this list's longest channel number: the number column is just that wide (as in the guide).
+    val numberDigits = remember(channels) { channels.maxOfOrNull { it.number.toString().length } ?: 1 }
+    var restingIndex by remember { mutableIntStateOf(-1) }
+    LaunchedEffect(index) {
+        restingIndex = -1
+        delay(900)
+        restingIndex = index
+    }
+    Column(modifier = Modifier.width(300.dp).fillMaxHeight().background(PanelDark)) {
+        PanelHeader { LiveText(title, size = osp(17f), weight = FontWeight.SemiBold) }
+        LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
+            itemsIndexed(channels, key = { _, c -> c.key }) { i, ch ->
+                val p = programs[ch.key]?.firstOrNull { now >= it.startMs && now < it.stopMs }
+                val isFocused = i == index
+                val colors = liveCellColors(focused = isFocused && focused, idle = if (isFocused) Color.White.copy(alpha = 0.08f) else Color.Transparent)
+                // On a solid highlight the accent-colored bits would disappear: make them white.
+                val onSolid = isFocused && focused && LocalLiveSolidHighlight.current
+                val accent = if (onSolid) Color.White else NuvioTheme.colors.Secondary
+                val shape = RoundedCornerShape(8.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(orow(62f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                        .clip(shape)
+                        .background(colors.background)
+                        .border(2.dp, colors.border, shape)
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (showNumbers) {
+                        // Right-aligned, so every number sits the same short gap from the logo.
+                        LiveText(ch.number.toString(), modifier = Modifier.width(odp(8f * numberDigits + 2f)), align = androidx.compose.ui.text.style.TextAlign.End,
+                            color = NuvioTheme.colors.TextSecondary, size = osp(13f))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    if (showLogos) {
+                        ChannelLogo(ch.logo, 32.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            LiveText(ch.name, color = colors.text, size = osp(15f), modifier = Modifier.weight(1f, fill = false), marquee = isFocused && i == restingIndex)
+                            if (ch.catchup != null) {
+                                Spacer(Modifier.width(4.dp))
+                                Icon(androidx.compose.material.icons.Icons.Default.History, contentDescription = "Catch-up", tint = if (onSolid) Color.White else NuvioTheme.colors.TextSecondary, modifier = Modifier.size(odp(13f)))
+                            }
+                            if (ch.key in favorites) LiveText("  ★", color = if (onSolid) Color.White else NuvioTheme.colors.Rating, size = osp(12f))
+                        }
+                        LiveText(
+                            p?.title?.let { titleMarks(it).title } ?: "No program information",
+                            color = when {
+                                p == null -> if (onSolid) Color.White.copy(alpha = 0.8f) else NuvioTheme.colors.TextTertiary
+                                else -> accent
+                            },
+                            size = osp(13f),
+                            marquee = isFocused && i == restingIndex
+                        )
+                        if (p != null) {
+                            Spacer(Modifier.height(3.dp))
+                            ProgressBar(
+                                p.progress(now),
+                                Modifier.fillMaxWidth(),
+                                color = if (onSolid) Color.White else null,
+                                trackColor = if (onSolid) Color.White.copy(alpha = 0.35f) else null
+                            )
+                        }
+                    }
+                    if (ch.key == playingKey) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = "Playing", tint = accent, modifier = Modifier.size(odp(20f)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A row of the overlay's group list: a group ([group] is its index) or a playlist heading ([group] -1). */
+private class GroupRow(val source: String?, val group: Int)
+
+/** The group list as the guide lays it out: groups of no playlist first, then each playlist's heading and (unless folded) its groups. */
+private fun overlayGroupRows(groups: List<ChannelGroup>, headed: Boolean, collapsed: Set<String>): List<GroupRow> {
+    if (!headed) return groups.indices.map { GroupRow(groups[it].sourceId, it) }
+    val out = ArrayList<GroupRow>()
+    // Favorite groups first, outside their playlist's heading (as in the guide).
+    groups.forEachIndexed { i, g -> if (g.section == null) out += GroupRow(null, i) }
+    groups.mapNotNull { it.section }.distinct().forEach { src ->
+        out += GroupRow(src, -1)
+        if (src !in collapsed) groups.forEachIndexed { i, g -> if (g.section == src) out += GroupRow(src, i) }
+    }
+    return out
+}
+
+@Composable
+private fun GroupsPanel(
+    groups: List<ChannelGroup>,
+    rows: List<GroupRow>,
+    index: Int,
+    headingAt: String?,
+    showCounts: Boolean,
+    playlistNames: Map<String, String>,
+    collapsed: Set<String>
+) {
+    val itemIndex = if (headingAt != null) rows.indexOfFirst { it.group < 0 && it.source == headingAt }
+    else rows.indexOfFirst { it.group == index }
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = (itemIndex - 3).coerceAtLeast(0))
+    // The group list moves a row at a time with no sliding, like the channels do when held.
+    keepVisible(state, itemIndex, instant = true)
+    Column(modifier = Modifier.width(250.dp).fillMaxHeight().background(PanelDark).padding(top = 20.dp)) {
+        LazyColumn(state = state, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)) {
+            itemsIndexed(rows, key = { _, row -> if (row.group >= 0) groups[row.group].id else "header:${row.source}" }) { _, row ->
+                val shape = RoundedCornerShape(8.dp)
+                if (row.group < 0) {
+                    val src = row.source.orEmpty()
+                    val focused = headingAt == src
+                    val isCollapsed = src in collapsed
+                    val inSource = groups.filter { it.section == src }
+                    val colors = liveCellColors(focused = focused, idle = Color.Transparent, idleText = NuvioTheme.colors.Secondary)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 2.dp)
+                            .height(orow(34f))
+                            .clip(shape)
+                            .background(colors.background)
+                            .border(2.dp, colors.border, shape)
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        LiveText(if (isCollapsed) "▸" else "▾", color = colors.text, size = osp(13f), modifier = Modifier.width(18.dp))
+                        LiveText(
+                            (playlistNames[src] ?: "Playlist").uppercase(),
+                            color = colors.text, size = osp(12f), weight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f), marquee = focused
+                        )
+                        LiveText(
+                            // Folded, but its group is the one showing: a dot says so.
+                            if (isCollapsed && inSource.any { groups.indexOf(it) == index }) "•" else "${inSource.size}",
+                            color = if (focused) colors.text else NuvioTheme.colors.TextSecondary,
+                            size = osp(11f)
+                        )
+                    }
+                    return@itemsIndexed
+                }
+                val i = row.group
+                val g = groups[i]
+                val colors = liveCellColors(focused = headingAt == null && i == index, idle = Color.Transparent)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(orow(44f))
+                        .padding(horizontal = 12.dp, vertical = 2.dp)
+                        .clip(shape)
+                        .background(colors.background)
+                        .border(2.dp, colors.border, shape)
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    LiveText(g.title, color = colors.text, size = osp(16f), modifier = Modifier.weight(1f), marquee = headingAt == null && i == index)
+                    if (g.favorite) {
+                        androidx.compose.material3.Icon(
+                            androidx.compose.material.icons.Icons.Default.Star, contentDescription = null,
+                            tint = if (headingAt == null && i == index) colors.text else NuvioTheme.colors.Secondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        if (showCounts) Spacer(Modifier.width(6.dp))
+                    }
+                    if (showCounts) LiveText(g.count.toString(), color = NuvioTheme.colors.TextSecondary, size = osp(12f))
+                }
+            }
+        }
+    }
+}
+
+/** The highlighted channel's shows around now (just to look at; Right opens the full schedule). */
+@Composable
+private fun SchedulePreview(channel: LiveChannel, list: List<EpgProgram>, now: Long, use24h: Boolean) {
+    val liveIndex = list.indexOfFirst { now >= it.startMs && now < it.stopMs }
+    val anchor = if (liveIndex >= 0) liveIndex else list.indexOfFirst { it.startMs >= now }.coerceAtLeast(0)
+    val shown = list.drop((anchor - 5).coerceAtLeast(0)).take(14)
+    Column(modifier = Modifier.width(320.dp).fillMaxHeight().background(PanelMid)) {
+        PanelHeader {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChannelLogo(channel.logo, 26.dp)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    LiveText(channel.name, size = osp(15f), weight = FontWeight.SemiBold)
+                    LiveText(channel.group, color = NuvioTheme.colors.TextSecondary, size = osp(12f))
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (shown.isEmpty()) {
+            LiveText("No program information", color = NuvioTheme.colors.TextSecondary, modifier = Modifier.padding(18.dp))
+        }
+        shown.forEach { p ->
+            val live = now >= p.startMs && now < p.stopMs
+            val color = when {
+                live -> NuvioTheme.colors.Secondary
+                // Past shows: a clearly darker grey, so they stand apart from what's coming up.
+                p.stopMs <= now -> NuvioTheme.colors.TextTertiary
+                else -> NuvioTheme.colors.TextPrimary
+            }
+            // The show on now is bold with a LIVE tag, so it stays easy to spot whatever the highlight color.
+            val weight = if (live) FontWeight.Bold else FontWeight.Normal
+            Row(modifier = Modifier.fillMaxWidth().height(orow(36f)).padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                LiveText(formatClock(p.startMs, use24h), color = color, size = osp(14f), weight = weight, modifier = Modifier.widthIn(min = odp(if (use24h) 40f else 60f)))
+                Spacer(Modifier.width(10.dp))
+                LiveText(titleMarks(p.title).title, color = color, size = osp(14f), weight = weight, modifier = Modifier.weight(1f))
+                if (live) {
+                    Spacer(Modifier.width(6.dp))
+                    LiveText(
+                        "LIVE",
+                        modifier = Modifier
+                            .border(1.dp, color.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                        color = color,
+                        size = osp(10f),
+                        weight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SchedulePanel(
+    channel: LiveChannel,
+    rows: List<ScheduleRow>,
+    index: Int,
+    focused: Boolean,
+    playingKey: String?,
+    now: Long,
+    use24h: Boolean
+) {
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = (index - 3).coerceAtLeast(0))
+    keepVisible(state, index)
+    Column(modifier = Modifier.width(460.dp).fillMaxHeight().background(PanelDark)) {
+        PanelHeader {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChannelLogo(channel.logo, 28.dp)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    LiveText(channel.name, size = osp(16f), weight = FontWeight.SemiBold)
+                    LiveText(channel.group, color = NuvioTheme.colors.TextSecondary, size = osp(12f))
+                }
+            }
+        }
+        if (rows.isEmpty()) {
+            LiveText("No program information for this channel", color = NuvioTheme.colors.TextSecondary, modifier = Modifier.padding(18.dp))
+        }
+        LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
+            itemsIndexed(rows) { i, row ->
+                when (row) {
+                    is ScheduleRow.Day -> LiveText(
+                        row.label,
+                        color = NuvioTheme.colors.Secondary,
+                        size = osp(14f),
+                        weight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = 18.dp, top = 12.dp, bottom = 4.dp)
+                    )
+                    is ScheduleRow.Show -> {
+                        val p = row.program
+                        val live = now >= p.startMs && now < p.stopMs
+                        val past = p.stopMs <= now
+                        val isFocused = i == index
+                        val colors = liveCellColors(
+                            focused = isFocused && focused,
+                            idle = if (isFocused) Color.White.copy(alpha = 0.08f) else Color.Transparent,
+                            idleText = if (past) NuvioTheme.colors.TextTertiary else NuvioTheme.colors.TextPrimary
+                        )
+                        val shape = RoundedCornerShape(8.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(orow(40f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                .clip(shape)
+                                .background(colors.background)
+                                .border(2.dp, colors.border, shape)
+                                .padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            LiveText(formatClock(p.startMs, use24h), color = colors.text, size = osp(14f), weight = if (live) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.widthIn(min = odp(if (use24h) 40f else 60f)))
+                            Spacer(Modifier.width(10.dp))
+                            LiveText(titleMarks(p.title).title, color = colors.text, size = osp(14f), weight = if (live) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f), marquee = isFocused)
+                            if (live && channel.key == playingKey) {
+                                val onSolid = isFocused && focused && LocalLiveSolidHighlight.current
+                                Icon(
+                                    Icons.Default.PlayArrow, contentDescription = null,
+                                    tint = if (onSolid) Color.White else NuvioTheme.colors.Secondary,
+                                    modifier = Modifier.size(odp(18f))
+                                )
+                            }
+                            if (live) {
+                                Spacer(Modifier.width(6.dp))
+                                LiveText(
+                                    "LIVE",
+                                    modifier = Modifier
+                                        .border(1.dp, colors.text.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                                    color = colors.text,
+                                    size = osp(10f),
+                                    weight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DatesPanel(days: List<Long>, index: Int, focused: Boolean, today: Long) {
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = (index - 3).coerceAtLeast(0))
+    keepVisible(state, index)
+    val fmt = remember { SimpleDateFormat("EEE,\nMMM d", Locale.getDefault()) }
+    Column(modifier = Modifier.width(100.dp).fillMaxHeight().background(PanelMid).padding(top = 56.dp)) {
+        LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
+            itemsIndexed(days) { i, day ->
+                val isSelected = i == index
+                val colors = liveCellColors(focused = isSelected && focused, idle = if (isSelected) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+                val shape = RoundedCornerShape(8.dp)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(orow(64f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                        .clip(shape)
+                        .background(colors.background)
+                        .border(2.dp, colors.border, shape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    LiveText(
+                        fmt.format(Date(day)),
+                        color = if (day == today && !(isSelected && focused)) NuvioTheme.colors.Secondary else colors.text,
+                        size = osp(13f),
+                        maxLines = 2,
+                        align = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ==================================================================== dates
+
+private fun startOfDay(ms: Long): Long = Calendar.getInstance().apply {
+    timeInMillis = ms
+    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+}.timeInMillis
+
+private fun dayLabel(dayStart: Long, now: Long): String {
+    val today = startOfDay(now)
+    val diffDays = Math.round((dayStart - today) / 86_400_000.0).toInt()
+    return when (diffDays) {
+        0 -> "Today"
+        -1 -> "Yesterday"
+        1 -> "Tomorrow"
+        else -> SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(Date(dayStart))
+    }
+}
+
+// ==================================================================== backup channels flyout
+
+/**
+ * Backup channels from the right edge (Right twice in full screen): this channel's other copies,
+ * in overlay mode's look and Guide Size, with what's on and where each comes from. OK switches to
+ * the highlighted copy; holding OK opens its options ([onLongPress]); Left or Back closes it.
+ * [menuOpen]: that menu is up, so the flyout doesn't close itself and takes the remote back after.
+ */
+@Composable
+internal fun LiveTvBackupFlyout(
+    viewModel: LiveTvViewModel,
+    channels: List<LiveChannel>,
+    playingKey: String?,
+    onPick: (LiveChannel) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+    onLongPress: (LiveChannel) -> Unit = {},
+    menuOpen: Boolean = false,
+    gameTitle: String = "",
+    gameChannels: List<LiveChannel> = emptyList(),
+    /** What a game channel's guide says about the game ([EpgProgram]: what's on it now), for its row. */
+    gameGuide: (LiveChannel, EpgProgram?) -> com.nuvio.tv.livetv.sports.GuideLine? = { _, _ -> null }
+) {
+    val sizeSettings by viewModel.settings.collectAsStateWithLifecycle()
+    val (textScale, rowScale) = when (sizeSettings.effectiveGuideSize) {
+        "COMPACT" -> 0.93f to 0.85f
+        "LARGE" -> 1.2f to 1.2f
+        "XLARGE" -> 1.4f to 1.4f
+        else -> 1f to 1f
+    }
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalOverlayScale provides textScale,
+        LocalOverlayRowScale provides rowScale
+    ) {
+        BackupFlyoutContent(viewModel, channels, gameTitle, gameChannels, playingKey, onPick, onClose, modifier, onLongPress, menuOpen, gameGuide)
+    }
+}
+
+@Composable
+private fun BackupFlyoutContent(
+    viewModel: LiveTvViewModel,
+    copies: List<LiveChannel>,
+    gameTitle: String,
+    gameChannels: List<LiveChannel>,
+    playingKey: String?,
+    onPick: (LiveChannel) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier,
+    onLongPress: (LiveChannel) -> Unit,
+    menuOpen: Boolean,
+    gameGuide: (LiveChannel, EpgProgram?) -> com.nuvio.tv.livetv.sports.GuideLine?
+) {
+    val programs by viewModel.programs.collectAsStateWithLifecycle()
+    val now by viewModel.now.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val playlistNames by viewModel.playlistNames.collectAsStateWithLifecycle()
+    // Watching a game: the other channels showing it first (they're what people want when a game's
+    // stream drops), then this channel's own copies; one list to move through, each part under a
+    // heading. Otherwise just the copies.
+    val channels = remember(copies, gameChannels) { gameChannels + copies }
+    val headed = gameChannels.isNotEmpty()
+    fun rowAt(i: Int): Int = i + (if (headed) 1 else 0) + (if (headed && copies.isNotEmpty() && i >= gameChannels.size) 1 else 0)
+    // Opens on the first copy that isn't the one playing.
+    var index by remember { mutableIntStateOf(channels.indexOfFirst { it.key != playingKey }.coerceAtLeast(0)) }
+    var activity by remember { mutableIntStateOf(0) }
+    val focus = remember { FocusRequester() }
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = (rowAt(index) - 3).coerceAtLeast(0))
+    keepVisible(state, rowAt(index))
+    // On opening, and again when the long-press menu closes.
+    LaunchedEffect(menuOpen) { if (!menuOpen) { delay(60); runCatching { focus.requestFocus() } } }
+    // Closes itself after a while without a key press, like overlay mode (not while its menu is up).
+    LaunchedEffect(activity, menuOpen) {
+        if (menuOpen) return@LaunchedEffect
+        delay(15_000)
+        onClose()
+    }
+    // Holding OK: the highlighted copy's options. By time held, not only by repeats (some
+    // HDMI-CEC remotes never repeat), as in the guide.
+    val holdScope = rememberCoroutineScope()
+    var okHoldJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var longPressFired by remember { mutableStateOf(false) }
+    // Only a press that started here counts (not the end of one from before the flyout opened).
+    var okDown by remember { mutableStateOf(false) }
+    fun openMenu() {
+        longPressFired = true
+        channels.getOrNull(index)?.let(onLongPress)
+    }
+    var restingIndex by remember { mutableIntStateOf(-1) }
+    LaunchedEffect(index) {
+        restingIndex = -1
+        delay(900)
+        restingIndex = index
+    }
+    Column(
+        modifier = modifier
+            .width(340.dp)
+            .fillMaxHeight()
+            .background(PanelDark)
+            .focusRequester(focus)
+            .onPreviewKeyEvent { e ->
+                val isOk = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                if (isOk && e.type == KeyEventType.KeyUp) {
+                    okHoldJob?.cancel()
+                    if (!okDown) return@onPreviewKeyEvent true
+                    okDown = false
+                    val heldMs = e.nativeKeyEvent.eventTime - e.nativeKeyEvent.downTime
+                    when {
+                        longPressFired -> longPressFired = false
+                        heldMs >= LONG_PRESS_MS -> { openMenu(); longPressFired = false }
+                        else -> channels.getOrNull(index)?.let(onPick)
+                    }
+                    return@onPreviewKeyEvent true
+                }
+                if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent isOk || e.key == Key.Back
+                activity++
+                when {
+                    e.key == Key.DirectionUp -> index = (index - 1).let { if (it < 0) channels.lastIndex else it }.coerceAtLeast(0)
+                    e.key == Key.DirectionDown -> index = (index + 1).let { if (it > channels.lastIndex) 0 else it }
+                    isOk -> if (e.nativeKeyEvent.repeatCount == 0) {
+                        // A new press: OK is acted on when it's let go, so a hold never switches first.
+                        longPressFired = false
+                        okDown = true
+                        okHoldJob?.cancel()
+                        okHoldJob = holdScope.launch {
+                            delay(LONG_PRESS_MS)
+                            if (!longPressFired) openMenu()
+                        }
+                    } else if (!longPressFired) {
+                        okHoldJob?.cancel()
+                        openMenu()
+                    }
+                    e.key == Key.DirectionLeft || e.key == Key.Back -> onClose()
+                }
+                true
+            }
+            .focusable()
+    ) {
+        PanelHeader {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                LiveText("Backups", size = osp(17f), weight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                LiveText("${channels.size}", color = NuvioTheme.colors.TextSecondary, size = osp(12f))
+            }
+        }
+        LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
+            if (headed) item(key = "head:game") {
+                FlyoutSection(androidx.compose.ui.res.stringResource(com.nuvio.tv.R.string.livetv_backups_also_showing, gameTitle))
+            }
+            itemsIndexed(gameChannels, key = { _, c -> "game:" + c.key }) { i, ch ->
+                FlyoutRow(viewModel, ch, i == index, i == restingIndex, playingKey, programs, now, settings.showChannelLogos, playlistNames, gameGuide = gameGuide)
+            }
+            if (headed && copies.isNotEmpty()) item(key = "head:copies") {
+                FlyoutSection(androidx.compose.ui.res.stringResource(com.nuvio.tv.R.string.livetv_backups_other_copies, copies.firstOrNull { it.key == playingKey }?.name ?: copies.first().name))
+            }
+            itemsIndexed(copies, key = { _, c -> c.key }) { j, ch ->
+                val i = gameChannels.size + j
+                FlyoutRow(viewModel, ch, i == index, i == restingIndex, playingKey, programs, now, settings.showChannelLogos, playlistNames)
+            }
+        }
+    }
+}
+
+/** A heading in the backup flyout ("Other copies of ESPN", "Also showing Bears vs Lions"). */
+@Composable
+private fun FlyoutSection(text: String) {
+    LiveText(
+        text,
+        color = NuvioTheme.colors.TextSecondary,
+        size = osp(12f),
+        weight = FontWeight.SemiBold,
+        maxLines = 1,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun FlyoutRow(
+    viewModel: LiveTvViewModel,
+    ch: LiveChannel,
+    isFocused: Boolean,
+    resting: Boolean,
+    playingKey: String?,
+    programs: Map<String, List<EpgProgram>>,
+    now: Long,
+    showLogos: Boolean,
+    playlistNames: Map<String, String>,
+    /** A game channel: what its guide says about the game, coloured, before what's on. */
+    gameGuide: ((LiveChannel, EpgProgram?) -> com.nuvio.tv.livetv.sports.GuideLine?)? = null
+) {
+    val p = programs[ch.key]?.firstOrNull { now >= it.startMs && now < it.stopMs }
+        ?: viewModel.currentProgram(ch.key)
+    val guide = gameGuide?.invoke(ch, p)
+    val colors = liveCellColors(focused = isFocused, idle = if (ch.key == playingKey) Color.White.copy(alpha = 0.08f) else Color.Transparent)
+    // On a solid highlight the accent-colored bits would disappear: make them white.
+    val onSolid = isFocused && LocalLiveSolidHighlight.current
+    val accent = if (onSolid) Color.White else NuvioTheme.colors.Secondary
+    val dim = if (onSolid) Color.White.copy(alpha = 0.8f) else NuvioTheme.colors.TextSecondary
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(orow(74f))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .clip(shape)
+            .background(colors.background)
+            .border(2.dp, colors.border, shape)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (showLogos) {
+            ChannelLogo(ch.logo, 32.dp)
+            Spacer(Modifier.width(8.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LiveText(ch.name, color = colors.text, size = osp(15f), modifier = Modifier.weight(1f, fill = false), marquee = isFocused && resting)
+                backupQuality(ch.name)?.let { q ->
+                    Spacer(Modifier.width(6.dp))
+                    LiveText(q, color = dim, size = osp(11f), weight = FontWeight.Bold)
+                }
+            }
+            val from = playlistNames[ch.sourceId] ?: ch.sourceName
+            // The group always shows here (even when hidden on the play bar): it's what tells
+            // same-named copies apart (UK, World, another language).
+            LiveText(
+                listOfNotNull(from.takeIf { it.isNotBlank() }, ch.group.takeIf { it.isNotBlank() }, if (ch.key == playingKey) "Watching" else null).joinToString(" · "),
+                color = dim, size = osp(12f), maxLines = 1,
+                marquee = isFocused && resting
+            )
+            if (guide != null) {
+                // "● Showing it now · Man City v Fulham", in the guide's colour (white on a solid highlight).
+                val gc = if (onSolid) Color.White else com.nuvio.tv.livetv.sports.guideColor(guide.kind, NuvioTheme.colors.Secondary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(gc))
+                    Spacer(Modifier.width(5.dp))
+                    LiveText(
+                        guide.text + (p?.title?.let { " · " + titleMarks(it).title } ?: ""),
+                        color = gc, size = osp(13f), weight = FontWeight.SemiBold,
+                        marquee = isFocused && resting,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
+            } else LiveText(
+                p?.title?.let { titleMarks(it).title } ?: "No program information",
+                color = if (p == null) (if (onSolid) Color.White.copy(alpha = 0.8f) else NuvioTheme.colors.TextTertiary) else accent,
+                size = osp(13f),
+                marquee = isFocused && resting
+            )
+            if (p != null) {
+                Spacer(Modifier.height(3.dp))
+                ProgressBar(
+                    p.progress(now),
+                    Modifier.fillMaxWidth(),
+                    color = if (onSolid) Color.White else null,
+                    trackColor = if (onSolid) Color.White.copy(alpha = 0.35f) else null
+                )
+            }
+        }
+        if (ch.key == playingKey) {
+            Icon(Icons.Default.PlayArrow, contentDescription = "Playing", tint = accent, modifier = Modifier.size(odp(20f)))
+        }
+    }
+}

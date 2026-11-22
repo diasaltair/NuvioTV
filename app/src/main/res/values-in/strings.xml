@@ -3462,8 +3462,8 @@
         <item quantity="other">Masih memuat setelah %1$d detik</item>
     </plurals>
 
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
+    <string name="settings_home_screen_rows">Baris Layar Beranda</string>
+    <string name="settings_home_screen_rows_subtitle">Pilih urutan baris di layar beranda Anda</string>
     <string name="library_type_items">item</string>
     <string name="library_empty_local_title">Belum ada %1$s</string>
     <string name="library_empty_trakt_title">Tidak ada %1$s di daftar ini</string>

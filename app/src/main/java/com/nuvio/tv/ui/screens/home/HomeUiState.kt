@@ -148,7 +148,9 @@ data class NextUpInfo(
     val seedSeason: Int? = null,
     val seedEpisode: Int? = null,
     val contentLanguage: String? = null,
-    val mdbListRatings: com.nuvio.tv.domain.model.MDBListRatings? = null
+    val mdbListRatings: com.nuvio.tv.domain.model.MDBListRatings? = null,
+    /** Live TV fork: a card from the Calendar (a show whose bell is rung, or an upcoming episode). */
+    val fromCalendar: Boolean = false
 )
 
 @Immutable
@@ -158,6 +160,10 @@ sealed class HomeRow {
 
     @Immutable
     data class CollectionRow(val collection: Collection) : HomeRow()
+
+    /** Live TV fork: a Live TV or Sports row added from Reorder Home Catalogs ([key] = "livetv_…"). */
+    @Immutable
+    data class LiveRow(val key: String, val title: String) : HomeRow()
 
     /**
      * Placeholder for a catalog row whose data hasn't been fetched yet.
@@ -206,6 +212,9 @@ sealed class GridItem {
         val addonBaseUrl: String,
         val type: String
     ) : GridItem()
+    /** Live TV fork: a Live TV or Sports row, drawn across the whole grid. */
+    @Immutable
+    data class LiveRow(val key: String, val title: String) : GridItem()
     @Immutable
     data class CollectionHeader(
         val collectionId: String,

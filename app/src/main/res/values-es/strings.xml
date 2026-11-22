@@ -3420,11 +3420,11 @@ Utilizas esta función bajo tu entera responsabilidad. P2P se puede desactivar e
     <string name="stream_resume_from_time">Reanudar desde %1$s</string>
     <string name="stream_resume_from_percent">Reanudar desde %1$d%%</string>
 
+    <string name="settings_home_screen_rows">Filas de la pantalla de inicio</string>
+    <string name="settings_home_screen_rows_subtitle">Elige el orden de las filas en tu pantalla de inicio</string>
     <string name="playback_net_http2">Activar HTTP/2</string>
     <string name="playback_net_http2_sub">Activa el protocolo HTTP/2 para las conexiones de red, permitiendo la multiplexación de solicitudes y tiempos de negociación (handshake) más rápidos.</string>
     <string name="playback_chapters_label">Capítulos</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">elementos</string>
     <string name="library_empty_local_title">Sin %1$s aún</string>
     <string name="library_empty_trakt_title">Sin %1$s en esta lista</string>

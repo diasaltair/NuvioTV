@@ -1,0 +1,232 @@
+name: Release to Users
+
+# Publishes an update of your fork between Nuvio releases, for example after you
+# change Live TV. Run it from the Actions tab. It picks the next version number
+# automatically so the app's built-in updater offers it:
+#   Nuvio 1.1.0-beta.2  ->  1.1.0-beta.2.1, 1.1.0-beta.2.2, ...
+#   Nuvio 1.2.0         ->  1.2.1-livetv.1, 1.2.1-livetv.2, ...
+# The next real Nuvio release always counts as newer than these.
+# Always releases the main branch (what was tested and approved), whichever branch is picked
+# in the Run workflow menu. Unfinished work on dev is never released.
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What changed (leave empty to use RELEASE_NOTES.md)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Work out the version number
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASE=$(grep -m1 -E '^\s*versionName = "' app/build.gradle.kts | sed -E 's/.*"(.*)".*/\1/')
+          if [ -z "$BASE" ]; then echo "Couldn't read versionName from app/build.gradle.kts" >&2; exit 1; fi
+          if [[ "$BASE" == *-* ]]; then
+            PREFIX="$BASE."
+          else
+            IFS=. read -r MA MI PA <<< "$BASE"
+            PREFIX="$MA.$MI.$((PA + 1))-livetv."
+          fi
+          LAST=$(gh release list -R "$GITHUB_REPOSITORY" --limit 200 --json tagName -q '.[].tagName' \
+            | grep -F "$PREFIX" | sed "s/^$(printf '%s' "$PREFIX" | sed 's/[.[\*^$/]/\\&/g')//" \
+            | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+          N=$(( ${LAST:-0} + 1 ))
+          if [ "$N" -gt 99 ]; then echo "Too many fork builds on one Nuvio version (max 99)" >&2; exit 1; fi
+          VERSION="$PREFIX$N"
+          echo "Nuvio base $BASE -> fork release $VERSION (build $N)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "number=$N" >> "$GITHUB_OUTPUT"
+
+      # The release text: what's typed in the "What changed" box, or else RELEASE_NOTES.md from main
+      # (its first line becomes "# Nuvio + IPTV <version>"). Stops before building if the file
+      # hasn't changed since the last release, so old notes are never published again.
+      - name: Release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TYPED: ${{ inputs.notes }}
+        run: |
+          mkdir -p out
+          if [ -n "$(printf '%s' "$TYPED" | tr -d '[:space:]')" ]; then
+            printf 'Nuvio + IPTV update %s.\n\n%s\n' "$VERSION" "$TYPED" > out/release-notes.md
+            echo "Using the notes typed in the box."
+          else
+            if [ ! -s RELEASE_NOTES.md ]; then echo "RELEASE_NOTES.md is missing or empty, and no notes were typed." >&2; exit 1; fi
+            LAST_TAG=$(gh release list -R "$GITHUB_REPOSITORY" --limit 50 --json tagName -q '.[].tagName' | grep -vx downloader | head -1 || true)
+            if [ -n "$LAST_TAG" ] && git rev-parse -q --verify "refs/tags/$LAST_TAG" >/dev/null \
+                && git diff --quiet "$LAST_TAG" HEAD -- RELEASE_NOTES.md; then
+              echo "RELEASE_NOTES.md hasn't changed since $LAST_TAG. Update it on main, or type the notes in the box." >&2
+              exit 1
+            fi
+            { echo "# Nuvio + IPTV $VERSION"; sed '1{/^# /d}' RELEASE_NOTES.md; } > out/release-notes.md
+            echo "Using RELEASE_NOTES.md."
+          fi
+          cat out/release-notes.md
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache-dependency-path: vpn-android/native/go.sum
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Write app keys
+        env:
+          NUVIO_BACKEND_URL: ${{ secrets.NUVIO_BACKEND_URL }}
+          NUVIO_BACKEND_KEY: ${{ secrets.NUVIO_BACKEND_KEY }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
+          TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_APP_NAME: ${{ secrets.SIMKL_APP_NAME }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          GOOGLE_DRIVE_CLIENT_ID: ${{ secrets.GOOGLE_DRIVE_CLIENT_ID }}
+          GOOGLE_DRIVE_CLIENT_SECRET: ${{ secrets.GOOGLE_DRIVE_CLIENT_SECRET }}
+          PREMIUMIZE_CLIENT_ID: ${{ secrets.PREMIUMIZE_CLIENT_ID }}
+          # IMDb ratings (episode ratings and the rating on details pages) come from Nuvio's
+          # ratings services; without these the app has nowhere to ask, so no ratings show.
+          IMDB_RATINGS_API_BASE_URL: ${{ secrets.IMDB_RATINGS_API_BASE_URL }}
+          IMDB_TAPFRAME_API_BASE_URL: ${{ secrets.IMDB_TAPFRAME_API_BASE_URL }}
+          # Skip intro: IntroDB (introdb.app), a free and open timestamp service (no key needed to
+          # read). A secret can point it elsewhere; otherwise the public address is used.
+          INTRODB_API_URL: ${{ secrets.INTRODB_API_URL }}
+        run: |
+          : > keys.properties
+          add() { if [ -n "$2" ]; then echo "$1=$2" >> keys.properties; fi; }
+          if [ -n "$NUVIO_BACKEND_URL" ]; then
+            BACKEND="${NUVIO_BACKEND_URL%/}"
+            add NUVIO_SUPABASE_URL "$BACKEND"
+            add NUVIO_SUPABASE_ANON_KEY "$NUVIO_BACKEND_KEY"
+            case "$BACKEND" in
+              *api.nuvio.tv*)
+                # Official Nuvio accounts: the app's built-in nuvio.tv login pages are already right.
+                ;;
+              *)
+                # Self-hosted server: its login pages live on the server itself.
+                add TV_LOGIN_WEB_BASE_URL "$BACKEND/tv-login"
+                add DEVICE_LOGIN_WEB_BASE_URL "$BACKEND/link"
+                add AVATAR_PUBLIC_BASE_URL "$BACKEND/storage/v1/object/public/avatars"
+                ;;
+            esac
+          fi
+          add TMDB_API_KEY "$TMDB_API_KEY"
+          add TRAKT_CLIENT_ID "$TRAKT_CLIENT_ID"
+          add TRAKT_CLIENT_SECRET "$TRAKT_CLIENT_SECRET"
+          add SIMKL_CLIENT_ID "$SIMKL_CLIENT_ID"
+          add SIMKL_APP_NAME "$SIMKL_APP_NAME"
+          add MDBLIST_CLIENT_ID "$MDBLIST_CLIENT_ID"
+          add GOOGLE_DRIVE_CLIENT_ID "$GOOGLE_DRIVE_CLIENT_ID"
+          add GOOGLE_DRIVE_CLIENT_SECRET "$GOOGLE_DRIVE_CLIENT_SECRET"
+          add PREMIUMIZE_CLIENT_ID "$PREMIUMIZE_CLIENT_ID"
+          add IMDB_RATINGS_API_BASE_URL "$IMDB_RATINGS_API_BASE_URL"
+          add IMDB_TAPFRAME_API_BASE_URL "$IMDB_TAPFRAME_API_BASE_URL"
+          add INTRODB_API_URL "${INTRODB_API_URL:-https://api.introdb.app/}"
+          # The build reads some values from each file, so write both.
+          cp keys.properties local.properties
+          cp keys.properties local.dev.properties
+          rm keys.properties
+          echo "Keys set:"; cut -d= -f1 local.properties
+
+      - name: Signing
+        run: |
+          cp keystore/livetv-fork.jks "$RUNNER_TEMP/key.jks"
+          {
+            echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/key.jks"
+            echo "NUVIO_RELEASE_KEY_ALIAS=livetv"
+            echo "NUVIO_RELEASE_KEY_PASSWORD=livetvfork"
+            echo "NUVIO_RELEASE_STORE_PASSWORD=livetvfork"
+          } >> "$GITHUB_ENV"
+
+      - name: Build APK
+        env:
+          # The app key for cloud sync and the sports files (same as APP_KEY in the Worker).
+          LIVETV_APP_KEY: ${{ secrets.LIVETV_APP_KEY }}
+        run: |
+          if [ -z "$LIVETV_APP_KEY" ]; then echo "::error::Add the LIVETV_APP_KEY secret first (cloud sync and Sports need it)."; exit 1; fi
+          chmod +x gradlew
+          ./gradlew :app:assembleFullRelease --stacktrace \
+            -PlivetvBuildNumber=${{ steps.version.outputs.number }} \
+            -PlivetvVersionName=${{ steps.version.outputs.version }}
+
+      - name: Package OpenVPN 2 corresponding source
+        run: |
+          python3 vpn-android/ci/package-openvpn2-sources.py --output out/openvpn2-corresponding-source.tar.gz
+
+      - name: Collect APKs
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p out
+          for f in $(find app/build/outputs/apk/full/release -name "*.apk"); do
+            name=$(basename "$f" .apk)
+            cp "$f" "out/NuvioPlusIPTV-$VERSION-${name#app-full-}.apk"
+          done
+          ls -la out
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          target_commitish: main
+          name: Nuvio + IPTV ${{ steps.version.outputs.version }}
+          prerelease: true
+          files: |
+            out/*.apk
+            out/openvpn2-corresponding-source.tar.gz
+          body_path: out/release-notes.md
+
+      # One link that always gives the newest APK (for a Downloader code):
+      # https://github.com/<you>/<repo>/releases/download/downloader/NuvioPlusIPTV.apk
+      # It lives on its own "downloader" release, whose file is replaced each time. That release
+      # has no version number, so the in-app updater ignores it, and in-app updates keep
+      # working exactly as before.
+      - name: Update the Downloader link (always the newest version)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK=$(ls out/*universal*.apk 2>/dev/null | head -1)
+          [ -z "$APK" ] && APK=$(ls out/*.apk | head -1)
+          mkdir -p dl
+          cp "$APK" dl/NuvioPlusIPTV.apk
+          if ! gh release view downloader -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create downloader -R "$GITHUB_REPOSITORY" \
+              --title "Nuvio + IPTV for Downloader (always the newest version)" \
+              --notes "This file is replaced with the newest version every release, so one link (and one Downloader code) always installs the latest Nuvio + IPTV. Updates after that happen inside the app." \
+              --latest=false --prerelease
+          fi
+          gh release upload downloader dl/NuvioPlusIPTV.apk out/openvpn2-corresponding-source.tar.gz -R "$GITHUB_REPOSITORY" --clobber
+
+      # Brings the README from dev onto main, so the front page shows the newest one. Only the README
+      # changes on main; the app that was just released is untouched.
+      - name: Update the README on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --no-tags origin dev main
+          # A separate folder, so files changed by the build above are never touched.
+          git worktree add --detach "$RUNNER_TEMP/readme" origin/main
+          cd "$RUNNER_TEMP/readme"
+          git checkout origin/dev -- README.md
+          if git diff --cached --quiet; then echo "README on main is already the newest."; exit 0; fi
+          git -c user.name=homelessbrian -c user.email=briansmithhb@gmail.com commit -m "README: newest from dev"
+          git push origin HEAD:main

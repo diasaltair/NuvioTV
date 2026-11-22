@@ -13,6 +13,7 @@ object StreamAutoPlayPolicy {
         return when (playerSettings.streamAutoPlayMode) {
             StreamAutoPlayMode.MANUAL -> false
             StreamAutoPlayMode.FIRST_STREAM -> true
+            StreamAutoPlayMode.QUALITY_RANK -> true
             StreamAutoPlayMode.REGEX_MATCH -> isRegexSelectionConfigured(playerSettings.streamAutoPlayRegex, playerSettings.streamAutoPlayRankedRegex)
         }
     }

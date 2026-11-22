@@ -3479,11 +3479,11 @@
     <string name="autosync_label_synced">מסונכרן אוטומטית</string>
     <string name="stream_resume_from_time">המשך מ-%1$s</string>
     <string name="stream_resume_from_percent">המשך מ-%1$d%%</string>
+    <string name="settings_home_screen_rows">שורות במסך הבית</string>
+    <string name="settings_home_screen_rows_subtitle">בחרו את סדר השורות במסך הבית</string>
     <string name="playback_net_http2">הפעלת HTTP/2</string>
     <string name="playback_net_http2_sub">הפעלת פרוטוקול HTTP/2 עבור חיבורי רשת, המאפשר ריבוב בקשות וזמני handshake מהירים יותר.</string>
     <string name="playback_chapters_label">מקטעים</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">פריטים</string>
     <string name="library_empty_local_title">אין עדיין פריטים ב\"%1$s\"</string>
     <string name="library_empty_trakt_title">אין %1$s ברשימה זו</string>

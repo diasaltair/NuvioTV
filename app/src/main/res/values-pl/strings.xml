@@ -3612,11 +3612,11 @@
     <string name="cd_emoji_option">Emoji %1$s</string>
     <string name="cd_trailer_controls">Sterowanie zwiastunem</string>
     <string name="cd_seek_bar">Pasek przewijania</string>
+    <string name="settings_home_screen_rows">Rzędy ekranu głównego</string>
+    <string name="settings_home_screen_rows_subtitle">Wybierz kolejność rzędów na ekranie głównym</string>
     <string name="playback_net_http2">Włącz HTTP/2</string>
     <string name="playback_net_http2_sub">Włącz protokół HTTP/2 dla połączeń sieciowych, umożliwiając multipleksowanie żądań i szybsze uzgadnianie.</string>
     <string name="playback_chapters_label">Rozdziały</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">elementy</string>
     <string name="library_empty_local_title">Brak %1$s</string>
     <string name="library_empty_trakt_title">Brak %1$s na tej liście</string>

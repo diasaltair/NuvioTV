@@ -2722,10 +2722,10 @@
     <string name="profile_default_name">Профіль %1$d</string>
     <string name="detail_tmdb_fallback_title">TMDB %1$d</string>
     <string name="collections_editor_tmdb_collection_fallback">Колекція TMDB %1$d</string>
+    <string name="settings_home_screen_rows">Ряди головного екрана</string>
+    <string name="settings_home_screen_rows_subtitle">Виберіть порядок рядів на головному екрані</string>
     <string name="playback_net_http2">Увімкнути HTTP/2</string>
     <string name="playback_net_http2_sub">Увімкнути протокол HTTP/2 для мережевих з’єднань, що дозволяє мультиплексування запитів і швидше встановлення з’єднання.</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">елементів</string>
     <string name="library_empty_local_title">Поки що немає %1$s</string>
     <string name="library_empty_trakt_title">У цьому списку немає %1$s</string>

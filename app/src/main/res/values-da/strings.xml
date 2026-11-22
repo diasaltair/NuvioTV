@@ -2690,8 +2690,8 @@
     <string name="profile_default_name">Profil %1$d</string>
     <string name="detail_tmdb_fallback_title">TMDB %1$d</string>
     <string name="collections_editor_tmdb_collection_fallback">TMDB Collection %1$d</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
+    <string name="settings_home_screen_rows">Rækker på startskærmen</string>
+    <string name="settings_home_screen_rows_subtitle">Vælg rækkefølgen af rækker på din startskærm</string>
     <string name="library_type_items">elementer</string>
     <string name="library_empty_local_title">Ingen %1$s endnu</string>
     <string name="library_empty_trakt_title">Ingen %1$s på denne liste</string>

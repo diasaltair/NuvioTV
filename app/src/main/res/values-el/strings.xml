@@ -3331,6 +3331,8 @@
   <string name="autosync_label_synced">Αυτόματα συγχρονισμένος</string>
   <string name="stream_resume_from_time">Συνέχεια από %1$s</string>
   <string name="stream_resume_from_percent">Συνέχεια από %1$d%%</string>
+    <string name="settings_home_screen_rows">Σειρές αρχικής οθόνης</string>
+    <string name="settings_home_screen_rows_subtitle">Επιλέξτε τη σειρά των σειρών στην αρχική οθόνη</string>
     <string name="playback_net_http2">Ενεργοποίηση HTTP/2</string>
     <string name="playback_net_http2_sub">Ενεργοποίηση του πρωτοκόλλου HTTP/2 για τις συνδέσεις δικτύου, επιτρέποντας πολύπλεξη αιτημάτων και ταχύτερους χρόνους χειραψίας.</string>
     <string name="playback_chapters_label">Κεφάλαια</string>

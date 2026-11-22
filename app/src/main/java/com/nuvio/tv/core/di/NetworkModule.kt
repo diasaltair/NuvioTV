@@ -110,7 +110,7 @@ object NetworkModule {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .addInterceptor { chain ->
-                val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
+                val version = BuildConfig.NUVIO_BASE_VERSION.ifBlank { BuildConfig.VERSION_NAME }.ifBlank { "dev" } // Live TV fork: identify as the Nuvio version it is built on
                 val request = chain.request().newBuilder()
                     .header("User-Agent", "Nuvio/$version")
                     .header("Accept-Language", buildAcceptLanguageHeader())
@@ -173,7 +173,7 @@ object NetworkModule {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .addInterceptor { chain ->
-            val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
+            val version = BuildConfig.NUVIO_BASE_VERSION.ifBlank { BuildConfig.VERSION_NAME }.ifBlank { "dev" } // Live TV fork: identify as the Nuvio version it is built on
             val request = chain.request().newBuilder()
                 .header("User-Agent", "Nuvio/$version")
                 .header("Accept-Language", buildAcceptLanguageHeader())
@@ -196,7 +196,7 @@ object NetworkModule {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .addInterceptor { chain ->
-                val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
+                val version = BuildConfig.NUVIO_BASE_VERSION.ifBlank { BuildConfig.VERSION_NAME }.ifBlank { "dev" } // Live TV fork: identify as the Nuvio version it is built on
                 val request = chain.request().newBuilder()
                     .header("User-Agent", "Nuvio/$version")
                     .header("Accept-Language", buildAcceptLanguageHeader())
@@ -209,7 +209,11 @@ object NetworkModule {
     @Provides
     @Singleton
     @Named("simkl")
-    fun provideSimklOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
+    fun provideSimklOkHttpClient(
+        @dagger.hilt.android.qualifiers.ApplicationContext context: android.content.Context
+    ): OkHttpClient = OkHttpClient.Builder()
+        // Live TV fork: Simkl "Auth V2" client IDs (device flow + refresh tokens).
+        .addInterceptor(com.nuvio.tv.data.simkl.SimklAuthV2Interceptor(context, BuildConfig.SIMKL_CLIENT_ID))
         .dns(IPv4FirstDns())
         .socketFactory(NoDelaySocketFactory)
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -247,7 +251,7 @@ object NetworkModule {
     ): OkHttpClient = okHttpClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val version = BuildConfig.VERSION_NAME.ifBlank { "dev" }
+            val version = BuildConfig.NUVIO_BASE_VERSION.ifBlank { BuildConfig.VERSION_NAME }.ifBlank { "dev" } // Live TV fork: identify as the Nuvio version it is built on
             val newRequest = request.newBuilder()
                 .header("Content-Type", "application/json")
                 .header("User-Agent", "Nuvio/$version")

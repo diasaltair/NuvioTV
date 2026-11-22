@@ -3478,8 +3478,8 @@
     <string name="web_stream_badge_imported">استُورد رابط الشارة.</string>
     <string name="web_stream_badge_importing">جارٍ الاستيراد\u2026</string>
     <string name="web_stream_badge_load_error">تعذر تحميل إعدادات شارات البث</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
+    <string name="settings_home_screen_rows">صفوف الشاشة الرئيسية</string>
+    <string name="settings_home_screen_rows_subtitle">اختر ترتيب الصفوف على شاشتك الرئيسية</string>
     <string name="library_type_items">عناصر</string>
     <string name="library_empty_local_title">لا يوجد %1$s بعد</string>
     <string name="library_empty_trakt_title">لا يوجد %1$s في هذه القائمة</string>

@@ -1,0 +1,26 @@
+name: Build Release Check
+
+# Run it by hand from the Actions tab. The steps live in release-check-steps.yml and always come from the
+# dev branch, so it works the same whichever branch "Use workflow from" is set to.
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to build"
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-check
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: homelessbrian/NuvioPlusIPTV/.github/workflows/release-check-steps.yml@dev
+    with:
+      branch: ${{ inputs.branch }}
+    secrets: inherit

@@ -3158,10 +3158,10 @@
     <string name="stream_test_video_bitrate">Prosečni video bitrejt: %1$s</string>
     <string name="stream_test_error_connection">Povezivanje nije uspelo. Veza poslednje puštenog strima je možda istekla ili je nedostupna. Pustite video ponovo i pokušajte opet.</string>
 
+    <string name="settings_home_screen_rows">Redovi početnog ekrana</string>
+    <string name="settings_home_screen_rows_subtitle">Izaberite redosled redova na početnom ekranu</string>
     <string name="playback_net_http2">Omogući HTTP/2</string>
     <string name="playback_net_http2_sub">Omogućite HTTP/2 protokol za mrežne veze, što omogućava multipleksiranje zahteva i brže uspostavljanje veze.</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">stavke</string>
     <string name="library_empty_local_title">Još nema %1$s</string>
     <string name="library_empty_trakt_title">Nema %1$s na ovoj listi</string>

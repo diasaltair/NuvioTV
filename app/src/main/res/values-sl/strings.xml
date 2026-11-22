@@ -2164,8 +2164,8 @@
     <string name="trakt_comments_error_request_failed">Zahteva za komentarje Trakt ni uspela</string>
     <string name="trakt_library_error_fetch_list_items">Pridobivanje elementov seznama ni uspelo</string>
 
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
+    <string name="settings_home_screen_rows">Vrstice začetnega zaslona</string>
+    <string name="settings_home_screen_rows_subtitle">Izberite vrstni red vrstic na začetnem zaslonu</string>
     <string name="library_empty_local_title">Še ni %1$s</string>
     <string name="library_empty_trakt_title">V tem seznamu ni %1$s</string>
     <string name="library_empty_local_subtitle">Začnite shranjevati priljubljene, da jih vidite tukaj</string>

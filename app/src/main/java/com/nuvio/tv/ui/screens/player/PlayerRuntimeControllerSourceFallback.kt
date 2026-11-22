@@ -210,7 +210,9 @@ internal fun nextSourceFallbackCandidate(
         selectedPlugins = settings.streamAutoPlaySelectedPlugins,
         rankedRegexPatterns = settings.streamAutoPlayRankedRegex,
         rankedRegexCheckCancelled = rankedRegexCheckCancelled,
-        bingeKeepsFilters = true
+        bingeKeepsFilters = true,
+        qualityRules = settings.streamQualityRules,
+        lowQualityGroups = settings.streamLowQualityGroups
     )
 }
 

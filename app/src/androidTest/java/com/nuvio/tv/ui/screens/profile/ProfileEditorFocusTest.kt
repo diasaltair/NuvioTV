@@ -68,7 +68,7 @@ class ProfileEditorFocusTest {
                             avatarCatalog = avatars,
                             isCreating = false,
                             onDismiss = { showEditor = false },
-                            onCreateProfile = { _, _, _, _, _ -> }
+                            onCreateProfile = { _, _, _, _, _, _ -> }
                         )
                     }
                 }
@@ -136,7 +136,7 @@ class ProfileEditorFocusTest {
                     avatarCatalog = catalog,
                     isCreating = false,
                     onDismiss = {},
-                    onCreateProfile = { _, _, _, _, _ -> }
+                    onCreateProfile = { _, _, _, _, _, _ -> }
                 )
             }
         }

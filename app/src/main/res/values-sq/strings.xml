@@ -2881,10 +2881,10 @@
     <string name="stream_test_error_prefix">Gabim: %1$s</string>
     <string name="stream_test_video_bitrate">Bitrate mesatar i videos: %1$s</string>
     <string name="stream_test_error_connection">Lidhja dështoi. Lidhja e transmetimit të luajtur së fundi mund të ketë skaduar ose të jetë e paarritshme. Ju lutemi luajeni videon përsëri dhe provoni sërish.</string>
+    <string name="settings_home_screen_rows">Rreshtat e ekranit kryesor</string>
+    <string name="settings_home_screen_rows_subtitle">Zgjidhni renditjen e rreshtave në ekranin kryesor</string>
     <string name="playback_net_http2">Aktivizo HTTP/2</string>
     <string name="playback_net_http2_sub">Aktivizo protokollin HTTP/2 për lidhjet e rrjetit, duke lejuar multiplexing të kërkesave dhe kohë më të shpejta handshake.</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">artikuj</string>
     <string name="library_empty_local_title">Ende nuk ka %1$s</string>
     <string name="library_empty_trakt_title">Nuk ka %1$s në këtë listë</string>

@@ -3432,16 +3432,14 @@
     <string name="profile_default_name">Perfil %1$d</string>
     <string name="detail_tmdb_fallback_title">TMDB %1$d</string>
     <string name="collections_editor_tmdb_collection_fallback">Coleção TMDB %1$d</string>
+    <string name="settings_home_screen_rows">Linhas do ecrã inicial</string>
+    <string name="settings_home_screen_rows_subtitle">Escolha a ordem das linhas no ecrã inicial</string>
     <string name="playback_chapters_label">Capítulos</string>
-
-    <!-- Retained Reshaped resource keys for existing controls and integrations. -->
     <string name="library_type_items">itens</string>
     <string name="library_empty_local_title">Ainda não há %1$s</string>
     <string name="library_empty_trakt_title">Nenhum %1$s nesta lista</string>
     <string name="library_empty_local_subtitle">Começa a guardar os teus favoritos para os veres aqui</string>
     <string name="library_empty_trakt_subtitle">Utiliza o + nos detalhes para adicionar itens à lista de interesse ou a outras listas</string>
-
-    <!-- Stream Throughput Speed & Chunk Diagnostic Test -->
     <string name="stream_test_section_header">Diagnóstico de rendimento de fontes</string>
     <string name="stream_test_card_title">Executar teste de velocidade da última fonte reproduzida</string>
     <string name="stream_test_server_label">Servidor: %1$s</string>
@@ -3462,7 +3460,6 @@
     <string name="stream_test_error_prefix">Erro: %1$s</string>
     <string name="stream_test_video_bitrate">Taxa de bits média do vídeo: %1$s</string>
     <string name="stream_test_error_connection">A ligação falhou. A hiperligação da última fonte reproduzida pode ter expirado ou estar inacessível. Reproduz o vídeo novamente e tenta outra vez.</string>
-
     <string name="random_episode_title">Aleatório</string>
     <string name="layout_random_episode_sub">Reproduzir episódios aleatórios de qualquer série. Desativar isto pausa a reprodução aleatória.</string>
     <string name="random_episode_unwatched">Episódios por ver</string>
@@ -3484,8 +3481,6 @@
     <string name="shuffle_save_failed">Não foi possível atualizar a reprodução aleatória. Tenta novamente.</string>
     <string name="shuffle_change_selection">Escolher episódios</string>
     <string name="shuffle_badge">Modo aleatório de episódios ativado</string>
-
-    <!-- Subtitle AutoSync -->
     <string name="autosync_tolerance_value">%1$d ms</string>
     <string name="autosync_toast_no_fit">A sincronização falhou: estas legendas não correspondem a esta versão do vídeo.</string>
     <string name="stream_resume_from_time">Retomar a partir de %1$s</string>
