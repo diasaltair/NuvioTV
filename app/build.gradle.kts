@@ -427,10 +427,10 @@ if (livetvIsTestBuild) {
 }
 
 androidComponents {
-    // Our fork's test builds update the app already on the Mi Box (com.nuviodebug.com) in place.
+    // Test build of Arc + Live TV: its own app ID, installed next to the Nuvio already on the Mi Box.
     onVariants(selector().withBuildType("debug")) { variant ->
         val isPlaystore = variant.productFlavors.any { it.second == "playstore" }
-        variant.applicationId.set(if (isPlaystore) "com.nuvio.appdebug" else "com.nuviodebug.com")
+        variant.applicationId.set(if (isPlaystore) "com.nuvio.appdebug" else "com.nuvio.arclive")
     }
     // Only the full flavor ships the in-app updater.
     onVariants(selector().withFlavor("distribution" to "full")) { variant ->
