@@ -204,17 +204,24 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
         )
         val isHls = resolvedMimeType == MimeTypes.APPLICATION_M3U8
         val isDash = resolvedMimeType == MimeTypes.APPLICATION_MPD
-        val httpDataSourceFactory = PlaybackThroughput.countingNetworkBytes(if (isHls || isDash) {
-            DefaultDataSource.Factory(
-                context,
-                PlayerPlaybackNetworking.createHttpDataSourceFactory(
-                    sanitizedHeaders,
-                    useLongReadTimeout = isLoopbackUrl(url),
-                ),
+        val httpDataSourceFactory = if (isHls || isDash) {
+            // Attach the Reshaped counter before HLS repair so segment probes are
+            // measured too, while locally generated init data stays off the network count.
+            val adaptiveFactory = PlaybackThroughput.countingNetworkBytes(
+                DefaultDataSource.Factory(
+                    context,
+                    PlayerPlaybackNetworking.createHttpDataSourceFactory(
+                        sanitizedHeaders,
+                        useLongReadTimeout = isLoopbackUrl(url),
+                    ),
+                )
             )
+            if (isHls) HlsParameterSetInitDataSource.Factory(adaptiveFactory) else adaptiveFactory
         } else {
-            PlayerPlaybackNetworking.createDataSourceFactory(context, sanitizedHeaders)
-        })
+            PlaybackThroughput.countingNetworkBytes(
+                PlayerPlaybackNetworking.createDataSourceFactory(context, sanitizedHeaders)
+            )
+        }
 
         val mediaItemBuilder = MediaItem.Builder().setUri(url)
         resolvedMimeType?.let(mediaItemBuilder::setMimeType)
@@ -1046,7 +1053,10 @@ internal class PlayerMediaSourceFactory(private val context: Context) {
 
             query.split('&').forEach { parameter ->
                 val key = parameter.substringBefore('=', missingDelimiterValue = "").trim()
-                val value = parameter.substringAfter('=', missingDelimiterValue = "").trim()
+                val rawValue = parameter.substringAfter('=', missingDelimiterValue = "").trim()
+                val value = runCatching {
+                    URLDecoder.decode(rawValue.replace("+", "%2B"), Charsets.UTF_8.name())
+                }.getOrDefault(rawValue).lowercase(Locale.US)
                 if (key.isBlank() || value.isBlank()) return@forEach
 
                 when (key) {

@@ -346,6 +346,118 @@ class ParallelRangeChunkLeaseTest {
     }
 
     @Test
+    fun `clearing an empty pool cannot orphan a concurrently recycled buffer`() {
+        @Suppress("UNCHECKED_CAST")
+        val pools = ParallelRangeDataSource::class.java.getDeclaredField("globalBufferPool")
+            .apply { isAccessible = true }.get(null) as
+            ConcurrentHashMap<Long, java.util.concurrent.ConcurrentLinkedDeque<Any>>
+        val emptyObserved = CountDownLatch(1)
+        val finishClear = CountDownLatch(1)
+        val recycleStarted = CountDownLatch(1)
+        val errors = AtomicReference<Throwable?>()
+        pools[CHUNK] = object : java.util.concurrent.ConcurrentLinkedDeque<Any>() {
+            override fun pollFirst(): Any? {
+                val value = super.pollFirst()
+                if (value == null) {
+                    emptyObserved.countDown()
+                    check(finishClear.await(5, TimeUnit.SECONDS))
+                }
+                return value
+            }
+        }
+        val buffer = pooledBuffer(memory.allocate(CHUNK.toInt()))
+        val clear = Thread {
+            try { call(ParallelRangeDataSource.Companion, "clearGlobalPool") }
+            catch (error: Throwable) { errors.set(error) }
+        }
+        val recycle = Thread {
+            recycleStarted.countDown()
+            try { releaseSessionBuffer(buffer, 4) }
+            catch (error: Throwable) { errors.set(error) }
+        }
+        try {
+            clear.start()
+            assertTrue(emptyObserved.await(5, TimeUnit.SECONDS))
+            recycle.start()
+            assertTrue(recycleStarted.await(5, TimeUnit.SECONDS))
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (recycle.state != Thread.State.BLOCKED && recycle.isAlive &&
+                System.nanoTime() < deadline) Thread.sleep(1)
+            // On the old code recycle completes into the deque that clear then removes.
+        } finally {
+            finishClear.countDown()
+            clear.join(5_000)
+            if (recycle.state != Thread.State.NEW) recycle.join(5_000)
+        }
+        assertFalse(clear.isAlive)
+        assertFalse(recycle.isAlive)
+        errors.get()?.let { throw AssertionError("pool worker failed", it) }
+        drainPool()
+        assertEquals(0, memory.badFrees.get())
+        assertEquals("concurrent recycling must remain reachable", memory.allocated.get(), memory.freed.get())
+    }
+
+    @Test
+    fun `session teardown waits for a completed future to be published`() {
+        serve()
+        val reader = Reader(source(), viaByteBuffer = false)
+        holdChunkOne(reader)
+        val session = field(reader.source, "session")!!
+        val futuresField = session.javaClass.getDeclaredField("futures").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val original = futuresField.get(session) as ConcurrentHashMap<Long, CompletableFuture<Any>>
+        original.values.toList().forEach { it.get(10, TimeUnit.SECONDS) }
+        val completedBeforePublication = CountDownLatch(1)
+        val publish = CountDownLatch(1)
+        val teardownStarted = CountDownLatch(1)
+        val teardownFinished = CountDownLatch(1)
+        val errors = AtomicReference<Throwable>()
+        val delayed = object : ConcurrentHashMap<Long, CompletableFuture<Any>>() {
+            override fun computeIfAbsent(
+                key: Long,
+                mappingFunction: java.util.function.Function<in Long, out CompletableFuture<Any>>
+            ): CompletableFuture<Any> = super.computeIfAbsent(key) { index ->
+                mappingFunction.apply(index).also { future ->
+                    future.get(10, TimeUnit.SECONDS)
+                    completedBeforePublication.countDown()
+                    check(publish.await(10, TimeUnit.SECONDS))
+                }
+            }
+        }
+        delayed.putAll(original)
+        futuresField.set(session, delayed)
+        val schedule = Thread {
+            try { call(reader.source, "ensureChunkScheduled", 20L) }
+            catch (error: Throwable) { errors.set(error) }
+        }
+        val teardown = Thread {
+            teardownStarted.countDown()
+            try { teardownSessions() }
+            catch (error: Throwable) { errors.set(error) }
+            finally { teardownFinished.countDown() }
+        }
+        try {
+            schedule.start()
+            assertTrue(completedBeforePublication.await(10, TimeUnit.SECONDS))
+            teardown.start()
+            assertTrue(teardownStarted.await(5, TimeUnit.SECONDS))
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (teardown.state != Thread.State.BLOCKED && teardownFinished.count != 0L &&
+                System.nanoTime() < deadline) Thread.sleep(1)
+            assertEquals("teardown must wait until the future is visible", Thread.State.BLOCKED, teardown.state)
+        } finally {
+            publish.countDown()
+            schedule.join(10_000)
+            if (teardown.state != Thread.State.NEW) teardown.join(10_000)
+            reader.close()
+        }
+        assertFalse(schedule.isAlive)
+        assertFalse(teardown.isAlive)
+        errors.get()?.let { throw AssertionError("session worker failed", it) }
+        assertAllMemoryReturned()
+    }
+
+    @Test
     fun `paced reader stays correct while sessions are torn down repeatedly`() {
         serve()
         val done = AtomicBoolean(false)

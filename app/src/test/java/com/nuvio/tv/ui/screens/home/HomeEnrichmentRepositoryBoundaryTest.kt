@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
@@ -76,10 +77,11 @@ class HomeEnrichmentRepositoryBoundaryTest {
 
         viewModel.onItemFocusPipeline(item(itemId))
         awaitAtLeast(metaCalls, 1)
+        awaitEnrichment(viewModel)
 
         reachable.set(true)
-        focusAndSettle(viewModel, item(otherId))
-        focusAndSettle(viewModel, item(itemId))
+        focusAndAwaitEnrichment(viewModel, item(otherId))
+        focusAndAwaitEnrichment(viewModel, item(itemId))
 
         // The failed lookup came back as a codeless Error, so the item was never marked prefetched
         // and the focus gate let it through again.
@@ -91,9 +93,44 @@ class HomeEnrichmentRepositoryBoundaryTest {
         )
     }
 
-    private suspend fun focusAndSettle(viewModel: HomeViewModel, item: MetaPreview) {
+    @Test
+    fun `an immediately completed transport failure cannot poison later retries`() = runBlocking {
+        val reachable = AtomicBoolean(false)
+        val api = mockk<AddonApi>()
+        coEvery { api.getMeta(any()) } coAnswers {
+            if (!reachable.get()) throw IOException("offline")
+            Response.success(MetaResponseDto(meta = MetaDto(id = itemId, type = "series", name = "Recovered")))
+        }
+        val repository = realRepository(api)
+        // Run the real request immediately, so completion before in-flight map publication is
+        // deterministic rather than depending on how quickly Dispatchers.IO schedules it.
+        val field = MetaRepositoryImpl::class.java.getDeclaredField("repositoryScope").apply { isAccessible = true }
+        (field.get(repository) as kotlinx.coroutines.CoroutineScope).cancel()
+        val immediate = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Unconfined)
+        field.set(repository, immediate)
+        try {
+            val failed = repository.getMetaFromAllAddons("series", itemId, catalogSourceUrl)
+                .last()
+            assertEquals(true, failed is com.nuvio.tv.core.network.NetworkResult.Error)
+            reachable.set(true)
+            val recovered = repository.getMetaFromAllAddons("series", itemId, catalogSourceUrl)
+                .last()
+            assertEquals("a completed failed request must not block a fresh lookup", true,
+                recovered is com.nuvio.tv.core.network.NetworkResult.Success)
+        } finally {
+            immediate.cancel()
+        }
+    }
+
+    private suspend fun focusAndAwaitEnrichment(viewModel: HomeViewModel, item: MetaPreview) {
         viewModel.onItemFocusPipeline(item)
-        delay(HomeViewModel.EXTERNAL_META_PREFETCH_FOCUS_DEBOUNCE_MS + 400)
+        awaitEnrichment(viewModel)
+    }
+
+    private suspend fun awaitEnrichment(viewModel: HomeViewModel) {
+        // API entry is earlier than repository completion and cache publication. Waiting for
+        // the actual focus job keeps slow runners from observing an unfinished retry.
+        withTimeout(5_000) { viewModel.tmdbEnrichFocusJob?.join() }
     }
 
     private suspend fun awaitAtLeast(counter: AtomicInteger, expected: Int) {
@@ -201,7 +238,9 @@ class HomeEnrichmentRepositoryBoundaryTest {
             cwEnrichmentCache = cwEnrichmentCache,
             profileManager = profileManager,
             tvRecommendationManager = mockk(relaxed = true),
-            serverCatalog = mockk(relaxed = true)
+            serverCatalog = mockk(relaxed = true),
+            trailerPlayerPool = mockk(relaxed = true),
+            backgroundTrailerController = mockk(relaxed = true)
         )
         viewModel.startupGracePeriodActive = false
         viewModel.externalMetaPrefetchEnabled = true

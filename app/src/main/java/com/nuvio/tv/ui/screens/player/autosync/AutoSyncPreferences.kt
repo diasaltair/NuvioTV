@@ -25,14 +25,13 @@ internal object AutoSyncPreferences {
     private var lastStartupSessionKey: Int? = null
     private var lastStartupPlaybackKey: String? = null
 
-    private val _enabled = MutableStateFlow(true)
+    private val _enabled = MutableStateFlow(false)
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
     private val _debugLogsEnabled = MutableStateFlow(false)
     val debugLogsEnabled: StateFlow<Boolean> = _debugLogsEnabled.asStateFlow()
-
     /** [enabled] as Compose state, so the settings list can show the dependent rows only when on. */
-    private val _enabledState = mutableStateOf(true)
+    private val _enabledState = mutableStateOf(false)
     val enabledState: State<Boolean> get() = _enabledState
 
     /** Thorough search: stop only on a stronger match; the applied match is gated the same. */

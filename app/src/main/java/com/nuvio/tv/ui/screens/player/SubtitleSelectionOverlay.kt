@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -62,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
 import com.nuvio.tv.ui.util.keepLtr
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import kotlin.math.roundToInt
 import androidx.tv.material3.Card
@@ -80,6 +83,7 @@ import com.nuvio.tv.domain.model.Subtitle
 import kotlin.math.abs
 import com.nuvio.tv.ui.components.LoadingIndicator
 import com.nuvio.tv.ui.screens.detail.requestFocusAfterFrames
+import com.nuvio.tv.ui.screens.player.autosync.AutoSyncStatusIndicator
 import com.nuvio.tv.ui.screens.player.autosync.AutoSyncedChip
 
 private const val SubtitleOffLanguageKey = "__off__"
@@ -186,7 +190,10 @@ internal fun SubtitleSelectionOverlay(
     val sessionInitialSubtitleOptions = remember(
         visible,
         sessionInitialLanguageKey,
-        sessionInitialSelectedOptionId
+        sessionInitialSelectedOptionId,
+        sessionInternalTracks,
+        sessionAddonSubtitles,
+        sessionInstalledSubtitleAddonOrder
     ) {
         buildSessionOptions(sessionInitialLanguageKey, sessionInitialSelectedOptionId)
     }
@@ -211,7 +218,11 @@ internal fun SubtitleSelectionOverlay(
         autoSyncPickKey,
         autoSyncPickOffsetMs
     ) {
-        buildSessionOptions(selectedLanguageKey, selectedOptionId)
+        if (selectedLanguageKey == sessionInitialLanguageKey && selectedOptionId == sessionInitialSelectedOptionId) {
+            sessionInitialSubtitleOptions
+        } else {
+            buildSessionOptions(selectedLanguageKey, selectedOptionId)
+        }
     }
     var lastFocusedLanguageKey by remember(visible) {
         mutableStateOf(sessionInitialLanguageKey.takeIf { key -> languageItems.any { it.key == key } })
@@ -259,7 +270,7 @@ internal fun SubtitleSelectionOverlay(
     val optionItemRequesters = rememberFocusRequesterMap(subtitleOptions.map { it.id })
     val styleRequesters = rememberStyleFocusRequesters()
     val optionRailVisible = selectedLanguageKey != SubtitleOffLanguageKey
-    val styleRailVisible = optionRailVisible && (revealStyleRail || selectedOptionId != null)
+    val styleRailVisible = optionRailVisible && (revealStyleRail || subtitleOptions.any { it.isSelected })
     val languageTargetKey: String? = remember(languageItems, lastFocusedLanguageKey, selectedLanguageKey) {
         lastFocusedLanguageKey?.takeIf { key -> languageItems.any { it.key == key } }
             ?: selectedLanguageKey.takeIf { key -> languageItems.any { it.key == key } }
@@ -523,7 +534,6 @@ internal fun SubtitleSelectionOverlay(
                             val nextSelectedId = selectedOptionId?.takeIf { id ->
                                 nextOptions.any { it.id == id }
                             }
-                            selectedOptionId = nextSelectedId
                             val nextTargetId = nextSelectedId
                                 ?: optionFocusMemory[languageKey]?.takeIf { id ->
                                     nextOptions.any { it.id == id }
@@ -622,6 +632,13 @@ internal fun SubtitleSelectionOverlay(
                 }
             }
         }
+
+        AutoSyncStatusIndicator(
+            subtitleUrl = selectedAddonSubtitle?.url,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .offset(y = 40.dp)
+        )
     }
 }
 
@@ -901,6 +918,16 @@ private fun SubtitleStyleRail(
                 }
             }
             item {
+                SubtitleFontStyleCard(
+                    subtitleStyle = subtitleStyle,
+                    focusRequesters = focusRequesters,
+                    onMoveLeft = onMoveLeft,
+                    onFocused = onStyleFocused,
+                    onEvent = dispatchStyleEvent,
+                    modifier = styleCardModifier
+                )
+            }
+            item {
                 OverlaySectionCard(
                     title = stringResource(R.string.subtitle_style_font_size),
                     modifier = styleCardModifier
@@ -1009,6 +1036,16 @@ private fun SubtitleStyleRail(
                 }
             }
             item {
+                SubtitleBackgroundStyleCard(
+                    subtitleStyle = subtitleStyle,
+                    focusRequesters = focusRequesters,
+                    onMoveLeft = onMoveLeft,
+                    onFocused = onStyleFocused,
+                    onEvent = dispatchStyleEvent,
+                    modifier = styleCardModifier
+                )
+            }
+            item {
                 OverlaySectionCard(
                     title = stringResource(R.string.subtitle_style_outline),
                     modifier = styleCardModifier
@@ -1040,6 +1077,16 @@ private fun SubtitleStyleRail(
                         )
                     }
                 }
+            }
+            item {
+                SubtitleShadowStyleCard(
+                    subtitleStyle = subtitleStyle,
+                    focusRequesters = focusRequesters,
+                    onMoveLeft = onMoveLeft,
+                    onFocused = onStyleFocused,
+                    onEvent = dispatchStyleEvent,
+                    modifier = styleCardModifier
+                )
             }
             item {
                 OverlaySectionCard(
@@ -1284,7 +1331,11 @@ private fun SubtitleOptionCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SourceChip(label = item.sourceLabel, selected = item.isSelected)
+                    SourceChip(
+                        label = item.sourceLabel,
+                        selected = item.isSelected,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                     item.addonSubtitle?.let { AutoSyncedChip(it.url, item.isSelected) } // AutoSync hook
                     if (item.syncLabel != null) {
                         SyncChip(label = item.syncLabel, tone = item.syncTone, selected = item.isSelected)
@@ -1367,9 +1418,9 @@ private fun SyncChip(label: String, tone: SyncTone, selected: Boolean) {
 }
 
 @Composable
-private fun SourceChip(label: String, selected: Boolean = false) {
+private fun SourceChip(label: String, selected: Boolean = false, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .background(
                 if (selected) {
                     NuvioTheme.colors.OnSecondary.copy(alpha = 0.14f)
@@ -1398,7 +1449,9 @@ private fun SourceChip(label: String, selected: Boolean = false) {
                 NuvioTheme.colors.OnSecondary.copy(alpha = 0.9f)
             } else {
                 Color.White.copy(alpha = 0.78f)
-            }
+            },
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
         )
     }
 }
@@ -1441,7 +1494,7 @@ private fun OverlayEmptyCard(text: String) {
 }
 
 @Composable
-private fun OverlaySectionCard(
+internal fun OverlaySectionCard(
     title: String,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
@@ -1460,11 +1513,12 @@ private fun OverlaySectionCard(
 }
 
 @Composable
-private fun StepperRow(
+internal fun StepperRow(
     value: String,
     onDecrease: () -> Unit,
     onIncrease: () -> Unit,
     valueWidth: Dp = 84.dp,
+    valueFontFamily: FontFamily? = null,
     onMoveLeft: (() -> Unit)? = null,
     decrementFocusRequester: FocusRequester? = null,
     incrementFocusRequester: FocusRequester? = null,
@@ -1495,7 +1549,10 @@ private fun StepperRow(
             Text(
                 text = value,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White
+                color = Color.White,
+                fontFamily = valueFontFamily,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
         StepperButton(
@@ -1576,7 +1633,7 @@ private fun StepperButton(
 }
 
 @Composable
-private fun ToggleChip(
+internal fun ToggleChip(
     label: String,
     isEnabled: Boolean,
     onMoveLeft: (() -> Unit)? = null,
@@ -1657,7 +1714,7 @@ private fun ToggleChip(
 }
 
 @Composable
-private fun ColorChipRow(
+internal fun ColorChipRow(
     colors: List<Color>,
     selectedColor: Int,
     enabled: Boolean = true,
@@ -1776,7 +1833,7 @@ private fun overlaySwatchColorLabel(color: Color): String {
     return "#" + rgb.toString(16).padStart(6, '0').uppercase()
 }
 
-private object StyleFocusKey {
+internal object StyleFocusKey {
     const val FontSizeDecrease = "font_size_decrease"
     const val FontSizeIncrease = "font_size_increase"
     const val Bold = "bold"
@@ -1791,6 +1848,18 @@ private object StyleFocusKey {
     const val HdrBrightnessDecrease = "hdr_brightness_decrease"
     const val HdrBrightnessIncrease = "hdr_brightness_increase"
     const val OutlineColorPrefix = "outline_color"
+    const val FontDecrease = "font_decrease"
+    const val FontIncrease = "font_increase"
+    const val BackgroundColorPrefix = "background_color"
+    const val BackgroundOpacityDecrease = "background_opacity_decrease"
+    const val BackgroundOpacityIncrease = "background_opacity_increase"
+    const val RoundnessDecrease = "roundness_decrease"
+    const val RoundnessIncrease = "roundness_increase"
+    const val ShadowToggle = "shadow_toggle"
+    const val ShadowOpacityDecrease = "shadow_opacity_decrease"
+    const val ShadowOpacityIncrease = "shadow_opacity_increase"
+    const val ShadowSizeDecrease = "shadow_size_decrease"
+    const val ShadowSizeIncrease = "shadow_size_increase"
 }
 
 private enum class OverlayFocusRail {
@@ -1804,21 +1873,28 @@ private fun String.isHdrBrightnessFocusKey(): Boolean =
 
 /** The HDR brightness item sits right after opacity, shifting every later item down by one. */
 private fun styleListIndexForFocusKey(focusKey: String, hasHdrBrightnessItem: Boolean): Int {
-    if (focusKey.isHdrBrightnessFocusKey()) return 5
+    if (focusKey.isHdrBrightnessFocusKey()) return 6
     val index = styleListIndexForFocusKey(focusKey)
-    return if (hasHdrBrightnessItem && index >= 5) index + 1 else index
+    return if (hasHdrBrightnessItem && index >= 6) index + 1 else index
 }
 
 private fun styleListIndexForFocusKey(focusKey: String): Int {
     return when {
         focusKey == StyleFocusKey.DelaySet -> 0
-        focusKey == StyleFocusKey.FontSizeDecrease || focusKey == StyleFocusKey.FontSizeIncrease -> 1
-        focusKey == StyleFocusKey.Bold -> 2
-        focusKey.startsWith("${StyleFocusKey.TextColorPrefix}:") -> 3
-        focusKey == StyleFocusKey.OpacityDecrease || focusKey == StyleFocusKey.OpacityIncrease -> 4
-        focusKey == StyleFocusKey.OutlineToggle || focusKey.startsWith("${StyleFocusKey.OutlineColorPrefix}:") -> 5
-        focusKey == StyleFocusKey.OffsetDecrease || focusKey == StyleFocusKey.OffsetIncrease -> 6
-        focusKey == StyleFocusKey.Reset -> 7
+        focusKey == StyleFocusKey.FontDecrease || focusKey == StyleFocusKey.FontIncrease -> 1
+        focusKey == StyleFocusKey.FontSizeDecrease || focusKey == StyleFocusKey.FontSizeIncrease -> 2
+        focusKey == StyleFocusKey.Bold -> 3
+        focusKey.startsWith("${StyleFocusKey.TextColorPrefix}:") -> 4
+        focusKey == StyleFocusKey.OpacityDecrease || focusKey == StyleFocusKey.OpacityIncrease -> 5
+        focusKey.startsWith("${StyleFocusKey.BackgroundColorPrefix}:") ||
+            focusKey == StyleFocusKey.BackgroundOpacityDecrease || focusKey == StyleFocusKey.BackgroundOpacityIncrease ||
+            focusKey == StyleFocusKey.RoundnessDecrease || focusKey == StyleFocusKey.RoundnessIncrease -> 6
+        focusKey == StyleFocusKey.OutlineToggle || focusKey.startsWith("${StyleFocusKey.OutlineColorPrefix}:") -> 7
+        focusKey == StyleFocusKey.ShadowToggle ||
+            focusKey == StyleFocusKey.ShadowOpacityDecrease || focusKey == StyleFocusKey.ShadowOpacityIncrease ||
+            focusKey == StyleFocusKey.ShadowSizeDecrease || focusKey == StyleFocusKey.ShadowSizeIncrease -> 8
+        focusKey == StyleFocusKey.OffsetDecrease || focusKey == StyleFocusKey.OffsetIncrease -> 9
+        focusKey == StyleFocusKey.Reset -> 10
         else -> 0
     }
 }
@@ -1843,13 +1919,27 @@ private fun rememberStyleFocusRequesters(): Map<String, FocusRequester> {
             StyleFocusKey.OffsetDecrease,
             StyleFocusKey.OffsetIncrease,
             StyleFocusKey.DelaySet,
-            StyleFocusKey.Reset
+            StyleFocusKey.Reset,
+            StyleFocusKey.FontDecrease,
+            StyleFocusKey.FontIncrease,
+            StyleFocusKey.BackgroundOpacityDecrease,
+            StyleFocusKey.BackgroundOpacityIncrease,
+            StyleFocusKey.RoundnessDecrease,
+            StyleFocusKey.RoundnessIncrease,
+            StyleFocusKey.ShadowToggle,
+            StyleFocusKey.ShadowOpacityDecrease,
+            StyleFocusKey.ShadowOpacityIncrease,
+            StyleFocusKey.ShadowSizeDecrease,
+            StyleFocusKey.ShadowSizeIncrease
         ).associateWith { FocusRequester() } +
             SubtitleTextColorPresets.associate { color ->
                 "${StyleFocusKey.TextColorPrefix}:${color.toArgb()}" to FocusRequester()
             } +
             SubtitleOutlineColorPresets.associate { color ->
                 "${StyleFocusKey.OutlineColorPrefix}:${color.toArgb()}" to FocusRequester()
+            } +
+            SubtitleBackgroundColorPresets.associate { color ->
+                "${StyleFocusKey.BackgroundColorPrefix}:${color.toArgb()}" to FocusRequester()
             }
     }
 }
@@ -2013,7 +2103,7 @@ private fun buildSubtitleOptionRailItems(
             SubtitleTimingMatcher.Confidence.UNAVAILABLE -> -2f
             else -> -1f
         }
-        val baseTitle = if (subtitle.isStreamProvided) {
+        val baseTitle = subtitle.label ?: if (subtitle.isStreamProvided) {
             streamProvidedSubtitleTitle(subtitle)
         } else {
             Subtitle.languageCodeToName(PlayerSubtitleUtils.normalizeLanguageCode(subtitle.lang))

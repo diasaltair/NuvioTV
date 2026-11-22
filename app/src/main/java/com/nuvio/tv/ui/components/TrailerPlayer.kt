@@ -18,14 +18,22 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
+import kotlin.math.max
+import kotlin.math.min
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
+import android.net.Uri
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -36,6 +44,19 @@ import com.nuvio.tv.core.player.LetterboxSampler
 import com.nuvio.tv.core.player.LetterboxTracker
 import com.nuvio.tv.core.player.LocalTrailerPlayerPool
 import com.nuvio.tv.core.player.TrailerPlayerPool
+import com.nuvio.tv.data.local.SubtitleStyleSettings
+import com.nuvio.tv.data.trailer.TrailerSubtitleTrack
+import com.nuvio.tv.ui.screens.player.SUBTITLE_BASE_TEXT_SP
+import com.nuvio.tv.ui.screens.player.StyledSubtitleCues
+import com.nuvio.tv.ui.screens.player.StyledSubtitleOverlay
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.sp
+import android.view.View
+import androidx.media3.common.text.CueGroup
+import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.nuvio.tv.data.trailer.YoutubeChunkedDataSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -43,6 +64,24 @@ import android.view.LayoutInflater
 import android.view.TextureView
 import com.nuvio.tv.R
 import kotlinx.coroutines.delay
+
+private fun buildTrailerMediaItem(videoUrl: String, subtitle: TrailerSubtitleTrack?): MediaItem =
+    MediaItem.Builder()
+        .setUri(videoUrl)
+        .apply {
+            if (subtitle != null) {
+                setSubtitleConfigurations(
+                    listOf(
+                        MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitle.url))
+                            .setMimeType(MimeTypes.TEXT_VTT)
+                            .setLanguage(subtitle.languageCode)
+                            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                            .build()
+                    )
+                )
+            }
+        }
+        .build()
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
@@ -62,6 +101,7 @@ fun TrailerPlayer(
     cropToFill: Boolean = false,
     overscanZoom: Float = 1f,
     autoCropLetterbox: Boolean = false,
+    detectLetterbox: Boolean = false,
     modifier: Modifier = Modifier,
     enter: EnterTransition = fadeIn(animationSpec = tween(800)),
     exit: ExitTransition = fadeOut(animationSpec = tween(500)),
@@ -79,22 +119,33 @@ fun TrailerPlayer(
     val currentOnProgressChanged by rememberUpdatedState(onProgressChanged)
     val currentOnRemoteKey by rememberUpdatedState(onRemoteKey)
     val zoomScale = if (cropToFill) overscanZoom.coerceAtLeast(1f) else 1f
-    var hasRenderedFirstFrame by remember(trailerUrl) { mutableStateOf(false) }
+    val resolvedPool = trailerPlayerPool ?: LocalTrailerPlayerPool.current
+    val ownerToken = remember { Any() }
+    val rootView = LocalView.current
+    val incomingHandoff = remember(trailerUrl, resolvedPool) { resolvedPool?.pendingHandoffFor(trailerUrl) }
+    val seamlessHandoff = remember(incomingHandoff, rootView) {
+        incomingHandoff?.sourceBounds?.coversView(rootView.width, rootView.height) == true
+    }
+    var hasRenderedFirstFrame by remember(trailerUrl) { mutableStateOf(seamlessHandoff) }
+    var subtitleTrack by remember(trailerUrl) { mutableStateOf<TrailerSubtitleTrack?>(null) }
+    val currentSubtitleTrack by rememberUpdatedState(subtitleTrack)
+    val subtitleStyle by remember(resolvedPool) {
+        resolvedPool?.subtitleStyle ?: MutableStateFlow(SubtitleStyleSettings())
+    }.collectAsState()
     val playerAlphaState = animateFloatAsState(
         targetValue = if (isPlaying && hasRenderedFirstFrame) 1f else 0f,
         animationSpec = tween(durationMillis = 300),
         label = "trailerFirstFrameAlpha"
     )
     val playerViewRef = remember { mutableStateOf<PlayerView?>(null) }
-    var letterboxZoom by remember(trailerUrl) { mutableFloatStateOf(1f) }
+    var letterboxZoom by remember(trailerUrl) { mutableFloatStateOf(incomingHandoff?.letterboxZoom ?: 1f) }
+    var letterboxZoomLocked by remember(trailerUrl) { mutableStateOf(incomingHandoff?.letterboxZoom != null) }
     val letterboxZoomState = animateFloatAsState(
         targetValue = if (autoCropLetterbox) letterboxZoom else 1f,
         animationSpec = tween(durationMillis = 400),
         label = "trailerLetterboxZoom"
     )
-
-    // Resolve pool: explicit parameter > CompositionLocal
-    val resolvedPool = trailerPlayerPool ?: LocalTrailerPlayerPool.current
+    val lastBounds = remember { arrayOfNulls<Rect>(1) }
 
     // Use the shared pool instance instead of creating a new ExoPlayer per focus.
     // The pool keeps one ExoPlayer alive across poster focus changes, eliminating
@@ -105,6 +156,16 @@ fun TrailerPlayer(
         } else {
             null
         }
+    }
+
+    var subtitleCues by remember(trailerPlayer) { mutableStateOf(StyledSubtitleCues()) }
+    var isHdrTrailer by remember(trailerPlayer) {
+        val transfer = trailerPlayer?.videoFormat?.colorInfo?.colorTransfer
+        mutableStateOf(transfer == C.COLOR_TRANSFER_ST2084 || transfer == C.COLOR_TRANSFER_HLG)
+    }
+    val renderedSubtitleStyle = subtitleStyle.forVideo(isHdrTrailer)
+    val subtitleTextSizePx = with(LocalDensity.current) {
+        (SUBTITLE_BASE_TEXT_SP * subtitleStyle.size / 100f).sp.toPx()
     }
 
     // Configure player settings when acquired
@@ -118,29 +179,50 @@ fun TrailerPlayer(
         }
     }
 
-    LaunchedEffect(isPlaying, trailerUrl, trailerAudioUrl, muted, trailerPlayer) {
+    LaunchedEffect(isPlaying, trailerUrl, trailerAudioUrl, trailerPlayer) {
         val player = trailerPlayer ?: return@LaunchedEffect
         player.volume = if (muted) 0f else 1f
         if (isPlaying && trailerUrl != null) {
+            if (resolvedPool?.isLoadedBy(ownerToken, trailerUrl) == true && player.currentMediaItem != null) {
+                player.playWhenReady = true
+                return@LaunchedEffect
+            }
+            val claimedHandoff = resolvedPool?.claimHandoff(ownerToken, trailerUrl)
+            if (claimedHandoff != null) {
+                letterboxZoom = claimedHandoff.letterboxZoom ?: 1f
+                letterboxZoomLocked = claimedHandoff.letterboxZoom != null
+                player.playWhenReady = true
+                return@LaunchedEffect
+            }
             hasRenderedFirstFrame = false
+            val subtitle = resolvedPool?.subtitleFor(trailerUrl)
+            subtitleTrack = subtitle
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setPreferredTextLanguage(subtitle?.languageCode)
+                .build()
             if (!trailerAudioUrl.isNullOrBlank()) {
                 val mediaSourceFactory = DefaultMediaSourceFactory(YoutubeChunkedDataSourceFactory())
-                val videoSource = mediaSourceFactory.createMediaSource(MediaItem.fromUri(trailerUrl))
+                val videoSource = mediaSourceFactory.createMediaSource(buildTrailerMediaItem(trailerUrl, subtitle))
                 val audioSource = mediaSourceFactory.createMediaSource(MediaItem.fromUri(trailerAudioUrl))
                 player.setMediaSource(MergingMediaSource(videoSource, audioSource))
             } else {
-                player.setMediaItem(MediaItem.fromUri(trailerUrl))
+                player.setMediaItem(buildTrailerMediaItem(trailerUrl, subtitle))
             }
             player.prepare()
+            resolvedPool?.onMediaLoaded(ownerToken, trailerUrl)
+            lastBounds[0]?.let { resolvedPool?.onOwnerBounds(ownerToken, it) }
             player.playWhenReady = true
         } else {
             hasRenderedFirstFrame = false
+            if (resolvedPool?.isHandoffPending() == true) return@LaunchedEffect
+            if (resolvedPool?.isOwnerOrFree(ownerToken) == false) return@LaunchedEffect
             player.playWhenReady = false
             // Defer heavy stop and clear until focus settling/collapse has finished
             delay(150)
             if (!isPlaying) {
                 player.stop()
                 player.clearMediaItems()
+                resolvedPool?.onMediaCleared(ownerToken)
             }
         }
     }
@@ -154,9 +236,11 @@ fun TrailerPlayer(
         }
     }
 
-    LaunchedEffect(autoCropLetterbox, hasRenderedFirstFrame, trailerPlayer) {
+    val letterboxDetectionEnabled = autoCropLetterbox || detectLetterbox
+    LaunchedEffect(letterboxDetectionEnabled, hasRenderedFirstFrame, trailerPlayer) {
+        if (letterboxZoomLocked) return@LaunchedEffect
         letterboxZoom = 1f
-        if (!autoCropLetterbox || !hasRenderedFirstFrame) return@LaunchedEffect
+        if (!letterboxDetectionEnabled || !hasRenderedFirstFrame) return@LaunchedEffect
         val player = trailerPlayer ?: return@LaunchedEffect
         val tracker = LetterboxTracker()
         val sampler = LetterboxSampler()
@@ -168,6 +252,7 @@ fun TrailerPlayer(
                 val textureView = playerViewRef.value?.videoSurfaceView as? TextureView ?: continue
                 val bar = sampler.sample(textureView) ?: continue
                 letterboxZoom = tracker.onSample(bar) ?: continue
+                resolvedPool?.onLetterboxZoomChanged(ownerToken, letterboxZoom)
                 break
             }
         } finally {
@@ -203,8 +288,21 @@ fun TrailerPlayer(
 
     DisposableEffect(activityLifecycleOwner, trailerPlayer) {
         val player = trailerPlayer ?: return@DisposableEffect onDispose {}
+        subtitleCues = trailerStyledSubtitleCues(player.currentCues.cues)
         val listener = object : Player.Listener {
+            override fun onCues(cueGroup: CueGroup) {
+                subtitleCues = trailerStyledSubtitleCues(cueGroup.cues)
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                isHdrTrailer = false
+                subtitleCues = StyledSubtitleCues()
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
+                    subtitleCues = StyledSubtitleCues()
+                }
                 if (playbackState == Player.STATE_ENDED &&
                     currentIsPlaying &&
                     player.playWhenReady
@@ -214,6 +312,8 @@ fun TrailerPlayer(
             }
 
             override fun onRenderedFirstFrame() {
+                val transfer = player.videoFormat?.colorInfo?.colorTransfer
+                isHdrTrailer = transfer == C.COLOR_TRANSFER_ST2084 || transfer == C.COLOR_TRANSFER_HLG
                 hasRenderedFirstFrame = true
                 currentOnFirstFrameRendered()
             }
@@ -221,6 +321,7 @@ fun TrailerPlayer(
             // A trailer that fails to load or decode never renders a frame, so without this the
             // caller stays in its trailer layout over a transparent player.
             override fun onPlayerError(error: PlaybackException) {
+                subtitleCues = StyledSubtitleCues()
                 if (currentIsPlaying) {
                     currentOnError()
                 }
@@ -233,13 +334,14 @@ fun TrailerPlayer(
                         if (player.currentMediaItem == null) {
                             if (!currentTrailerAudioUrl.isNullOrBlank()) {
                                 val mediaSourceFactory = DefaultMediaSourceFactory(YoutubeChunkedDataSourceFactory())
-                                val videoSource = mediaSourceFactory.createMediaSource(MediaItem.fromUri(currentTrailerUrl!!))
+                                val videoSource = mediaSourceFactory.createMediaSource(buildTrailerMediaItem(currentTrailerUrl!!, currentSubtitleTrack))
                                 val audioSource = mediaSourceFactory.createMediaSource(MediaItem.fromUri(currentTrailerAudioUrl!!))
                                 player.setMediaSource(MergingMediaSource(videoSource, audioSource))
                             } else {
-                                player.setMediaItem(MediaItem.fromUri(currentTrailerUrl!!))
+                                player.setMediaItem(buildTrailerMediaItem(currentTrailerUrl!!, currentSubtitleTrack))
                             }
                             player.prepare()
+                            resolvedPool?.onMediaLoaded(ownerToken, currentTrailerUrl!!)
                         }
                         player.playWhenReady = true
                     }
@@ -260,8 +362,9 @@ fun TrailerPlayer(
         onDispose {
             runCatching { activityLifecycleOwner.lifecycle.removeObserver(observer) }
             runCatching { player.removeListener(listener) }
+            subtitleCues = StyledSubtitleCues()
             // Only stop — never release. The pool manages the ExoPlayer lifecycle.
-            resolvedPool?.stop()
+            resolvedPool?.stopIfOwner(ownerToken)
         }
     }
 
@@ -271,48 +374,74 @@ fun TrailerPlayer(
             enter = enter,
             exit = exit
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    (LayoutInflater.from(ctx).inflate(R.layout.trailer_player_view, null) as PlayerView).apply {
-                        playerViewRef.value = this
-                        player = trailerPlayer
-                        isFocusable = false
-                        isFocusableInTouchMode = false
-                        setOnKeyListener { _, keyCode, event ->
-                            currentOnRemoteKey(keyCode, event.action, event.repeatCount)
+            // Keep caption geometry independent of video-only overscan/letterbox zoom.
+            Box(modifier = modifier.clipToBounds().graphicsLayer { alpha = playerAlphaState.value }) {
+                AndroidView(
+                    factory = { ctx ->
+                        (LayoutInflater.from(ctx).inflate(R.layout.trailer_player_view, null) as PlayerView).apply {
+                            playerViewRef.value = this
+                            player = trailerPlayer
+                            isFocusable = false
+                            isFocusableInTouchMode = false
+                            setOnKeyListener { _, keyCode, event ->
+                                currentOnRemoteKey(keyCode, event.action, event.repeatCount)
+                            }
+                            keepScreenOn = true
+                            // Reshaped's shared overlay also preserves imported fonts, outline width,
+                            // rounded backgrounds, shadow size and vertical position for trailers.
+                            subtitleView?.visibility = View.INVISIBLE
+                            resizeMode = if (cropToFill) {
+                                AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            } else {
+                                AspectRatioFrameLayout.RESIZE_MODE_FIT
+                            }
                         }
-                        keepScreenOn = true
-                        resizeMode = if (cropToFill) {
+                    },
+                    update = { view ->
+                        // Re-attach player in case it was reclaimed after yield
+                        if (view.player !== trailerPlayer) {
+                            view.player = trailerPlayer
+                        }
+                        view.resizeMode = if (cropToFill) {
                             AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         } else {
                             AspectRatioFrameLayout.RESIZE_MODE_FIT
                         }
-                    }
-                },
-                update = { view ->
-                    // Re-attach player in case it was reclaimed after yield
-                    if (view.player !== trailerPlayer) {
-                        view.player = trailerPlayer
-                    }
-                    view.resizeMode = if (cropToFill) {
-                        AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    } else {
-                        AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    }
-                },
-                onRelease = { view ->
-                    playerViewRef.value = null
-                    view.player = null
-                    view.keepScreenOn = false
-                },
-                modifier = modifier
-                    .clipToBounds()
-                    .graphicsLayer {
-                        alpha = playerAlphaState.value
-                        scaleX = zoomScale * letterboxZoomState.value
-                        scaleY = zoomScale * letterboxZoomState.value
-                    }
-            )
+                    },
+                    onRelease = { view ->
+                        playerViewRef.value = null
+                        view.player = null
+                        view.keepScreenOn = false
+                    },
+                    modifier = Modifier.fillMaxSize()
+                        .onGloballyPositioned { coordinates ->
+                            val bounds = coordinates.boundsInWindow()
+                            lastBounds[0] = bounds
+                            resolvedPool?.onOwnerBounds(ownerToken, bounds)
+                        }
+                        .clipToBounds()
+                        .graphicsLayer {
+                            scaleX = zoomScale * letterboxZoomState.value
+                            scaleY = zoomScale * letterboxZoomState.value
+                        }
+                )
+                StyledSubtitleOverlay(
+                    cues = subtitleCues,
+                    style = renderedSubtitleStyle,
+                    textSizePx = subtitleTextSizePx,
+                    liftPx = 0f,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }
+
+private fun Rect.coversView(viewWidth: Int, viewHeight: Int): Boolean {
+    if (viewWidth <= 0 || viewHeight <= 0) return false
+    val coveredWidth = (min(right, viewWidth.toFloat()) - max(left, 0f)).coerceAtLeast(0f)
+    val coveredHeight = (min(bottom, viewHeight.toFloat()) - max(top, 0f)).coerceAtLeast(0f)
+    return coveredWidth * coveredHeight >= viewWidth * viewHeight * FULL_SCREEN_SOURCE_COVERAGE
+}
+
+private const val FULL_SCREEN_SOURCE_COVERAGE = 0.95f
