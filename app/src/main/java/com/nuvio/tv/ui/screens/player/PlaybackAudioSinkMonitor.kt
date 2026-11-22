@@ -181,9 +181,9 @@ internal class PlaybackAudioSinkMonitor(
             if (isAudioClockGap(playbackActive, wallDeltaMs, posDeltaMs - expectedMs)) {
                 val held = gapLimiter.take(nowMs)
                 if (held >= 0) {
-                    PlaybackRecorder.event(
-                        com.nuvio.tv.core.report.RecorderEvent.AUDIO_CLOCK_GAP,
-                        "wallMs=$wallDeltaMs audioMs=$posDeltaMs offMs=${posDeltaMs - expectedMs} atAudioMs=${positionUs / 1_000L}" +
+                    android.util.Log.w(
+                        "PlaybackAudioSink",
+                        "audio clock gap wallMs=$wallDeltaMs audioMs=$posDeltaMs offMs=${posDeltaMs - expectedMs} atAudioMs=${positionUs / 1_000L}" +
                             if (held > 0) " heldBack=$held" else ""
                     )
                 }
