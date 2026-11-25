@@ -71,6 +71,13 @@ fun V2TopNavigation(
     onExit: () -> Unit
 ) {
     val visible = currentRoute in rootRoutes
+    // Live TV fork: the guide and Sports play video full screen inside their own page, so the
+    // bar stays out of the way there; Back/Left on those pages (LocalOpenSidebar) brings it up
+    // over the page, and it goes again once focus leaves it.
+    val immersive = currentRoute == com.nuvio.tv.ui.navigation.Screen.LiveTv.route ||
+        currentRoute == com.nuvio.tv.ui.navigation.Screen.Sports.route
+    var revealed by remember { mutableStateOf(false) }
+    val barShown = visible && (!immersive || revealed)
     val contentFocus = remember { FocusRequester() }
     val routes = items.map { it.route }
     val routeFocus = remember(routes) { routes.associateWith { FocusRequester() } }
@@ -80,7 +87,16 @@ fun V2TopNavigation(
     val entryFocus = routeFocus[lastRoute] ?: routeFocus[selectedRoute] ?: routeFocus.values.first()
 
     // Destination BackHandlers are composed later and retain priority for sheets/settings.
-    BackHandler(enabled = visible) {
+    LaunchedEffect(currentRoute) { revealed = false }
+    LaunchedEffect(navFocused) { if (!navFocused) revealed = false }
+    var focusBarRequest by remember { mutableStateOf(0) }
+    LaunchedEffect(focusBarRequest) {
+        if (focusBarRequest > 0) {
+            repeat(2) { withFrameNanos { } }
+            runCatching { entryFocus.requestFocus() }
+        }
+    }
+    BackHandler(enabled = barShown) {
         if (navFocused) onExit() else entryFocus.requestFocus()
     }
     LaunchedEffect(returnToContent, currentRoute) {
@@ -91,20 +107,23 @@ fun V2TopNavigation(
         }
     }
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().padding(top = if (visible) 54.dp else 0.dp)
+        Box(Modifier.fillMaxSize().padding(top = if (visible && !immersive) 54.dp else 0.dp)
             .focusRequester(contentFocus).focusRestorer()
             .focusProperties {
                 this.onExit = {
-                    if (visible && requestedFocusDirection == FocusDirection.Up) entryFocus.requestFocus()
+                    if (barShown && requestedFocusDirection == FocusDirection.Up) entryFocus.requestFocus()
                 }
             }.focusGroup()) {
             CompositionLocalProvider(LocalContentFocusRequester provides contentFocus,
                 LocalSidebarExpanded provides navFocused,
-                LocalV2TopChrome provides visible) {
+                LocalV2TopChrome provides (visible && !immersive),
+                com.nuvio.tv.LocalOpenSidebar provides {
+                    if (visible) { revealed = true; focusBarRequest++ }
+                }) {
                 navigationContent(true)
             }
         }
-        if (visible) {
+        if (barShown) {
             NuvioGlassSurface(GlassRole.NAVIGATION,
                 Modifier.align(Alignment.TopCenter).padding(horizontal = 36.dp, vertical = 10.dp).fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)) {

@@ -547,7 +547,13 @@ open class MainActivity : ComponentActivity() {
                         screensaverController.notifyInteraction()
                         while (true) {
                             delay(1_000)
-                            screensaverController.maybeEngage(minutes * 60_000L)
+                            // Live TV fork: a channel playing (guide preview, full screen, Sports
+                            // window) counts as watching; its player never reports to the controller.
+                            if (com.nuvio.tv.livetv.player.LiveWatching.active.value != null) {
+                                screensaverController.notifyInteraction()
+                            } else {
+                                screensaverController.maybeEngage(minutes * 60_000L)
+                            }
                         }
                     }
             }
@@ -1102,9 +1108,9 @@ open class MainActivity : ComponentActivity() {
                     val openOnRoute = remember { com.nuvio.tv.livetv.startup.StartPage.cachedRoute(this@MainActivity) }
                     val startDestination = when {
                         needsExperienceSelection -> Screen.ExperienceModeSelection.route
-                        layoutChosen -> Screen.Home.route
+                        layoutChosen -> openOnRoute ?: Screen.Home.route
                         // The fork has one layout, so the layout picker is bypassed.
-                        else -> Screen.Home.route
+                        else -> openOnRoute ?: Screen.Home.route
                     }
                     val navController = rememberNavController()
                     // Back stack ViewModels live in a store of their own that ends with this
@@ -1434,6 +1440,32 @@ open class MainActivity : ComponentActivity() {
                     val recordingsFromGuide = currentRoute == Screen.Recordings.route &&
                         navController.previousBackStackEntry?.destination?.route == Screen.LiveTv.route
                     val sportsInSidebar = sportsRepository.settings.collectAsState().value.showInSidebar
+                    // Live TV fork: Settings → Menu & Features (order, pages taken off, thin line,
+                    // Home off once the app opens on another page). Lost in the Arc merge.
+                    val sideMenuOrder = liveTvSettingsNow.sideMenuOrder
+                    val sideMenuHidden = liveTvSettingsNow.sideMenuHidden
+                    val sideMenuLine = liveTvSettingsNow.sideMenuLine
+                    val startRouteNow = com.nuvio.tv.livetv.startup.StartPage.routeFor(liveTvSettingsNow, sportsInSidebar)
+                    val homeHidden = startRouteNow != null && com.nuvio.tv.livetv.calendar.SideMenuPages.HOME in
+                        com.nuvio.tv.livetv.calendar.SideMenuPages.hidden(sideMenuHidden)
+                    androidx.compose.runtime.DisposableEffect(navController, homeHidden, startRouteNow) {
+                        val main = android.os.Handler(android.os.Looper.getMainLooper())
+                        val listener = androidx.navigation.NavController.OnDestinationChangedListener { controller, destination, _ ->
+                            val target = startRouteNow
+                            if (homeHidden && target != null && destination.route == Screen.Home.route) {
+                                main.post {
+                                    runCatching {
+                                        controller.navigate(target) {
+                                            popUpTo(Screen.Home.route) { inclusive = true }
+                                            launchSingleTop = true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        navController.addOnDestinationChangedListener(listener)
+                        onDispose { navController.removeOnDestinationChangedListener(listener) }
+                    }
                     val drawerItems = remember(
                         strNavHome,
                         strNavDiscover,
@@ -1448,32 +1480,39 @@ open class MainActivity : ComponentActivity() {
                         onDemandInSidebar,
                         recordingNow,
                         recordingsInSidebar,
-                        sportsInSidebar
+                        sportsInSidebar,
+                        homeHidden,
+                        sideMenuOrder,
+                        sideMenuHidden,
+                        sideMenuLine
                     ) {
+                        val pages = com.nuvio.tv.livetv.calendar.SideMenuPages
+                        val hiddenPages = pages.hidden(sideMenuHidden)
+                        fun page(id: String): DrawerItem? = when (id) {
+                            pages.HOME -> if (!homeHidden) DrawerItem(route = Screen.Home.route, label = strNavHome, icon = Icons.Default.Home) else null
+                            pages.DISCOVER -> if (discoverLocation == DiscoverLocation.IN_SIDEBAR && id !in hiddenPages) {
+                                DrawerItem(route = Screen.Discover.route, label = strNavDiscover, icon = Icons.Default.Explore)
+                            } else null
+                            pages.SEARCH -> if (id !in hiddenPages) DrawerItem(route = Screen.Search.route, label = strNavSearch, iconRes = R.raw.sidebar_search) else null
+                            pages.LIBRARY -> if (id !in hiddenPages) DrawerItem(route = Screen.Library.route, label = strNavLibrary, iconRes = R.raw.sidebar_library) else null
+                            pages.CALENDAR -> if (calendarInMenu && id !in hiddenPages) DrawerItem(route = Screen.Calendar.route, label = strNavCalendar, icon = Icons.Default.CalendarMonth) else null
+                            pages.LIVE_TV -> if (liveTvInSidebar && id !in hiddenPages) DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv, badge = recordingNow && !recordingsInSidebar) else null
+                            pages.RECORDINGS -> if (recordingsInSidebar && id !in hiddenPages) DrawerItem(route = Screen.Recordings.route, label = "Recordings", icon = Icons.Default.RadioButtonChecked, badge = recordingNow) else null
+                            pages.SPORTS -> if (sportsInSidebar && id !in hiddenPages) DrawerItem(route = Screen.Sports.route, label = "Sports", icon = Icons.Default.EmojiEvents) else null
+                            pages.ON_DEMAND -> if (onDemandInSidebar && id !in hiddenPages) DrawerItem(route = Screen.OnDemand.route, label = "On Demand", icon = Icons.Default.VideoLibrary) else null
+                            else -> null
+                        }
                         buildList {
-                            add(DrawerItem(route = Screen.Home.route, label = strNavHome, icon = Icons.Default.Home))
-                            if (discoverLocation == DiscoverLocation.IN_SIDEBAR) {
-                                add(DrawerItem(route = Screen.Discover.route, label = strNavDiscover, icon = Icons.Default.Explore))
-                            }
-                            add(DrawerItem(route = Screen.Search.route, label = strNavSearch, iconRes = R.raw.sidebar_search))
-                            if (scoutInMenu) {
-                                add(DrawerItem(route = Screen.Scout.route, label = strNavScout, iconRes = R.raw.sidebar_scout))
-                            }
-                            add(DrawerItem(route = Screen.Library.route, label = strNavLibrary, iconRes = R.raw.sidebar_library))
-                            if (calendarInMenu) {
-                                add(DrawerItem(route = Screen.Calendar.route, label = strNavCalendar, icon = Icons.Default.CalendarMonth))
-                            }
-                            if (liveTvInSidebar) {
-                                add(DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv, badge = recordingNow && !recordingsInSidebar))
-                            }
-                            if (recordingsInSidebar) {
-                                add(DrawerItem(route = Screen.Recordings.route, label = "Recordings", icon = Icons.Default.RadioButtonChecked, badge = recordingNow))
-                            }
-                            if (sportsInSidebar) {
-                                add(DrawerItem(route = Screen.Sports.route, label = "Sports", icon = Icons.Default.EmojiEvents))
-                            }
-                            if (onDemandInSidebar) {
-                                add(DrawerItem(route = Screen.OnDemand.route, label = "On Demand", icon = Icons.Default.VideoLibrary))
+                            var lineDone = false
+                            pages.order(sideMenuOrder).forEach { id ->
+                                val item = page(id) ?: return@forEach
+                                val line = sideMenuLine && !lineDone && id in pages.LIVE_FAMILY && isNotEmpty()
+                                if (id in pages.LIVE_FAMILY) lineDone = true
+                                add(if (line) item.copy(sectionStart = true) else item)
+                                // Arc's Scout has no entry in Menu & Features: it stays right after Search.
+                                if (id == pages.SEARCH && scoutInMenu) {
+                                    add(DrawerItem(route = Screen.Scout.route, label = strNavScout, iconRes = R.raw.sidebar_scout))
+                                }
                             }
                             add(
                                 DrawerItem(
