@@ -27,12 +27,11 @@ jobs:
           path: |
             ~/.gradle/caches/build-cache-1
             app/.cxx
-          key: iec-build-cache-${{ runner.os }}-${{ github.sha }}
-          restore-keys: iec-build-cache-${{ runner.os }}-
+          key: nokeys-build-cache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: nokeys-build-cache-${{ runner.os }}-
 
       - name: Prepare local properties
         env:
-          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
           TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
           TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
           MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
@@ -51,7 +50,7 @@ jobs:
               echo "IMDB_TAPFRAME_API_BASE_URL=https://imdb.tapframe.space/"
             } >> "$f"
           done
-          for key in SIMKL_CLIENT_ID TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET MDBLIST_CLIENT_ID; do
+          for key in TRAKT_CLIENT_ID TRAKT_CLIENT_SECRET MDBLIST_CLIENT_ID; do
             value="${!key}"
             if [ -n "$value" ]; then
               echo "$key=$value" >> local.properties
@@ -105,7 +104,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nuvio-iec-armeabi-v7a
+          name: nuvio-arc-iptv-nokeys-armeabi-v7a
           path: app/build/outputs/apk/full/debug/*armeabi-v7a*.apk
           if-no-files-found: error
 
