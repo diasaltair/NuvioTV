@@ -265,7 +265,8 @@ class HomeEnrichmentRepositoryBoundaryTest {
             prefetchSelectionSupplier = mockk(relaxed = true),
             streamRepository = mockk(relaxed = true),
             trailerSettingsDataStore = mockk(relaxed = true),
-            serverCatalog = mockk(relaxed = true)
+            serverCatalog = mockk(relaxed = true),
+            homeLiveRows = com.nuvio.tv.testing.testHomeLiveRows()
         )
         viewModel.startupGracePeriodActive = false
         viewModel.externalMetaPrefetchEnabled = true

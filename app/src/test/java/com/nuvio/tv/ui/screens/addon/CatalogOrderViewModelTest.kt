@@ -49,7 +49,7 @@ class CatalogOrderViewModelTest {
         val addons = mockk<AddonRepository> { every { getInstalledAddons() } returns flowOf(listOf(addon)) }
         val collections = mockk<CollectionsDataStore> { every { this@mockk.collections } returns flowOf(emptyList()) }
         val sync = mockk<HomeCatalogSettingsSyncService>(relaxed = true)
-        val vm = CatalogOrderViewModel(addons, collections, layout, sync, mockk { every { this@mockk.addons } returns flowOf(emptyList()) })
+        val vm = CatalogOrderViewModel(addons, collections, layout, sync, mockk { every { this@mockk.addons } returns flowOf(emptyList()) }, homeLiveRows = com.nuvio.tv.testing.testHomeLiveRows())
         try {
             advanceUntilIdle()
             val initial = vm.uiState.value.items

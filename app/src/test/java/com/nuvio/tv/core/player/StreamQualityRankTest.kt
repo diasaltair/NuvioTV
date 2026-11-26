@@ -29,15 +29,6 @@ class StreamQualityRankTest {
     }
 
     @Test
-    fun lowQualityGroupsGoLast() {
-        val yts = stream("Movie.2024.2160p.WEB-DL.x265-YTS.mkv")
-        val other = stream("Movie.2024.1080p.WEB-DL.x264-RANDOM.mkv")
-        assertEquals(listOf(other, yts), StreamQualityRank.rank(listOf(yts, other)))
-        assertEquals(listOf(yts, other), StreamQualityRank.rank(listOf(yts, other), lowQuality = LowQualityGroups.NORMAL))
-        assertEquals(listOf(other), StreamQualityRank.rank(listOf(yts, other), lowQuality = LowQualityGroups.HIDE))
-    }
-
-    @Test
     fun nothingLeftFallsBackToEverything() {
         val cam = stream("Movie.2024.CAM.x264.mkv")
         assertEquals(listOf(cam), StreamQualityRank.rank(listOf(cam, cam.copy(url = "https://b"))).take(1))

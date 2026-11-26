@@ -279,7 +279,8 @@ class HomeContinueWatchingOwnershipTest {
             prefetchSelectionSupplier = mockk(relaxed = true),
             streamRepository = mockk(relaxed = true),
             trailerSettingsDataStore = mockk(relaxed = true),
-            serverCatalog = mockk { every { addons } returns flowOf(emptyList()); every { artworkUpdates } returns MutableStateFlow(0L) }
+            serverCatalog = mockk { every { addons } returns flowOf(emptyList()); every { artworkUpdates } returns MutableStateFlow(0L) },
+            homeLiveRows = com.nuvio.tv.testing.testHomeLiveRows()
         )
         viewModel.startupGracePeriodActive = false
         viewModel.externalMetaPrefetchEnabled = true

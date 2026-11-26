@@ -479,7 +479,8 @@ class HomeEnrichmentRetryTest {
             prefetchSelectionSupplier = mockk(relaxed = true),
             streamRepository = mockk(relaxed = true),
             trailerSettingsDataStore = mockk(relaxed = true),
-            serverCatalog = mockk(relaxed = true)
+            serverCatalog = mockk(relaxed = true),
+            homeLiveRows = com.nuvio.tv.testing.testHomeLiveRows()
         )
         // The pipeline defers everything while the startup grace period is active, and TMDB is
         // switched off so the external addon is the only enrichment source under test.

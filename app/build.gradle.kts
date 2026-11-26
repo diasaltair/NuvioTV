@@ -231,7 +231,9 @@ android {
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("debug")
+            // A fixed key when one is given (CI's NUVIO_RELEASE_STORE_FILE): Android's debug key is
+            // made fresh on every CI runner, so each build refused to install over the previous one.
+            signingConfig = if (releaseStoreFilePath != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
             isDebuggable = parseBooleanProperty(providers.gradleProperty("debuggable").orNull)
             isMinifyEnabled = false
 
