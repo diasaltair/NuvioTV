@@ -1720,9 +1720,16 @@ internal class SportsMatcher(
          * [list] (in order) with each channel's copies together: one entry per channel, the first
          * copy in the list leading (or [playingKey]'s, while it plays).
          */
+        private const val FOLD_COPIES = false
+
         fun groupCopies(list: List<ChannelMatch>, playingKey: String? = null): List<List<ChannelMatch>> {
             val groups = LinkedHashMap<String, MutableList<ChannelMatch>>()
-            list.forEach { m -> groups.getOrPut(copyKey(m.channel).ifBlank { m.channel.key }) { ArrayList() } += m }
+            // Owner's build: every channel gets its own row (SporTV and SporTV [4K] both listed),
+            // no folding of copies into "+1". Set FOLD_COPIES to bring the folding back.
+            list.forEach { m ->
+                val key = if (FOLD_COPIES) copyKey(m.channel).ifBlank { m.channel.key } else m.channel.key
+                groups.getOrPut(key) { ArrayList() } += m
+            }
             return groups.values.map { g ->
                 val i = g.indexOfFirst { it.channel.key == playingKey }
                 if (i > 0) listOf(g[i]) + g.filterIndexed { j, _ -> j != i } else g
