@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,36 +70,42 @@ fun V2TopNavigation(
     profile: AvatarModel?,
     onNavigate: (String) -> Unit,
     onSwitchProfile: () -> Unit,
-    onExit: () -> Unit
+    onExit: () -> Unit,
+    /** Live TV fork: a channel is full screen inside its page; the bar steps aside (as the sidebars do). */
+    immersive: Boolean = false
 ) {
-    val visible = currentRoute in rootRoutes
-    // Live TV fork: the guide and Sports play video full screen inside their own page, so the
-    // bar stays out of the way there; Back/Left on those pages (LocalOpenSidebar) brings it up
-    // over the page, and it goes again once focus leaves it.
-    val immersive = currentRoute == com.nuvio.tv.ui.navigation.Screen.LiveTv.route ||
-        currentRoute == com.nuvio.tv.ui.navigation.Screen.Sports.route
-    var revealed by remember { mutableStateOf(false) }
-    val barShown = visible && (!immersive || revealed)
+    val visible = currentRoute in rootRoutes && !immersive
     val contentFocus = remember { FocusRequester() }
     val routes = items.map { it.route }
     val routeFocus = remember(routes) { routes.associateWith { FocusRequester() } }
     var lastRoute by remember { mutableStateOf(selectedRoute) }
     var navFocused by remember { mutableStateOf(false) }
     var returnToContent by remember { mutableStateOf(false) }
-    val entryFocus = routeFocus[lastRoute] ?: routeFocus[selectedRoute] ?: routeFocus.values.first()
-
-    // Destination BackHandlers are composed later and retain priority for sheets/settings.
-    LaunchedEffect(currentRoute) { revealed = false }
-    LaunchedEffect(navFocused) { if (!navFocused) revealed = false }
-    var focusBarRequest by remember { mutableStateOf(0) }
+    val listState = rememberLazyListState()
+    // Focus the bar's entry for the page (or the last one used). The LazyRow may not have that
+    // item composed (scrolled away): scroll to it first, and fall back to the first entry.
+    var focusBarRequest by remember { mutableIntStateOf(0) }
     LaunchedEffect(focusBarRequest) {
-        if (focusBarRequest > 0) {
-            repeat(2) { withFrameNanos { } }
-            runCatching { entryFocus.requestFocus() }
+        if (focusBarRequest == 0 || !visible) return@LaunchedEffect
+        val target = listOf(lastRoute, selectedRoute).firstOrNull { it != null && it in routeFocus }
+        val index = target?.let { routes.indexOf(it) } ?: 0
+        runCatching { listState.scrollToItem(index.coerceAtLeast(0)) }
+        withFrameNanos { }
+        val ok = runCatching { routeFocus[target]?.requestFocus() == true }.getOrDefault(false)
+        if (!ok) {
+            runCatching { listState.scrollToItem(0) }
+            withFrameNanos { }
+            runCatching { routeFocus.values.firstOrNull()?.requestFocus() }
         }
     }
-    BackHandler(enabled = barShown) {
-        if (navFocused) onExit() else entryFocus.requestFocus()
+    // The bar leaving with focus in it (a channel going full screen) must not leave the pages
+    // thinking the menu is still open (their Back handlers are off while it is).
+    LaunchedEffect(visible) { if (!visible) navFocused = false }
+    val openBar = remember { { focusBarRequest++; Unit } }
+
+    // Destination BackHandlers are composed later and retain priority for sheets/settings.
+    BackHandler(enabled = visible) {
+        if (navFocused) onExit() else openBar()
     }
     LaunchedEffect(returnToContent, currentRoute) {
         if (returnToContent) {
@@ -107,23 +115,22 @@ fun V2TopNavigation(
         }
     }
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().padding(top = if (visible && !immersive) 54.dp else 0.dp)
+        Box(Modifier.fillMaxSize().padding(top = if (visible) 54.dp else 0.dp)
             .focusRequester(contentFocus).focusRestorer()
             .focusProperties {
                 this.onExit = {
-                    if (barShown && requestedFocusDirection == FocusDirection.Up) entryFocus.requestFocus()
+                    if (visible && requestedFocusDirection == FocusDirection.Up) openBar()
                 }
             }.focusGroup()) {
             CompositionLocalProvider(LocalContentFocusRequester provides contentFocus,
                 LocalSidebarExpanded provides navFocused,
-                LocalV2TopChrome provides (visible && !immersive),
-                com.nuvio.tv.LocalOpenSidebar provides {
-                    if (visible) { revealed = true; focusBarRequest++ }
-                }) {
+                LocalV2TopChrome provides visible,
+                // Live TV fork: the guide, Sports, On Demand and Calendar open the menu on Back.
+                com.nuvio.tv.LocalOpenSidebar provides openBar) {
                 navigationContent(true)
             }
         }
-        if (barShown) {
+        if (visible) {
             NuvioGlassSurface(GlassRole.NAVIGATION,
                 Modifier.align(Alignment.TopCenter).padding(horizontal = 36.dp, vertical = 10.dp).fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)) {
@@ -131,7 +138,7 @@ fun V2TopNavigation(
                     .onFocusChanged { navFocused = it.hasFocus }.focusGroup(),
                     verticalAlignment = Alignment.CenterVertically) {
                     com.nuvio.tv.ui.v2.components.V2Wordmark(modifier = Modifier.width(116.dp).height(30.dp))
-                    LazyRow(Modifier.weight(1f), contentPadding = PaddingValues(4.dp),
+                    LazyRow(Modifier.weight(1f), state = listState, contentPadding = PaddingValues(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
                         items(items, key = { it.route }) { item ->
                             val isSelected = item.route == selectedRoute

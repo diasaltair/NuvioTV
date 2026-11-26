@@ -75,11 +75,22 @@ class ScreensaverController @Inject constructor(
         }
     }
 
+    @Volatile
+    private var liveHold: Boolean = false
+
+    /** Live TV fork: a channel playing holds the overlay off, like [setPlaybackActive] (without its other listeners). */
+    fun setLiveHold(on: Boolean) {
+        if (liveHold == on) return
+        liveHold = on
+        if (on) notifyWake() else notifyInteraction()
+    }
+
     /** Called at ~1 Hz. Engages the overlay only when every condition holds. */
     fun maybeEngage(timeoutMs: Long) {
         if (_overlayVisible.value) return
         if (!windowFocused) return
         if (_playbackActive.value) return
+        if (liveHold) return
         if (SystemClock.elapsedRealtime() - _lastInteractionAt.value < timeoutMs) return
         _overlayVisible.value = true
         trailerPlayerPool.setScreensaverSuppressed(true)

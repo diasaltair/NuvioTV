@@ -107,19 +107,13 @@ fun SideMenuSettingsContent(initialFocusRequester: FocusRequester? = null) {
             "Discover", "Browse by genre, network and more", discover != DiscoverLocation.OFF,
             value = when (discover) { DiscoverLocation.IN_SIDEBAR -> "In the menu"; DiscoverLocation.IN_SEARCH -> "Inside Search"; DiscoverLocation.OFF -> "Off" }
         ) { dialog = "discover" }
-        SideMenuPages.CALENDAR -> {
-            val mode = when { id in hidden -> "OFF"; s.calendarInMenu -> "ALWAYS"; else -> "BELL" }
-            PageRow(
-                "Calendar",
-                when (mode) {
-                    "OFF" -> "Off: no bells on show pages, no new-episode cards on Home"
-                    "ALWAYS" -> "Release dates of your shows and movies, bells on show pages and new-episode cards on Home"
-                    else -> "Shows up in the menu by itself once your shows (watch history, Library or a bell) have episodes coming"
-                },
-                mode != "OFF",
-                value = when (mode) { "OFF" -> "Off"; "ALWAYS" -> "Always in the menu"; else -> "Automatic" }
-            ) { dialog = "calendar" }
-        }
+        // Arc + IPTV build: the menu's Calendar is Arc's (its own options are in Settings → Calendar);
+        // here it's just on or off (off also drops the bells and new-episode cards).
+        SideMenuPages.CALENDAR -> PageRow(
+            "Calendar",
+            "Release dates of your shows and movies, bells on show pages and new-episode cards on Home",
+            id !in hidden
+        ) { setHidden(id, id !in hidden) }
         SideMenuPages.LIVE_TV -> PageRow("Live TV", "The guide, Recordings, the Live TV row on Home and channels in Search", s.showInSidebar) {
             update { it.copy(showInSidebar = !it.showInSidebar) }
         }

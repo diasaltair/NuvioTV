@@ -547,16 +547,16 @@ open class MainActivity : ComponentActivity() {
                         screensaverController.notifyInteraction()
                         while (true) {
                             delay(1_000)
-                            // Live TV fork: a channel playing (guide preview, full screen, Sports
-                            // window) counts as watching; its player never reports to the controller.
-                            if (com.nuvio.tv.livetv.player.LiveWatching.active.value != null) {
-                                screensaverController.notifyInteraction()
-                            } else {
-                                screensaverController.maybeEngage(minutes * 60_000L)
-                            }
+                            screensaverController.maybeEngage(minutes * 60_000L)
                         }
                     }
             }
+        }
+
+        // Live TV fork: a channel actually playing (guide preview, full screen, Sports window)
+        // holds off the idle dimmer; paused or stalled, the idle count starts over.
+        lifecycleScope.launch {
+            com.nuvio.tv.livetv.player.LiveWatching.playing.collect { screensaverController.setLiveHold(it) }
         }
 
         window?.decorView?.post {
@@ -1108,7 +1108,6 @@ open class MainActivity : ComponentActivity() {
                     val openOnRoute = remember { com.nuvio.tv.livetv.startup.StartPage.cachedRoute(this@MainActivity) }
                     val startDestination = when {
                         needsExperienceSelection -> Screen.ExperienceModeSelection.route
-                        layoutChosen -> openOnRoute ?: Screen.Home.route
                         // The fork has one layout, so the layout picker is bypassed.
                         else -> openOnRoute ?: Screen.Home.route
                     }
@@ -1473,6 +1472,7 @@ open class MainActivity : ComponentActivity() {
                         strNavLibrary,
                         strNavSettings,
                         strNavCalendar,
+                        strNavScout,
                         discoverLocation,
                         calendarInMenu,
                         scoutInMenu,
@@ -1490,26 +1490,29 @@ open class MainActivity : ComponentActivity() {
                         val hiddenPages = pages.hidden(sideMenuHidden)
                         fun page(id: String): DrawerItem? = when (id) {
                             pages.HOME -> if (!homeHidden) DrawerItem(route = Screen.Home.route, label = strNavHome, icon = Icons.Default.Home) else null
-                            pages.DISCOVER -> if (discoverLocation == DiscoverLocation.IN_SIDEBAR && id !in hiddenPages) {
+                            pages.DISCOVER -> if (discoverLocation == DiscoverLocation.IN_SIDEBAR) {
                                 DrawerItem(route = Screen.Discover.route, label = strNavDiscover, icon = Icons.Default.Explore)
                             } else null
                             pages.SEARCH -> if (id !in hiddenPages) DrawerItem(route = Screen.Search.route, label = strNavSearch, iconRes = R.raw.sidebar_search) else null
                             pages.LIBRARY -> if (id !in hiddenPages) DrawerItem(route = Screen.Library.route, label = strNavLibrary, iconRes = R.raw.sidebar_library) else null
                             pages.CALENDAR -> if (calendarInMenu && id !in hiddenPages) DrawerItem(route = Screen.Calendar.route, label = strNavCalendar, icon = Icons.Default.CalendarMonth) else null
-                            pages.LIVE_TV -> if (liveTvInSidebar && id !in hiddenPages) DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv, badge = recordingNow && !recordingsInSidebar) else null
-                            pages.RECORDINGS -> if (recordingsInSidebar && id !in hiddenPages) DrawerItem(route = Screen.Recordings.route, label = "Recordings", icon = Icons.Default.RadioButtonChecked, badge = recordingNow) else null
-                            pages.SPORTS -> if (sportsInSidebar && id !in hiddenPages) DrawerItem(route = Screen.Sports.route, label = "Sports", icon = Icons.Default.EmojiEvents) else null
-                            pages.ON_DEMAND -> if (onDemandInSidebar && id !in hiddenPages) DrawerItem(route = Screen.OnDemand.route, label = "On Demand", icon = Icons.Default.VideoLibrary) else null
+                            pages.LIVE_TV -> if (liveTvInSidebar) DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv, badge = recordingNow && !recordingsInSidebar) else null
+                            pages.RECORDINGS -> if (recordingsInSidebar) DrawerItem(route = Screen.Recordings.route, label = "Recordings", icon = Icons.Default.RadioButtonChecked, badge = recordingNow) else null
+                            pages.SPORTS -> if (sportsInSidebar) DrawerItem(route = Screen.Sports.route, label = "Sports", icon = Icons.Default.EmojiEvents) else null
+                            pages.ON_DEMAND -> if (onDemandInSidebar) DrawerItem(route = Screen.OnDemand.route, label = "On Demand", icon = Icons.Default.VideoLibrary) else null
                             else -> null
                         }
                         buildList {
                             var lineDone = false
                             pages.order(sideMenuOrder).forEach { id ->
-                                val item = page(id) ?: return@forEach
-                                val line = sideMenuLine && !lineDone && id in pages.LIVE_FAMILY && isNotEmpty()
-                                if (id in pages.LIVE_FAMILY) lineDone = true
-                                add(if (line) item.copy(sectionStart = true) else item)
-                                // Arc's Scout has no entry in Menu & Features: it stays right after Search.
+                                val item = page(id)
+                                if (item != null) {
+                                    val line = sideMenuLine && !lineDone && id in pages.LIVE_FAMILY && isNotEmpty()
+                                    if (id in pages.LIVE_FAMILY) lineDone = true
+                                    add(if (line) item.copy(sectionStart = true) else item)
+                                }
+                                // Arc's Scout has no entry in Menu & Features: it keeps Search's place,
+                                // shown or not.
                                 if (id == pages.SEARCH && scoutInMenu) {
                                     add(DrawerItem(route = Screen.Scout.route, label = strNavScout, iconRes = R.raw.sidebar_scout))
                                 }
@@ -1596,7 +1599,9 @@ open class MainActivity : ComponentActivity() {
                                         v2ProfilePickerRequested = device.interfaceExperience == com.nuvio.tv.domain.model.InterfaceExperience.NUVIO_V2
                                         hasSelectedProfileThisSession = false
                                     },
-                                    onExit = handleExitApp
+                                    onExit = handleExitApp,
+                                    immersive = com.nuvio.tv.livetv.ui.LiveTvFullscreen.active.collectAsState().value ||
+                                        com.nuvio.tv.livetv.ui.LiveTvFullscreen.pending
                                 )
                             } else if (modernSidebarEnabled) {
                                 ModernSidebarScaffold(
@@ -1717,6 +1722,7 @@ open class MainActivity : ComponentActivity() {
                             val liveTvPlaying by com.nuvio.tv.livetv.player.LiveWatching.active.collectAsState()
                             // Watching counts as activity: the idle wait starts over when it stops.
                             LaunchedEffect(liveTvPlaying) { ambientIdleController.onInteraction() }
+                            val liveTvPlayingNow by com.nuvio.tv.livetv.player.LiveWatching.playing.collectAsState()
                             val isTrailerPlaying by trailerPlayerPool.isTrailerPlaying.collectAsState()
                             val playbackActive by screensaverController.playbackActive.collectAsState()
                             val ambientShowing by ambientIdleController.isShowing.collectAsState()
@@ -1734,6 +1740,7 @@ open class MainActivity : ComponentActivity() {
                                 allowed = !playbackUiActive &&
                                     currentRoute != Screen.LiveTvPlayer.route && currentRoute != Screen.LiveTvMultiview.route &&
                                     currentRoute != Screen.SportsMultiview.route && currentRoute != Screen.LiveTv.route &&
+                                    !liveTvPlayingNow &&
                                     !playbackActive &&
                                     autoNextOverlay == null &&
                                     !isTrailerPlaying &&

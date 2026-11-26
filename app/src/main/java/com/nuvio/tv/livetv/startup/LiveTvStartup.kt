@@ -87,7 +87,7 @@ object StartPage {
 
     private val ROUTES = setOf(
         Screen.LiveTv.route, Screen.OnDemand.route, Screen.Sports.route,
-        Screen.LiveCalendar.route, Screen.Library.route, Screen.Search.route
+        Screen.Calendar.route, Screen.Library.route, Screen.Search.route
     )
 
     /** The page to open on, or null for Home. */
@@ -103,7 +103,7 @@ object StartPage {
             "LIVE_TV" -> Screen.LiveTv.route.takeIf { s.showInSidebar }
             "ON_DEMAND" -> Screen.OnDemand.route.takeIf { s.onDemandEnabled && s.onDemandInSidebar }
             "SPORTS" -> Screen.Sports.route.takeIf { sportsOn }
-            "CALENDAR" -> Screen.LiveCalendar.route.takeIf { com.nuvio.tv.livetv.calendar.SideMenuPages.CALENDAR !in off }
+            "CALENDAR" -> Screen.Calendar.route.takeIf { com.nuvio.tv.livetv.calendar.SideMenuPages.CALENDAR !in off }
             "LIBRARY" -> Screen.Library.route.takeIf { com.nuvio.tv.livetv.calendar.SideMenuPages.LIBRARY !in off }
             "SEARCH" -> Screen.Search.route.takeIf { com.nuvio.tv.livetv.calendar.SideMenuPages.SEARCH !in off }
             else -> null

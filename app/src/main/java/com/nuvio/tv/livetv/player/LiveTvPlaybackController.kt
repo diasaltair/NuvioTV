@@ -2000,6 +2000,7 @@ class LiveTvPlaybackController @Inject constructor(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _state.value = _state.value.copy(isPlaying = isPlaying)
+            LiveWatching.playing.value = isPlaying
         }
 
         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
@@ -2465,7 +2466,9 @@ class LiveTvPlaybackController @Inject constructor(
 object LiveWatching {
     /** Also tells the app a channel is on (Nuvio's idle slideshow stays away while one is). */
     val active = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    /** A channel is actually playing (not paused, buffering or stopped): holds off the idle dimmer. */
+    val playing = kotlinx.coroutines.flow.MutableStateFlow(false)
     var sourceId: String?
         get() = active.value
-        set(value) { active.value = value }
+        set(value) { active.value = value; if (value == null) playing.value = false }
 }
