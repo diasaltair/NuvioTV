@@ -10,7 +10,10 @@ import javax.inject.Singleton
 internal class NoEligibleUpdateException : IllegalStateException("No compatible fork update found")
 
 @Singleton
-class UpdateRepository @Inject constructor(private val gitHubReleaseApi: GitHubReleaseApi) {
+class UpdateRepository @Inject constructor(
+    private val gitHubReleaseApi: GitHubReleaseApi,
+    private val okHttpClient: okhttp3.OkHttpClient
+) {
     // After the repository rename GitHub serves release files under the new name; the old name still redirects.
     private val downloadPrefixes = listOf(BuildConfig.GITHUB_REPO, BuildConfig.GITHUB_REPO_NEW_NAME).map {
         "https://github.com/${BuildConfig.GITHUB_OWNER}/$it/releases/download/"
@@ -20,6 +23,14 @@ class UpdateRepository @Inject constructor(private val gitHubReleaseApi: GitHubR
         supportedAbis: List<String> =
             AbiSelector.installedFirst(android.os.Build.SUPPORTED_ABIS?.toList().orEmpty())
     ): Result<AppUpdate> = try {
+        if (SelfUpdate.enabled) Result.success(SelfUpdate.latest(okHttpClient)) else fromGitHub(supportedAbis)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
+
+    private suspend fun fromGitHub(supportedAbis: List<String>): Result<AppUpdate> = run {
         // List releases includes prereleases; /latest does not. Inspect all pages.
         val releases = mutableListOf<com.nuvio.tv.data.remote.dto.GitHubReleaseDto>()
         var page = 1
@@ -46,9 +57,5 @@ class UpdateRepository @Inject constructor(private val gitHubReleaseApi: GitHubR
             releaseUrl = dto.htmlUrl, assetName = asset.name, assetUrl = asset.browserDownloadUrl,
             assetSizeBytes = asset.size, versionCode = ReleaseSelector.versionCode(dto)
         ))
-    } catch (cancelled: CancellationException) {
-        throw cancelled
-    } catch (error: Exception) {
-        Result.failure(error)
     }
 }

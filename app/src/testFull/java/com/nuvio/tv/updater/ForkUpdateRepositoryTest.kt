@@ -15,7 +15,7 @@ import retrofit2.Response
 
 class ForkUpdateRepositoryTest {
     private val api = mockk<GitHubReleaseApi>()
-    private val repo = UpdateRepository(api)
+    private val repo = UpdateRepository(api, okhttp3.OkHttpClient())
     private val nextCode = BuildConfig.VERSION_CODE + 1L
     private fun asset(abi: String = "arm64-v8a") = GitHubAssetDto(
         "app-full-$abi-release.apk",

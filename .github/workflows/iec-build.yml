@@ -98,10 +98,13 @@ jobs:
           free -h; df -h /
 
       - name: Build fullDebug APK
-        run: ./gradlew :app:assembleFullDebug --stacktrace --no-daemon
+        run: ./gradlew :app:assembleFullDebug -PselfUpdateUrl=https://n.bludev.com.br/update.json --stacktrace --no-daemon
 
       - name: List APKs
-        run: find app/build/outputs/apk -name '*.apk' -exec ls -la {} \;
+        run: |
+          find app/build/outputs/apk -name '*.apk' -exec ls -la {} \;
+          # versionCode/versionName for update.json (self-hosted updates)
+          grep -h -o '"versionCode": [0-9]*\|"versionName": "[^"]*"' app/build/outputs/apk/full/debug/output-metadata.json || true
 
       - uses: actions/upload-artifact@v4
         with:
@@ -112,4 +115,4 @@ jobs:
       - name: Unit tests (IEC keep-alive)
         # Test build: some Arc tests don't know the Live TV constructor parameters yet.
         continue-on-error: true
-        run: ./gradlew :app:testFullDebugUnitTest --tests "*IecKeepAliveTest*" --stacktrace --no-daemon
+        run: ./gradlew :app:testFullDebugUnitTest -PselfUpdateUrl=https://n.bludev.com.br/update.json --tests "*IecKeepAliveTest*" --tests "*SelfUpdateTest*" --stacktrace --no-daemon

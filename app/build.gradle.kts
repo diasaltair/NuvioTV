@@ -426,6 +426,16 @@ if (livetvIsTestBuild) {
     android.sourceSets.getByName("release").res.srcDir("src/livetvTest/res")
 }
 
+// Arc + IPTV self-hosted updates (CI: -PselfUpdateUrl=https://…/update.json). Each such build gets
+// a versionCode from the clock (as test builds), so a newer build is always an upgrade.
+val selfUpdateUrl = ((findProperty("selfUpdateUrl") as String?) ?: "").trim()
+android.defaultConfig.buildConfigField("String", "SELF_UPDATE_URL", buildConfigString(selfUpdateUrl))
+if (selfUpdateUrl.isNotEmpty() && !livetvIsTestBuild) {
+    val minutes: Int = ((System.currentTimeMillis() / 1000L - 1767225600L) / 60L).toInt()
+    android.defaultConfig.versionCode = 200_000_000 + minutes
+    android.defaultConfig.versionName = (android.defaultConfig.versionName ?: "0.0.0") + ".b$minutes"
+}
+
 androidComponents {
     // Test build of Arc + Live TV: its own app ID, installed next to the Nuvio already on the Mi Box.
     onVariants(selector().withBuildType("debug")) { variant ->
