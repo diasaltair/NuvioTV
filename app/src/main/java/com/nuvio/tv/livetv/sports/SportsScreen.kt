@@ -1669,7 +1669,7 @@ private fun GamePage(
                     verticalArrangement = Arrangement.spacedBy(7.dp),
                     contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
                 ) {
-                    itemsIndexed(shownRows, key = { _, g -> SportsMatcher.copyKey(g[0].channel).ifBlank { g[0].channel.key } }) { i, g ->
+                    itemsIndexed(shownRows, key = { _, g -> g[0].channel.key }) { i, g ->
                         val m = g[0]
                         SportsChannelRow(
                             m = m,
