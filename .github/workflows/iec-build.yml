@@ -62,19 +62,18 @@ jobs:
 
       - name: Prepare signing config
         env:
-          KEYSTORE_BASE64: ${{ secrets.NUVIO_IEC_KEYSTORE_BASE64 }}
-          KEY_ALIAS: ${{ secrets.NUVIO_IEC_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.NUVIO_IEC_KEY_PASSWORD }}
+          # Arc + IPTV (com.nuvio.arclive) has its own key; copy in Infisical /nuvio-arc.
+          KEYSTORE_BASE64: ${{ secrets.NUVIO_ARC_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.NUVIO_ARC_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NUVIO_ARC_KEY_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             # Fixed test keystore so every build installs over the previous one.
             printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/ci-debug.jks"
             ALIAS="$KEY_ALIAS"; PASS="$KEY_PASSWORD"
           else
-            keytool -genkeypair -v -keystore "$RUNNER_TEMP/ci-debug.jks" \
-              -storepass android -alias androiddebugkey -keypass android \
-              -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
-            ALIAS=androiddebugkey; PASS=android
+            # A throwaway key makes a build that can't update the installed app: stop instead.
+            echo "::error::NUVIO_ARC_KEYSTORE_BASE64 secret missing"; exit 1
           fi
           {
             echo "NUVIO_RELEASE_STORE_FILE=$RUNNER_TEMP/ci-debug.jks"
