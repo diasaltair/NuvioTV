@@ -749,7 +749,39 @@ class LiveTvPlaybackController @Inject constructor(
         releaseJob?.cancel()
         attachCount++
         if (!watchingFullscreen) { watchingFullscreen = true; watchFullscreen() }
-        return _player ?: buildPlayer().also { _player = it }
+        return (_player ?: buildPlayer().also { _player = it }).also { openSession(it) }
+    }
+
+    /**
+     * The system's view of Live TV playing: a media session, like the movie player has. Without
+     * one, Fire TV (and launchers such as Projectivy) see nothing playing and start the
+     * screensaver / sleep in the middle of a channel. Play and pause from outside the app (the
+     * remote's media keys, HDMI-CEC, Alexa) go through [togglePause], so pausing live still
+     * starts the pause buffer.
+     */
+    private var session: androidx.media3.session.MediaSession? = null
+
+    private fun openSession(p: ExoPlayer) {
+        if (session != null) return
+        session = runCatching {
+            androidx.media3.session.MediaSession.Builder(context, LiveSessionPlayer(p))
+                // Its own id: the movie player's session can exist at the same time (handover).
+                .setId("nuvio-live-tv")
+                .build()
+        }.onFailure { Log.w(TAG, "Media session not opened: ${it.message}") }.getOrNull()
+    }
+
+    private fun closeSession() {
+        runCatching { session?.release() }
+        session = null
+    }
+
+    private inner class LiveSessionPlayer(p: Player) : androidx.media3.common.ForwardingPlayer(p) {
+        override fun play() { if (!wrappedPlayer.isPlaying) togglePause() }
+        override fun pause() { if (wrappedPlayer.isPlaying) togglePause() }
+        override fun setPlayWhenReady(playWhenReady: Boolean) { if (playWhenReady) play() else pause() }
+        // Live streams can report a buffered position Media3's percent maths overflows on.
+        override fun getBufferedPercentage(): Int = runCatching { super.getBufferedPercentage().coerceIn(0, 100) }.getOrDefault(100)
     }
 
     /** Releases the player shortly after the last screen detaches (lets route changes hand it over). */
@@ -2394,6 +2426,7 @@ class LiveTvPlaybackController @Inject constructor(
         reconnectJob?.cancel()
         stallJob?.cancel()
         stallJob = null
+        closeSession()
         _player?.removeListener(listener)
         _player?.release()
         _player = null
