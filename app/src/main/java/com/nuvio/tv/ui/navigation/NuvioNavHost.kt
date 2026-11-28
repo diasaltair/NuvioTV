@@ -14,6 +14,7 @@ import com.nuvio.tv.LocalRootRoutes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
@@ -141,8 +142,23 @@ private fun NavGraphBuilder.forkPageComposable(
         } else false
         // Full screen must fill its first frame, without waiting for the sidebar inset animation.
         val inset = if (liveTvFullscreen) 0.dp else com.nuvio.tv.LocalForkPageInset.current
-        Box(modifier = Modifier.padding(start = inset)) {
-            content(backStackEntry)
+        // V2 menu: the page slides aside while the menu is open, as Home does (it used to sit
+        // under the menu). Pure graphicsLayer, so the page never re-lays out while it slides.
+        val menuLayout = com.nuvio.tv.ui.v2.components.LocalSidebarPageLayout.current.takeIf { !liveTvFullscreen }
+        val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+        val slide = if (menuLayout == null) Modifier else Modifier.graphicsLayer {
+            translationX = menuLayout.expandedWidth.toPx() * menuLayout.expansion() * (if (rtl) -1f else 1f)
+        }
+        // Inside, Home's own content (On Demand's Modern layout) keeps its place: the whole page
+        // already slides, so it mustn't slide a second time.
+        val innerLayout = androidx.compose.runtime.remember(menuLayout) {
+            menuLayout?.let { com.nuvio.tv.ui.v2.components.SidebarPageLayout(it.startInset, it.expandedWidth) { 0f } }
+        }
+        Box(modifier = Modifier.padding(start = inset).then(slide)) {
+            if (menuLayout == null) content(backStackEntry)
+            else androidx.compose.runtime.CompositionLocalProvider(
+                com.nuvio.tv.ui.v2.components.LocalSidebarPageLayout provides innerLayout
+            ) { content(backStackEntry) }
         }
     }
 }

@@ -81,7 +81,6 @@ import com.nuvio.tv.ui.theme.NuvioTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import com.nuvio.tv.livetv.ui.leftJumpsToTop
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -308,15 +307,6 @@ fun SportsScreen(
         }
     }
 
-    // Back up to the top bar (its first button, My Sports, so one more Left or Back opens Nuvio's menu).
-    fun hubToTop() {
-        scope.launch {
-            runCatching { listState.scrollToItem(0) }
-            runCatching { rowsState.scrollToItem(0) }
-            repeat(2) { androidx.compose.runtime.withFrameNanos { } }
-            if (runCatching { sportsFirstChip.requestFocus() }.isFailure) openSidebar()
-        }
-    }
     // Hold Back: full screen on what's playing in the window (like Live TV's guide). Nothing
     // playing: Back works as usual.
     val hostActivity = androidx.compose.ui.platform.LocalContext.current as? com.nuvio.tv.MainActivity
@@ -438,15 +428,11 @@ fun SportsScreen(
                     }
                 }
             )
-            else -> Box(
-                Modifier.fillMaxSize().leftJumpsToTop(
-                    atTop = { topBarFocused },
-                    toTop = { hubToTop() }
-                )
-            ) { SportsHub(
+            // Left at the page's left edge and Back open Nuvio's menu straight away (no stop at the
+            // top bar first), as on Home.
+            else -> Box(Modifier.fillMaxSize()) { SportsHub(
                 firstChip = sportsFirstChip,
                 topBarFocused = topBarFocused,
-                onBackToTop = { hubToTop() },
                 onTopBarFocus = { topBarFocused = it },
                 events = events,
                 known = known,
@@ -599,8 +585,6 @@ private fun SportsHub(
     firstChip: FocusRequester,
     /** The top bar has the highlight. */
     topBarFocused: Boolean,
-    /** Back on My Sports' rows: the highlight goes up to the My Sports button first. */
-    onBackToTop: () -> Unit,
     onTopBarFocus: (Boolean) -> Unit,
     matches: Map<String, List<ChannelMatch>>,
     follows: SportsFollows,
@@ -672,10 +656,8 @@ private fun SportsHub(
     }
     val rowsSport: Sport? = effectiveChip.takeIf { it.startsWith(CHIP_SPORT) }?.let { c -> followedSports.firstOrNull { CHIP_SPORT + it.name == c } }
     val rowsPage = effectiveChip == CHIP_MINE || rowsSport != null
-    // On My Sports, the first Back takes the highlight up to the My Sports button; the next opens the menu.
-    BackHandler(enabled = !sidebarOpen) {
-        if (effectiveChip == CHIP_MINE && !topBarFocused) onBackToTop() else openSidebar()
-    }
+    // Back opens the menu from anywhere on the page, a game card included.
+    BackHandler(enabled = !sidebarOpen) { openSidebar() }
     val leagueView = effectiveChip.takeIf { it.startsWith(CHIP_LEAGUE) }?.removePrefix(CHIP_LEAGUE)
     // Days before yesterday: their games are fetched when you open one.
     LaunchedEffect(day) { if (day < -1) viewModel.repo.wantPast() }
